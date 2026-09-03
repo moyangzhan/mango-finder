@@ -37,8 +37,6 @@
       "minimumSystemVersion": "10.15"
     },
     "resources": [
-      "../docs/cli.md",
-      "../docs/cli_cn.md",
       "assets/model/embedding.onnx",
       "assets/model/embedding_tokenizer.json",
       "assets/model/vision.onnx",

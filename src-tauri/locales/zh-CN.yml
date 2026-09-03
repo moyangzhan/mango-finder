@@ -63,8 +63,8 @@ message:
 cli:
   check:
     no-ip: 无法获取本地 IP 地址，请检查网络连接
-    port-occupied: 端口 15678 已被占用，请关闭占用该端口的程序或修改端口配置
+    port-occupied: 端口 %{port} 已被占用，请关闭占用该端口的程序或修改端口配置
     cluster-disabled: 多机互联功能未启用，请在设置中开启
-    no-indexed-files: 没有已索引的文件，请先使用 'mf index start' 索引文件
+    no-indexed-files: 没有已索引的文件，请先使用 'mfd index start' 索引文件
     no-paired-devices: 没有已配对的设备，请在 GUI 中添加设备或接受配对请求
     all-normal: 系统状态正常，可以正常使用所有功能

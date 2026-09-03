@@ -12,6 +12,9 @@ extern crate rust_i18n;
 i18n!("locales", fallback = "en-US");
 
 fn main() {
+    // 注册 sqlite-vec 扩展，否则 vec0 虚拟表（similar / index clear 等）不可用
+    mango_finder_lib::init_sqlite_extensions();
+
     let cli = commands::Cli::parse();
 
     // 如果没有子命令，显示帮助信息
@@ -29,15 +32,12 @@ fn main() {
             .init();
     }
 
-    // 初始化路径（不依赖 Tauri）
+    // 初始化路径（不依赖 Tauri）；失败时 print_error 会输出 JSON 并以退出码 1 结束
     if let Err(e) = app_util::init_paths_standalone() {
-        eprintln!("Error: {}", e);
-        eprintln!();
-        eprintln!("Troubleshooting:");
-        eprintln!("  1. Ensure the executable has write permissions to the data directory");
-        eprintln!("  2. Check if the data directory is accessible");
-        eprintln!("  3. Try running with administrator privileges if needed");
-        output::print_error(&e);
+        output::print_error(&format!(
+            "Failed to initialize data directories: {}. Ensure the executable has write permissions to the data directory.",
+            e
+        ));
     }
 
     // 初始化核心服务

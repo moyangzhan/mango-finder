@@ -3,13 +3,16 @@ import { openPath } from '@tauri-apps/plugin-opener'
 import { LogoGithub, DocumentTextOutline } from '@vicons/ionicons5'
 import { invoke } from '@tauri-apps/api/core'
 import { getVersion } from '@tauri-apps/api/app'
-import { resourceDir } from '@tauri-apps/api/path'
-import { readTextFile } from '@tauri-apps/plugin-fs'
+import cliDocEn from '../../../docs/cli.md?raw'
+import cliDocZh from '../../../docs/cli_cn.md?raw'
 import HowToUse from '../HowToUse.vue'
-import { t } from '@/locales'
+import MarkdownPreview from '@/components/MarkdownPreview.vue'
+import { getLocale, t } from '@/locales'
 
 const appVersion = ref('')
 const appClientId = ref('')
+const showCliDoc = ref(false)
+const cliDocContent = ref('')
 
 function openUrl(path = '') {
   openPath(path).then((res) => {
@@ -17,36 +20,10 @@ function openUrl(path = '') {
   })
 }
 
-async function openCliDoc() {
-  try {
-    const resDir = await resourceDir()
-    // 资源目录路径（Tauri 会自动处理路径分隔符）
-    const docPath = `${resDir}docs/cli.md`
-    const content = await readTextFile(docPath)
-    // 创建一个临时 HTML 页面显示文档
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Mango Finder CLI Documentation</title>
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
-          pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; }
-          code { background: #f5f5f5; padding: 2px 4px; border-radius: 2px; }
-          h1, h2, h3 { color: #333; }
-        </style>
-      </head>
-      <body>
-        <pre>${content}</pre>
-      </body>
-      </html>
-    `
-    // 使用 data URL 打开
-    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`
-    openPath(dataUrl)
-  } catch (error) {
-    console.error('Failed to open CLI doc:', error)
-  }
+function openCliDoc() {
+  // 文档在构建期内嵌，跟随界面语言选择中英文版本
+  cliDocContent.value = getLocale() === 'zh-CN' ? cliDocZh : cliDocEn
+  showCliDoc.value = true
 }
 
 onMounted(async () => {
@@ -107,10 +84,15 @@ onMounted(async () => {
               <DocumentTextOutline />
             </NIcon>
           </template>
-          <span class="text-xs">CLI Documentation</span>
+          <span class="text-xs">{{ t('about.cliDoc') }}</span>
         </NButton>
       </div>
     </div>
+    <NModal v-model:show="showCliDoc" preset="card" :title="t('about.cliDoc')" style="width: 80%; max-height: 80vh;" class="select-text">
+      <div class="overflow-y-auto" style="max-height: 65vh">
+        <MarkdownPreview :content="cliDocContent" />
+      </div>
+    </NModal>
   </div>
 </template>
 

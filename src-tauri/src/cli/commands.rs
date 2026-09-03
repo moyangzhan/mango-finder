@@ -3,29 +3,30 @@ use local_ip_address::list_afinet_netifas;
 use serde_json;
 use std::net::{TcpListener, UdpSocket};
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use mango_finder_lib::searcher;
 use mango_finder_lib::similarity::similarity_service;
 use mango_finder_lib::indexer_service;
 use mango_finder_lib::repositories::{file_info_repo, file_content_embedding_repo, file_content_fts_repo, file_metadata_embedding_repo, device_repo, indexing_task_repo, config_repo};
-use mango_finder_lib::global::{INDEXING, SCANNING, INDEXING_SUMMARY, STOP_INDEX_SIGNAL, CLIENT_ID, STORAGE_PATH, DB_PATH, EMBEDDING_MODEL_PATH, EMBEDDING_TOKENIZER_PATH, ACTIVE_LOCALE};
+use mango_finder_lib::global::{CLIENT_ID, STORAGE_PATH, DB_PATH, EMBEDDING_MODEL_PATH, EMBEDDING_TOKENIZER_PATH, ACTIVE_LOCALE};
 
 use crate::output;
 
 #[derive(Parser)]
-#[command(name = "mf", about = "Mango Finder Command Line Interface")]
+// 使用自定义的 Help 子命令（支持 [command] 参数），需禁用 clap 内置的 help 子命令，
+// 否则 debug 构建会因子命令重名触发 clap 的 debug_asserts panic
+#[command(name = "mfd", about = "Mango Finder Command Line Interface", disable_help_subcommand = true)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
     /// Output format: json (default) or table
-    #[arg(long, default_value = "json", env = "MANGO_FINDER_OUTPUT")]
+    #[arg(long, default_value = "json", env = "MANGO_FINDER_OUTPUT", global = true)]
     pub output: String,
 
     /// Suppress logs, only output result
-    #[arg(long, env = "MANGO_FINDER_QUIET")]
+    #[arg(long, env = "MANGO_FINDER_QUIET", global = true)]
     pub quiet: bool,
 }
 
@@ -123,13 +124,11 @@ pub enum Commands {
 pub enum IndexAction {
     /// Show index status
     Status,
-    /// Start indexing
+    /// Start indexing (runs in foreground until done)
     Start {
         /// Paths to index
         paths: Vec<String>,
     },
-    /// Stop indexing
-    Stop,
     /// List indexed files
     List {
         #[arg(long, default_value = "1")]
@@ -162,12 +161,13 @@ pub async fn handle_search(query: &str, search_type: &str, device: Option<String
     };
 
     let elapsed = start.elapsed();
+    let total = results.len();
     let limited_results: Vec<_> = results.into_iter().take(limit).collect();
-    let total = limited_results.len();
 
     let data = serde_json::json!({
         "results": limited_results,
         "total": total,
+        "returned": limit.min(total),
         "elapsed_ms": elapsed.as_millis()
     });
 
@@ -203,35 +203,16 @@ pub async fn handle_index(action: IndexAction, output_format: &str) {
         IndexAction::Status => {
             let total = file_info_repo::count().unwrap_or(0);
             let indexed = file_content_embedding_repo::count().unwrap_or(0);
-            let is_indexing = INDEXING.load(Ordering::SeqCst);
-            let is_scanning = SCANNING.load(Ordering::SeqCst);
 
-            // 获取当前索引任务的进度
-            let indexing_progress = if is_indexing || is_scanning {
-                let summary = INDEXING_SUMMARY.read().await;
-                let embedding_progress = summary.calculate_all_embedding();
-                Some(serde_json::json!({
-                    "task_id": summary.task_id,
-                    "total": summary.total,
-                    "processed": embedding_progress.processed,
-                    "success": embedding_progress.success,
-                    "failed": embedding_progress.failed,
-                    "skipped": embedding_progress.skipped,
-                    "duration_seconds": summary.duration
-                }))
-            } else {
-                None
-            };
-
-            // 获取最近的索引任务历史
+            // 索引任务状态持久化在数据库中，跨进程可见；
+            // 进程内的原子状态（INDEXING 等）对一次性的 CLI 进程没有意义
             let recent_tasks = indexing_task_repo::list(1, 5, "id", "desc").unwrap_or_default();
+            let latest_task = recent_tasks.first();
 
             let data = serde_json::json!({
                 "total_files": total,
                 "indexed_files": indexed,
-                "is_indexing": is_indexing,
-                "is_scanning": is_scanning,
-                "current_progress": indexing_progress,
+                "latest_task": latest_task,
                 "recent_tasks": recent_tasks
             });
             output::print_success(&data, output_format);
@@ -242,31 +223,23 @@ pub async fn handle_index(action: IndexAction, output_format: &str) {
                 return;
             }
 
-            let paths_clone = paths.clone();
-            tokio::spawn(async move {
-                match indexer_service::start_indexing(paths_clone.clone(), "cli").await {
-                    Ok(_) => {
-                        log::info!("Indexing completed for paths: {:?}", paths_clone);
-                    }
-                    Err(e) => {
-                        log::error!("Indexing failed: {}", e);
-                    }
+            // CLI 是一次性进程：后台 spawn 的任务会随进程退出被终止，
+            // 因此这里同步执行索引并输出最终结果。进度日志输出到 stderr，
+            // 需要中途停止时按 Ctrl+C 终止进程。
+            log::info!("Indexing started for paths: {:?}", paths);
+            match indexer_service::start_indexing(paths.clone(), "cli").await {
+                Ok(_) => {
+                    let data = serde_json::json!({
+                        "message": "Indexing finished",
+                        "paths": paths,
+                        "tip": "Use 'mfd index status' to see indexed file counts"
+                    });
+                    output::print_success(&data, output_format);
                 }
-            });
-
-            let data = serde_json::json!({
-                "message": "Indexing started in background",
-                "paths": paths,
-                "tip": "Use 'mf index status' to check progress"
-            });
-            output::print_success(&data, output_format);
-        }
-        IndexAction::Stop => {
-            STOP_INDEX_SIGNAL.store(true, Ordering::SeqCst);
-            let data = serde_json::json!({
-                "message": "Stop signal sent"
-            });
-            output::print_success(&data, output_format);
+                Err(e) => {
+                    output::print_error(&format!("Indexing failed: {}", e));
+                }
+            }
         }
         IndexAction::List { page, page_size } => {
             match file_info_repo::list(page, page_size) {
@@ -284,14 +257,24 @@ pub async fn handle_index(action: IndexAction, output_format: &str) {
             }
         }
         IndexAction::Clear => {
-            let _ = file_content_fts_repo::clear();
-            let _ = file_content_embedding_repo::clear();
-            let _ = file_metadata_embedding_repo::clear();
-            let _ = file_info_repo::clear();
-            let data = serde_json::json!({
-                "message": "Index cleared"
-            });
-            output::print_success(&data, output_format);
+            let clear_result = (|| -> Result<(), String> {
+                file_content_fts_repo::clear().map_err(|e| e.to_string())?;
+                file_content_embedding_repo::clear().map_err(|e| e.to_string())?;
+                file_metadata_embedding_repo::clear().map_err(|e| e.to_string())?;
+                file_info_repo::clear().map_err(|e| e.to_string())?;
+                Ok(())
+            })();
+            match clear_result {
+                Ok(()) => {
+                    let data = serde_json::json!({
+                        "message": "Index cleared"
+                    });
+                    output::print_success(&data, output_format);
+                }
+                Err(e) => {
+                    output::print_error(&format!("Failed to clear index: {}", e));
+                }
+            }
         }
     }
 }
@@ -305,7 +288,11 @@ pub async fn handle_file(id: i64, open: bool, device: Option<String>, output_for
 
     match file_info_repo::get_by_id(id) {
         Ok(Some(file)) => {
-            if open && is_image(&file.file_ext) {
+            if open {
+                if !Path::new(&file.path).exists() {
+                    output::print_error(&format!("File path no longer exists: {}", file.path));
+                    return;
+                }
                 open_with_system(&file.path);
             }
             output::print_success(&serde_json::to_value(&file).unwrap(), output_format);
@@ -341,7 +328,6 @@ pub async fn handle_device(action: DeviceAction, output_format: &str) {
 pub async fn handle_status(output_format: &str) {
     let total_files = file_info_repo::count().unwrap_or(0);
     let indexed_files = file_content_embedding_repo::count().unwrap_or(0);
-    let is_indexing = INDEXING.load(Ordering::SeqCst);
     let locale = ACTIVE_LOCALE
         .read()
         .map(|l| l.clone())
@@ -350,7 +336,6 @@ pub async fn handle_status(output_format: &str) {
     let data = serde_json::json!({
         "total_files": total_files,
         "indexed_files": indexed_files,
-        "is_indexing": is_indexing,
         "locale": locale,
         "version": env!("CARGO_PKG_VERSION")
     });
@@ -360,7 +345,7 @@ pub async fn handle_status(output_format: &str) {
 
 pub fn handle_version(output_format: &str) {
     let data = serde_json::json!({
-        "name": "mf",
+        "name": "mfd",
         "version": env!("CARGO_PKG_VERSION")
     });
 
@@ -421,7 +406,7 @@ pub fn handle_check(output_format: &str) {
     let indexed_files = file_info_repo::count().unwrap_or(0);
     let total_embeddings = file_content_embedding_repo::count().unwrap_or(0);
     
-    // 获取集群设置
+    // 获取集群设置（端口可在其中配置）
     let cluster_setting = get_cluster_setting();
     let device_name = cluster_setting.get("device_name")
         .and_then(|v| v.as_str())
@@ -429,9 +414,11 @@ pub fn handle_check(output_format: &str) {
     let cluster_enabled = cluster_setting.get("enabled")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    
+    let port = cluster_setting.get("port")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(15678) as u16;
+
     // 检查端口是否可用
-    let port = 15678; // 默认端口
     let port_available = check_port_available(port);
     
     // 获取网络接口信息
@@ -479,7 +466,7 @@ pub fn handle_check(output_format: &str) {
             "paired_devices": paired_devices,
         },
         "ai_model": model_status,
-        "recommendations": get_recommendations(&local_ip, port_available, cluster_enabled, indexed_files, paired_devices)
+        "recommendations": get_recommendations(&local_ip, port, port_available, cluster_enabled, indexed_files, paired_devices)
     });
 
     output::print_success(&check, output_format);
@@ -573,19 +560,20 @@ fn get_paired_device_count() -> i64 {
 
 fn get_recommendations(
     local_ip: &Option<String>,
+    port: u16,
     port_available: bool,
     cluster_enabled: bool,
     indexed_files: i64,
     paired_devices: i64,
 ) -> Vec<String> {
     let mut recommendations = Vec::new();
-    
+
     if local_ip.is_none() {
         recommendations.push(t!("cli.check.no-ip").to_string());
     }
-    
+
     if !port_available {
-        recommendations.push(t!("cli.check.port-occupied").to_string());
+        recommendations.push(t!("cli.check.port-occupied", port = port).to_string());
     }
     
     if !cluster_enabled {
@@ -643,7 +631,7 @@ fn get_command_help(command: &str) -> String {
                 r#"search - 搜索文档
 
 用法:
-    mf search <query> [选项]
+    mfd search <query> [选项]
 
 参数:
     <query>    搜索关键词
@@ -658,13 +646,13 @@ fn get_command_help(command: &str) -> String {
 
 示例:
     # 语义搜索
-    mf search "机器学习"
+    mfd search "机器学习"
 
     # 关键词搜索
-    mf search "report.docx" --type keyword
+    mfd search "report.docx" --type keyword
 
     # 限制结果数
-    mf search "AI" --limit 5
+    mfd search "AI" --limit 5
 
 说明:
     - 语义搜索使用 AI embedding 进行语义匹配
@@ -674,7 +662,7 @@ fn get_command_help(command: &str) -> String {
                 r#"search - Search documents
 
 USAGE:
-    mf search <query> [OPTIONS]
+    mfd search <query> [OPTIONS]
 
 ARGS:
     <query>    Search query string
@@ -689,13 +677,13 @@ OPTIONS:
 
 EXAMPLES:
     # Semantic search
-    mf search "machine learning"
+    mfd search "machine learning"
 
     # Keyword search
-    mf search "report.docx" --type keyword
+    mfd search "report.docx" --type keyword
 
     # Limit results
-    mf search "AI" --limit 5
+    mfd search "AI" --limit 5
 
 NOTES:
     - Semantic search uses AI embeddings for meaning-based matching
@@ -708,7 +696,7 @@ NOTES:
                 r#"similar - 查找相似文件
 
 用法:
-    mf similar <file_id> [选项]
+    mfd similar <file_id> [选项]
 
 参数:
     <file_id>    文件 ID
@@ -722,10 +710,10 @@ NOTES:
 
 示例:
     # 查找相似文件
-    mf similar 123
+    mfd similar 123
 
     # 限制结果数
-    mf similar 123 --limit 5
+    mfd similar 123 --limit 5
 
 说明:
     - 基于文件内容相似度，而非文件名
@@ -734,7 +722,7 @@ NOTES:
                 r#"similar - Find similar files by file ID
 
 USAGE:
-    mf similar <file_id> [OPTIONS]
+    mfd similar <file_id> [OPTIONS]
 
 ARGS:
     <file_id>    File ID to find similar files for
@@ -748,10 +736,10 @@ OPTIONS:
 
 EXAMPLES:
     # Find similar files
-    mf similar 123
+    mfd similar 123
 
     # Limit results
-    mf similar 123 --limit 5
+    mfd similar 123 --limit 5
 
 NOTES:
     - Similarity is based on file content, not filename
@@ -763,12 +751,11 @@ NOTES:
                 r#"index - 索引管理
 
 用法:
-    mf index <action>
+    mfd index <action>
 
 操作:
-    status              显示索引状态和进度
-    start <paths...>    在后台启动索引任务
-    stop                停止索引
+    status              显示索引状态和最近任务
+    start <paths...>    在前台执行索引任务，完成后返回
     list                列出已索引文件
     clear               清空所有索引
 
@@ -779,34 +766,31 @@ NOTES:
 
 示例:
     # 显示状态
-    mf index status
+    mfd index status
 
-    # 开始索引
-    mf index start "C:\Documents" "D:\Projects"
+    # 开始索引（同步执行直到完成）
+    mfd index start "C:\Documents" "D:\Projects"
 
     # 列出文件 (分页)
-    mf index list --page 1 --page-size 50
-
-    # 停止索引
-    mf index stop
+    mfd index list --page 1 --page-size 50
 
     # 清空索引
-    mf index clear
+    mfd index clear
 
 说明:
-    - index start 在后台异步执行
-    - 使用 index status 查询进度
+    - index start 在前台执行，进度日志输出到 stderr
+    - 需要中途停止时按 Ctrl+C 终止
+    - 使用 index status 查看已索引文件数量和任务历史
     - index clear 会永久删除所有索引数据"#
             } else {
                 r#"index - Index management
 
 USAGE:
-    mf index <action>
+    mfd index <action>
 
 ACTIONS:
-    status              Show index status and progress
-    start <paths...>    Start indexing in background
-    stop                Stop indexing
+    status              Show index status and recent tasks
+    start <paths...>    Start indexing in foreground, returns when done
     list                List indexed files
     clear               Clear all index
 
@@ -817,23 +801,21 @@ OPTIONS:
 
 EXAMPLES:
     # Show status
-    mf index status
+    mfd index status
 
-    # Start indexing
-    mf index start "C:\Documents" "D:\Projects"
+    # Start indexing (runs in foreground until finished)
+    mfd index start "C:\Documents" "D:\Projects"
 
     # List files (with pagination)
-    mf index list --page 1 --page-size 50
-
-    # Stop indexing
-    mf index stop
+    mfd index list --page 1 --page-size 50
 
     # Clear all index
-    mf index clear
+    mfd index clear
 
 NOTES:
-    - index start runs asynchronously in background
-    - Use index status to check progress
+    - index start runs in the foreground; progress logs go to stderr
+    - Press Ctrl+C to stop it before completion
+    - Use index status to see indexed file counts and task history
     - index clear deletes all indexed data permanently"#
             }
         }
@@ -842,7 +824,7 @@ NOTES:
                 r#"file - 文件操作
 
 用法:
-    mf file <id> [选项]
+    mfd file <id> [选项]
 
 参数:
     <id>    文件 ID
@@ -856,19 +838,19 @@ NOTES:
 
 示例:
     # 获取文件信息
-    mf file 123
+    mfd file 123
 
-    # 打开文件 (图片、文档)
-    mf file 123 --open
+    # 使用系统默认程序打开文件
+    mfd file 123 --open
 
 说明:
-    - --open 使用系统默认程序打开文件
-    - 最适合图片 (jpg, png, gif, webp, bmp)"#
+    - --open 使用系统默认程序打开任意类型的文件
+    - 文件路径不存在时会报错"#
             } else {
                 r#"file - File operations
 
 USAGE:
-    mf file <id> [OPTIONS]
+    mfd file <id> [OPTIONS]
 
 ARGS:
     <id>    File ID
@@ -882,14 +864,14 @@ OPTIONS:
 
 EXAMPLES:
     # Get file info
-    mf file 123
+    mfd file 123
 
-    # Open file (images, documents)
-    mf file 123 --open
+    # Open file with the system default program
+    mfd file 123 --open
 
 NOTES:
-    - --open uses system default program for the file type
-    - Works best with images (jpg, png, gif, webp, bmp)"#
+    - --open works for any indexed file type
+    - Errors if the file path no longer exists"#
             }
         }
         "device" => {
@@ -897,7 +879,7 @@ NOTES:
                 r#"device - 设备管理
 
 用法:
-    mf device <action>
+    mfd device <action>
 
 操作:
     list    列出在线设备
@@ -909,7 +891,7 @@ NOTES:
 
 示例:
     # 列出在线设备
-    mf device list
+    mfd device list
 
 说明:
     - 只显示已配对且在线的设备
@@ -918,7 +900,7 @@ NOTES:
                 r#"device - Device management
 
 USAGE:
-    mf device <action>
+    mfd device <action>
 
 ACTIONS:
     list    List online devices
@@ -930,7 +912,7 @@ OPTIONS:
 
 EXAMPLES:
     # List online devices
-    mf device list
+    mfd device list
 
 NOTES:
     - Shows paired and online devices only
@@ -942,7 +924,7 @@ NOTES:
                 r#"status - 显示应用状态
 
 用法:
-    mf status [选项]
+    mfd status [选项]
 
 选项:
     --output <format>  输出格式: json (默认), table
@@ -951,7 +933,7 @@ NOTES:
 
 示例:
     # 显示状态
-    mf status
+    mfd status
 
 说明:
     - 显示总文件数、已索引文件数、索引状态
@@ -960,7 +942,7 @@ NOTES:
                 r#"status - Show application status
 
 USAGE:
-    mf status [OPTIONS]
+    mfd status [OPTIONS]
 
 OPTIONS:
     --output <format>  Output format: json (default), table
@@ -969,7 +951,7 @@ OPTIONS:
 
 EXAMPLES:
     # Show status
-    mf status
+    mfd status
 
 NOTES:
     - Shows total files, indexed files, and indexing status
@@ -981,7 +963,7 @@ NOTES:
                 r#"version - 显示版本信息
 
 用法:
-    mf version [选项]
+    mfd version [选项]
 
 选项:
     --output <format>  输出格式: json (默认), table
@@ -990,12 +972,12 @@ NOTES:
 
 示例:
     # 显示版本
-    mf version"#
+    mfd version"#
             } else {
                 r#"version - Show version information
 
 USAGE:
-    mf version [OPTIONS]
+    mfd version [OPTIONS]
 
 OPTIONS:
     --output <format>  Output format: json (default), table
@@ -1004,7 +986,7 @@ OPTIONS:
 
 EXAMPLES:
     # Show version
-    mf version"#
+    mfd version"#
             }
         }
         "check" => {
@@ -1012,7 +994,7 @@ EXAMPLES:
                 r#"check - 检查系统状态
 
 用法:
-    mf check [选项]
+    mfd check [选项]
 
 选项:
     --output <format>  输出格式: json (默认), table
@@ -1021,7 +1003,7 @@ EXAMPLES:
 
 示例:
     # 检查系统状态
-    mf check
+    mfd check
 
 检查内容:
     - 系统信息 (版本、设备名称、客户端 ID)
@@ -1033,7 +1015,7 @@ EXAMPLES:
                 r#"check - Check system status
 
 USAGE:
-    mf check [OPTIONS]
+    mfd check [OPTIONS]
 
 OPTIONS:
     --output <format>  Output format: json (default), table
@@ -1042,7 +1024,7 @@ OPTIONS:
 
 EXAMPLES:
     # Check system status
-    mf check
+    mfd check
 
 Check items:
     - System info (version, device name, client ID)
@@ -1057,7 +1039,7 @@ Check items:
                 r#"locale - 获取或设置语言
 
 用法:
-    mf locale [value]
+    mfd locale [value]
 
 参数:
     value    要设置的语言 (如 zh-CN, en-US)
@@ -1068,18 +1050,18 @@ Check items:
 
 示例:
     # 显示当前语言
-    mf locale
+    mfd locale
 
     # 设置为中文
-    mf locale zh-CN
+    mfd locale zh-CN
 
     # 设置为英文
-    mf locale en-US"#
+    mfd locale en-US"#
             } else {
                 r#"locale - Get or set locale
 
 USAGE:
-    mf locale [value]
+    mfd locale [value]
 
 ARGS:
     value    Locale to set (e.g., zh-CN, en-US)
@@ -1090,13 +1072,13 @@ OPTIONS:
 
 EXAMPLES:
     # Show current locale
-    mf locale
+    mfd locale
 
     # Set locale to Chinese
-    mf locale zh-CN
+    mfd locale zh-CN
 
     # Set locale to English
-    mf locale en-US"#
+    mfd locale en-US"#
             }
         }
         "help" => {
@@ -1104,32 +1086,32 @@ EXAMPLES:
                 r#"help - 显示帮助文档
 
 用法:
-    mf help [command]
+    mfd help [command]
 
 参数:
     command    命令名称 (可选，显示完整帮助)
 
 示例:
     # 显示完整帮助
-    mf help
+    mfd help
 
     # 显示 search 命令帮助
-    mf help search"#
+    mfd help search"#
             } else {
                 r#"help - Show help documentation
 
 USAGE:
-    mf help [command]
+    mfd help [command]
 
 ARGS:
     command    Command name (optional, shows full help)
 
 EXAMPLES:
     # Show full help
-    mf help
+    mfd help
 
     # Show search command help
-    mf help search"#
+    mfd help search"#
             }
         }
         _ => {
@@ -1140,10 +1122,6 @@ EXAMPLES:
             };
         }
     }.to_string()
-}
-
-fn is_image(ext: &str) -> bool {
-    matches!(ext.to_lowercase().as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp")
 }
 
 fn open_with_system(path: &str) {

@@ -1,25 +1,31 @@
-# Mango Finder CLI (mf)
+# Mango Finder CLI (mfd)
 
 Mango Finder 命令行工具，方便开发者和 AI Agent 使用。
 
 ## 安装
 
-CLI 工具随 Mango Finder 一起构建，位于 `src-tauri/target/release/mf.exe`
+CLI 工具随 Mango Finder 一起构建，位于 `src-tauri/target/release/mfd.exe`
 
 ## 获取帮助
 
 ```bash
 # 显示帮助信息
-mf --help
-mf -h
+mfd --help
+mfd -h
 
 # 显示子命令帮助
-mf search --help
-mf index --help
+mfd search --help
+mfd index --help
 
-# 显示详细文档
-mf doc search
-mf doc index
+# 显示某个命令的详细文档
+mfd help search
+mfd help index
+
+# 显示完整 CLI 文档
+mfd help
+
+# 等价的命令内参数
+mfd search --help-doc
 ```
 
 ## 命令列表
@@ -27,88 +33,91 @@ mf doc index
 ### search - 搜索文档
 
 ```bash
-mf search <query> [--type semantic|keyword] [--device <id>] [--limit <n>]
+mfd search <query> [--type semantic|keyword] [--device <id>] [--limit <n>]
 ```
 
 **参数说明：**
 - `query`：搜索关键词
 - `--type`：搜索类型，`semantic`（语义搜索，默认）或 `keyword`（关键词搜索）
-- `--device`：远程设备 ID（可选）
+- `--device`：远程设备 ID（可选，暂未实现）
 - `--limit`：返回结果数量限制，默认 10
 
 **示例：**
 ```bash
 # 语义搜索
-mf search "机器学习"
+mfd search "机器学习"
 
 # 关键词搜索
-mf search "report.docx" --type keyword --limit 5
+mfd search "report.docx" --type keyword --limit 5
 ```
+
+**说明：**
+- 语义搜索需要本地存在 embedding 模型文件
+- 输出中的 `total` 为完整匹配数量，`returned` 为应用 `--limit` 后实际返回的数量
 
 ### similar - 查找相似文件
 
 ```bash
-mf similar <file_id> [--device <id>] [--limit <n>]
+mfd similar <file_id> [--device <id>] [--limit <n>]
 ```
 
 **示例：**
 ```bash
-mf similar 123 --limit 5
+mfd similar 123 --limit 5
 ```
 
 ### index - 索引管理
 
 ```bash
-mf index <action>
+mfd index <action>
 ```
 
 **可用操作：**
-- `status`：查看索引状态和进度
-- `start <paths...>`：在后台启动索引任务
-- `stop`：停止索引
+- `status`：查看索引状态和最近任务历史
+- `start <paths...>`：执行索引任务，前台运行直到完成后返回
 - `list [--page <n>] [--page-size <n>]`：列出已索引文件
 - `clear`：清空所有索引
 
 **示例：**
 ```bash
-# 查看索引状态（包含当前进度和最近任务历史）
-mf index status
+# 查看索引状态（包含最近任务历史）
+mfd index status
 
-# 在后台启动索引（立即返回）
-mf index start "C:\Documents" "D:\Projects"
+# 开始索引（前台执行直到完成，进度日志输出到 stderr）
+mfd index start "C:\Documents" "D:\Projects"
 
 # 列出已索引文件
-mf index list --page 1 --page-size 50
+mfd index list --page 1 --page-size 50
 ```
 
 **说明：**
-- `index start` 命令会在后台异步执行，不会阻塞终端
-- 可以使用 `index status` 命令随时查询索引进度
+- `index start` 在前台执行，需要中途停止时按 `Ctrl+C` 终止
+- 索引任务历史持久化在数据库中，可用 `index status` 查看
 
 ### file - 文件操作
 
 ```bash
-mf file <id> [--open] [--device <id>]
+mfd file <id> [--open] [--device <id>]
 ```
 
 **参数说明：**
 - `id`：文件 ID
-- `--open`：使用系统默认程序打开文件（主要用于图片）
-- `--device`：远程设备 ID（可选）
+- `--open`：使用系统默认程序打开文件（适用于任意已索引的文件类型）
+- `--device`：远程设备 ID（可选，暂未实现）
 
 **示例：**
 ```bash
 # 查看文件信息
-mf file 123
+mfd file 123
 
-# 打开图片
-mf file 123 --open
+# 使用系统默认程序打开文件
+mfd file 123 --open
 ```
 
 ### device - 设备管理
 
 ```bash
-mf device <action>
+mfd device <action>
 ```
 
 **可用操作：**
@@ -117,58 +126,37 @@ mf device <action>
 ### status - 应用状态
 
 ```bash
-mf status
+mfd status
 ```
 
 ### version - 版本信息
 
 ```bash
-mf version
+mfd version
 ```
 
-### help-doc - 查看文档
+### help - 查看文档
 
 ```bash
-mf help-doc
-```
-
-### doc - 查看命令详细文档
-
-```bash
-mf doc <command>
+mfd help [command]
 ```
 
 **示例：**
 ```bash
+# 显示完整 CLI 文档
+mfd help
+
 # 查看 search 命令的详细文档
-mf doc search
+mfd help search
 
 # 查看 index 命令的详细文档
-mf doc index
-```
-
-### man - 查看 man page 风格文档
-
-```bash
-mf man [command]
-```
-
-**示例：**
-```bash
-# 查看完整 man page
-mf man
-
-# 查看 search 命令的 man page
-mf man search
-
-# 查看 index 命令的 man page
-mf man index
+mfd help index
 ```
 
 ### check - 检查系统状态
 
 ```bash
-mf check
+mfd check
 ```
 
 **检查内容：**
@@ -181,31 +169,31 @@ mf check
 **示例：**
 ```bash
 # 检查系统状态
-mf check
+mfd check
 
 # JSON 格式输出
-mf check --output json
+mfd check --output json
 ```
 
 ### locale - 获取或设置语言
 
 ```bash
-mf locale [value]
+mfd locale [value]
 ```
 
-**参数：**
+**参数说明：**
 - `value`：要设置的语言（如 `zh-CN`、`en-US`）。如果不指定，则显示当前语言。
 
 **示例：**
 ```bash
 # 显示当前语言
-mf locale
+mfd locale
 
 # 设置为中文
-mf locale zh-CN
+mfd locale zh-CN
 
 # 设置为英文
-mf locale en-US
+mfd locale en-US
 ```
 
 ## 全局选项
@@ -236,7 +224,8 @@ export MANGO_FINDER_QUIET=1
   "success": true,
   "data": {
     "results": [...],
-    "total": 10,
+    "total": 25,
+    "returned": 10,
     "elapsed_ms": 156
   },
   "error": null
@@ -257,14 +246,14 @@ export MANGO_FINDER_QUIET=1
 
 ```bash
 # 搜索文档
-mf search "机器学习算法" --output json
+mfd search "机器学习算法" --output json
 
 # 获取文件详情
-mf file 123 --output json
+mfd file 123 --output json
 
 # 检查索引状态
-mf index status --output json
+mfd index status --output json
 
 # 查找相似文件
-mf similar 456 --limit 5 --output json
+mfd similar 456 --limit 5 --output json
 ```

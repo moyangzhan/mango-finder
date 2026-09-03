@@ -1,25 +1,31 @@
-# Mango Finder CLI (mf)
+# Mango Finder CLI (mfd)
 
 Mango Finder Command Line Interface for searching and managing documents.
 
 ## Installation
 
-CLI tool is built with Mango Finder, located at `src-tauri/target/release/mf.exe`
+CLI tool is built with Mango Finder, located at `src-tauri/target/release/mfd.exe`
 
 ## Getting Help
 
 ```bash
 # Show help
-mf --help
-mf -h
+mfd --help
+mfd -h
 
 # Show subcommand help
-mf search --help
-mf index --help
+mfd search --help
+mfd index --help
 
-# Show detailed documentation
-mf doc search
-mf doc index
+# Show detailed documentation for a command
+mfd help search
+mfd help index
+
+# Show full CLI documentation
+mfd help
+
+# Equivalent per-command flag
+mfd search --help-doc
 ```
 
 ## Command List
@@ -27,88 +33,91 @@ mf doc index
 ### search - Search Documents
 
 ```bash
-mf search <query> [--type semantic|keyword] [--device <id>] [--limit <n>]
+mfd search <query> [--type semantic|keyword] [--device <id>] [--limit <n>]
 ```
 
 **Parameters:**
 - `query`: Search query string
 - `--type`: Search type, `semantic` (default) or `keyword`
-- `--device`: Remote device ID (optional)
+- `--device`: Remote device ID (optional, not implemented yet)
 - `--limit`: Max results, default 10
 
 **Examples:**
 ```bash
 # Semantic search
-mf search "machine learning"
+mfd search "machine learning"
 
 # Keyword search
-mf search "report.docx" --type keyword --limit 5
+mfd search "report.docx" --type keyword --limit 5
 ```
+
+**Notes:**
+- Semantic search requires local embedding model files
+- `total` in the output is the full match count; `returned` is the number of items actually returned after `--limit`
 
 ### similar - Find Similar Files
 
 ```bash
-mf similar <file_id> [--device <id>] [--limit <n>]
+mfd similar <file_id> [--device <id>] [--limit <n>]
 ```
 
 **Examples:**
 ```bash
-mf similar 123 --limit 5
+mfd similar 123 --limit 5
 ```
 
 ### index - Index Management
 
 ```bash
-mf index <action>
+mfd index <action>
 ```
 
 **Actions:**
-- `status`: Show index status and progress
-- `start <paths...>`: Start indexing in background
-- `stop`: Stop indexing
+- `status`: Show index status and recent task history
+- `start <paths...>`: Start indexing, runs in the foreground and returns when finished
 - `list [--page <n>] [--page-size <n>]`: List indexed files
 - `clear`: Clear all index
 
 **Examples:**
 ```bash
 # Show index status
-mf index status
+mfd index status
 
-# Start indexing in background
-mf index start "C:\Documents" "D:\Projects"
+# Start indexing (blocks until finished; progress logs go to stderr)
+mfd index start "C:\Documents" "D:\Projects"
 
 # List indexed files
-mf index list --page 1 --page-size 50
+mfd index list --page 1 --page-size 50
 ```
 
 **Notes:**
-- `index start` runs asynchronously in background
-- Use `index status` to check progress
+- `index start` runs in the foreground; press `Ctrl+C` to stop it before completion
+- Use `index status` to see indexed file counts and recent task history (persisted in the database)
 
 ### file - File Operations
 
 ```bash
-mf file <id> [--open] [--device <id>]
+mfd file <id> [--open] [--device <id>]
 ```
 
 **Parameters:**
 - `id`: File ID
-- `--open`: Open file with system default program (mainly for images)
-- `--device`: Remote device ID (optional)
+- `--open`: Open the file with the system default program (works for any indexed file type)
+- `--device`: Remote device ID (optional, not implemented yet)
 
 **Examples:**
 ```bash
 # Get file info
-mf file 123
+mfd file 123
 
-# Open image
-mf file 123 --open
+# Open the file with the system default program
+mfd file 123 --open
 ```
 
 ### device - Device Management
 
 ```bash
-mf device <action>
+mfd device <action>
 ```
 
 **Actions:**
@@ -117,55 +126,37 @@ mf device <action>
 ### status - Application Status
 
 ```bash
-mf status
+mfd status
 ```
 
 ### version - Version Info
 
 ```bash
-mf version
+mfd version
 ```
 
-### help-doc - View Documentation
+### help - View Documentation
 
 ```bash
-mf help-doc
-```
-
-### doc - View Command Documentation
-
-```bash
-mf doc <command>
+mfd help [command]
 ```
 
 **Examples:**
 ```bash
-# View search command documentation
-mf doc search
+# Show full CLI documentation
+mfd help
 
-# View index command documentation
-mf doc index
-```
+# Show detailed documentation for the search command
+mfd help search
 
-### man - View Man Page
-
-```bash
-mf man [command]
-```
-
-**Examples:**
-```bash
-# View full man page
-mf man
-
-# View search command man page
-mf man search
+# Show detailed documentation for the index command
+mfd help index
 ```
 
 ### check - Check System Status
 
 ```bash
-mf check
+mfd check
 ```
 
 **Check items:**
@@ -178,16 +169,16 @@ mf check
 **Examples:**
 ```bash
 # Check system status
-mf check
+mfd check
 
 # JSON output
-mf check --output json
+mfd check --output json
 ```
 
 ### locale - Get or Set Locale
 
 ```bash
-mf locale [value]
+mfd locale [value]
 ```
 
 **Parameters:**
@@ -196,13 +187,13 @@ mf locale [value]
 **Examples:**
 ```bash
 # Show current locale
-mf locale
+mfd locale
 
 # Set locale to Chinese
-mf locale zh-CN
+mfd locale zh-CN
 
 # Set locale to English
-mf locale en-US
+mfd locale en-US
 ```
 
 ## Global Options
@@ -233,7 +224,8 @@ Default JSON output:
   "success": true,
   "data": {
     "results": [...],
-    "total": 10,
+    "total": 25,
+    "returned": 10,
     "elapsed_ms": 156
   },
   "error": null
@@ -254,14 +246,14 @@ Error output:
 
 ```bash
 # Search documents
-mf search "machine learning algorithms" --output json
+mfd search "machine learning algorithms" --output json
 
 # Get file details
-mf file 123 --output json
+mfd file 123 --output json
 
 # Check index status
-mf index status --output json
+mfd index status --output json
 
 # Find similar files
-mf similar 456 --limit 5 --output json
+mfd similar 456 --limit 5 --output json
 ```

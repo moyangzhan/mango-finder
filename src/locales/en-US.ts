@@ -380,6 +380,7 @@ export default {
     currentVersion: 'Current Version',
     appClientId: 'App Client ID',
     appInfo: 'App Info',
+    cliDoc: 'CLI Documentation',
   },
   cluster: {
     title: 'Multi-Device',

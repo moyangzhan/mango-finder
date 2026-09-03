@@ -74,8 +74,10 @@ i18n!("locales", fallback = "en-US");
 
 static WARMUP_DONE: AtomicBool = AtomicBool::new(false);
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+/// Register the sqlite-vec extension so every SQLite connection opened in this
+/// process has the `vec0` virtual table module available. GUI 和 CLI 都必须在
+/// 任何数据库访问之前调用一次。
+pub fn init_sqlite_extensions() {
     // SAFETY: sqlite3_vec_init 是 sqlite-vec 扩展的入口点。
     // 虽然 sqlite3_auto_extension 期望的回调签名是 fn(*mut sqlite3) -> c_int，
     // 但 SQLite 允许入口点函数忽略参数，这是 sqlite-vec 官方推荐的初始化方式。
@@ -83,6 +85,11 @@ pub fn run() {
     unsafe {
         sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
     }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    init_sqlite_extensions();
     panic::set_hook(Box::new(|panic_info| {
         let message = format!("Application crashed: {:?}", panic_info);
         error!("{}", message);

@@ -370,6 +370,7 @@ export default {
     currentVersion: '当前版本',
     appClientId: '客户端ID',
     appInfo: '应用信息',
+    cliDoc: 'CLI 文档',
   },
   cluster: {
     title: '多设备互联',

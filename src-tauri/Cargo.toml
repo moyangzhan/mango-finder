@@ -95,5 +95,5 @@ windows-sys = { version = "0.59", features = ["Win32_Networking_WinSock"] }
 tauri-plugin-single-instance = "2"
 
 [[bin]]
-name = "mf"
+name = "mfd"
 path = "src/cli/main.rs"
