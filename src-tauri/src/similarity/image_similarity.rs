@@ -2,6 +2,7 @@ use crate::entities::FileInfo;
 use crate::enums::SimilarityType;
 use crate::errors::AppError;
 use crate::repositories::{file_content_embedding_repo, file_info_repo};
+use crate::structs::image_similarity_candidate::ImageSimilarityCandidate;
 use crate::structs::search_result::SearchResult;
 use crate::traits::similarity_detector::SimilarityDetector;
 use async_trait::async_trait;
@@ -12,7 +13,7 @@ use std::path::Path;
 
 /// Candidate limit for ANN pre-filtering
 /// ANN 预过滤的候选数量限制
-const ANN_CANDIDATE_LIMIT: usize = 200;
+pub const ANN_CANDIDATE_LIMIT: usize = 200;
 
 pub struct ImageSimilarityDetector;
 
@@ -56,62 +57,75 @@ impl SimilarityDetector for ImageSimilarityDetector {
         }
 
         // Stage 2: Calculate hybrid scores for candidates
-        // (file_id, score, similarity_type)
-        let mut file_results: Vec<(i64, usize, SimilarityType)> = Vec::new();
+        score_image_candidates(&source_hash, &candidates, Some(file_info.id), limit)
+    }
+}
 
-        for candidate in &candidates {
-            if candidate.file_id == file_info.id {
-                continue;
-            }
+/// Score candidates against the source hash and build search results
+/// 依据源哈希对候选计算融合分并组装结果（已索引与外部现场计算共用）
+///
+/// `exclude_file_id` is None for external files that have no index row.
+pub fn score_image_candidates(
+    source_hash: &ImageHash,
+    candidates: &[ImageSimilarityCandidate],
+    exclude_file_id: Option<i64>,
+    limit: usize,
+) -> Result<Vec<SearchResult>, AppError> {
+    // (file_id, score, similarity_type)
+    let mut file_results: Vec<(i64, usize, SimilarityType)> = Vec::new();
 
-            // Calculate visual similarity score using stored hash
-            let visual_score = match calculate_visual_score_from_stored(&source_hash, &candidate.image_hash) {
-                Some(score) => score,
-                None => continue,
-            };
-
-            // Use pre-computed semantic score from ANN search
-            let semantic_score = candidate.semantic_score;
-
-            // Take maximum of visual and semantic scores, and determine which type was used
-            let (final_score, similarity_type) = if visual_score >= semantic_score {
-                (visual_score, SimilarityType::ImageHash)
-            } else {
-                (semantic_score, SimilarityType::ImageSemantic)
-            };
-
-            // Only include if similarity >= 30%
-            if final_score >= 30 {
-                file_results.push((candidate.file_id, final_score, similarity_type));
-            }
+    for candidate in candidates {
+        if Some(candidate.file_id) == exclude_file_id {
+            continue;
         }
 
-        // Sort by score and take top N
-        file_results.sort_by(|a, b| b.1.cmp(&a.1));
-        file_results.truncate(limit);
+        // Calculate visual similarity score using stored hash
+        let visual_score = match calculate_visual_score_from_stored(source_hash, &candidate.image_hash) {
+            Some(score) => score,
+            None => continue,
+        };
 
-        // Fetch file info for results
-        let file_ids: Vec<i64> = file_results.iter().map(|(id, _, _)| *id).collect();
-        let file_list = file_info_repo::list_by_ids(&file_ids)?;
-        let file_map: HashMap<i64, FileInfo> = file_list.into_iter().map(|f| (f.id, f)).collect();
+        // Use pre-computed semantic score from ANN search
+        let semantic_score = candidate.semantic_score;
 
-        let results: Vec<SearchResult> = file_results
-            .into_iter()
-            .filter_map(|(file_id, score, similarity_type)| {
-                file_map.get(&file_id).map(|info| SearchResult {
-                    score,
-                    hit_types: vec![],
-                    file_info: info.clone(),
-                    matched_keywords: HashSet::new(),
-                    matched_chunk_ids: HashSet::new(),
-                    similarity_type: Some(similarity_type),
-                    source_device: None,
-                })
-            })
-            .collect();
+        // Take maximum of visual and semantic scores, and determine which type was used
+        let (final_score, similarity_type) = if visual_score >= semantic_score {
+            (visual_score, SimilarityType::ImageHash)
+        } else {
+            (semantic_score, SimilarityType::ImageSemantic)
+        };
 
-        Ok(results)
+        // Only include if similarity >= 30%
+        if final_score >= 30 {
+            file_results.push((candidate.file_id, final_score, similarity_type));
+        }
     }
+
+    // Sort by score and take top N
+    file_results.sort_by(|a, b| b.1.cmp(&a.1));
+    file_results.truncate(limit);
+
+    // Fetch file info for results
+    let file_ids: Vec<i64> = file_results.iter().map(|(id, _, _)| *id).collect();
+    let file_list = file_info_repo::list_by_ids(&file_ids)?;
+    let file_map: HashMap<i64, FileInfo> = file_list.into_iter().map(|f| (f.id, f)).collect();
+
+    let results: Vec<SearchResult> = file_results
+        .into_iter()
+        .filter_map(|(file_id, score, similarity_type)| {
+            file_map.get(&file_id).map(|info| SearchResult {
+                score,
+                hit_types: vec![],
+                file_info: info.clone(),
+                matched_keywords: HashSet::new(),
+                matched_chunk_ids: HashSet::new(),
+                similarity_type: Some(similarity_type),
+                source_device: None,
+            })
+        })
+        .collect();
+
+    Ok(results)
 }
 
 /// Create hasher with Gradient algorithm for perceptual hash

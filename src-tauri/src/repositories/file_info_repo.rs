@@ -555,6 +555,31 @@ pub fn get_by_path(path: &str) -> Result<Option<FileInfo>, RepositoryError> {
     }
 }
 
+pub fn list_by_name(name: &str) -> Result<Vec<FileInfo>, RepositoryError> {
+    let conn = Connection::open(get_db_path())?;
+    let mut stmt = conn.prepare("select * from file_info where name = ?1 order by id asc")?;
+    let rows = stmt.query_map([name], |row| Ok(build_file_info(row)?))?;
+    let mut result = Vec::new();
+    for item in rows {
+        result.push(item?);
+    }
+    Ok(result)
+}
+
+/// List id + image_hash of all image files with a stored hash
+/// 列出所有已存储感知哈希的图片文件（供外部文件纯视觉比对使用）
+pub fn list_image_hashes() -> Result<Vec<(i64, Option<Vec<u8>>)>, RepositoryError> {
+    let conn = Connection::open(get_db_path())?;
+    let mut stmt =
+        conn.prepare("select id, image_hash from file_info where category = 2 and image_hash is not null")?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    let mut result = Vec::new();
+    for item in rows {
+        result.push(item?);
+    }
+    Ok(result)
+}
+
 pub fn delete_by_id(file_id: i64) -> Result<usize, RepositoryError> {
     let conn = Connection::open(get_db_path())?;
     let mut stmt = conn.prepare("delete from file_info where id = ?1")?;

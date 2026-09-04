@@ -368,3 +368,72 @@ pub fn find_image_similarity_candidates(
 
     Ok(candidates)
 }
+
+/// Same as `find_image_similarity_candidates`, but the query vector is provided
+/// directly instead of being loaded from a stored source file embedding.
+/// 与 `find_image_similarity_candidates` 相同，区别在于查询向量直接入参，
+/// 而不是从已存储的源文件嵌入中加载（供未索引外部文件使用）。
+pub fn find_image_similarity_candidates_by_vector(
+    dense_embedding: &[f32],
+    limit: usize,
+) -> Result<Vec<ImageSimilarityCandidate>, RepositoryError> {
+    let embedding_bytes = unsafe {
+        std::slice::from_raw_parts(
+            dense_embedding.as_ptr() as *const u8,
+            dense_embedding.len() * std::mem::size_of::<f32>(),
+        )
+    };
+
+    let conn = Connection::open(get_db_path())?;
+
+    let sql = format!(
+        r#"
+        SELECT
+            d.file_id,
+            v.distance,
+            f.image_hash
+        FROM (
+            SELECT id, distance
+            FROM file_content_vec
+            WHERE embedding MATCH :embedding
+            ORDER BY distance
+            LIMIT {}
+        ) v
+        JOIN file_content_data d ON v.id = d.id
+        JOIN file_info f ON d.file_id = f.id
+        WHERE f.category = 2
+        GROUP BY d.file_id
+    "#,
+        limit * 2
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(
+        rusqlite::named_params! {
+            ":embedding": embedding_bytes
+        },
+        |row| {
+            let file_id: i64 = row.get(0)?;
+            let distance: f32 = row.get(1)?;
+            let image_hash: Option<Vec<u8>> = row.get(2)?;
+
+            // Convert distance to score (distance 0 = 100, distance 1 = 0)
+            let semantic_score = ((1.0 - distance) * 100.0).max(0.0).min(100.0) as usize;
+
+            Ok(ImageSimilarityCandidate {
+                file_id,
+                semantic_score,
+                image_hash,
+            })
+        },
+    )?;
+
+    let mut candidates = Vec::new();
+    for row in rows {
+        if let Ok(candidate) = row {
+            candidates.push(candidate);
+        }
+    }
+
+    Ok(candidates)
+}

@@ -210,3 +210,21 @@ pub fn generate_caption(image_path: &Path) -> String {
         String::new()
     })
 }
+
+/// Build the local analysis text for an image: BLIP caption + OCR text.
+/// Either part is skipped on failure (empty string), matching the indexing pipeline.
+/// 生成图片的本地分析文本：BLIP 打标 + OCR。任一环节失败时跳过（返回空串），与索引管线行为一致。
+pub fn build_local_analysis_text(image_path: &Path) -> String {
+    let blip_caption = generate_caption(image_path);
+    let ocr_text = crate::ocr_service::recognize_file(image_path);
+
+    match (blip_caption.is_empty(), ocr_text.is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => format!("## OCR Text\n\n{}", ocr_text),
+        (false, true) => format!("## Image Description\n\n{}", blip_caption),
+        (false, false) => format!(
+            "## Image Description\n\n{}\n\n## OCR Text\n\n{}",
+            blip_caption, ocr_text
+        ),
+    }
+}

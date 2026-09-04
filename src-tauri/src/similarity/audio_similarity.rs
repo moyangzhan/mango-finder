@@ -52,47 +52,7 @@ impl AudioSimilarityDetector {
             }
         };
 
-        // Query Music type files directly using audio_type index (category=3, audio_type=2)
-        let music_file_ids = file_info_repo::list_ids_by_category_and_audio_type(3, AudioType::Music as i32)?;
-        let music_files = file_info_repo::list_by_ids(&music_file_ids)?;
-
-        let mut similarities: Vec<(FileInfo, f32)> = Vec::new();
-
-        for candidate in music_files {
-            if candidate.id == file_info.id {
-                continue;
-            }
-
-            // Read fingerprint from database and calculate similarity score
-            // 从数据库读取指纹并计算相似度
-            if let Some(candidate_bytes) = candidate.audio_fingerprint.as_ref() {
-                if let Some(candidate_fp) = MusicFingerprint::from_bytes(candidate_bytes) {
-                    let similarity = compare_music_fingerprints(&source_fingerprint, &candidate_fp);
-
-                    if similarity >= 30.0 {
-                        similarities.push((candidate, similarity));
-                    }
-                }
-            }
-        }
-
-        similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        similarities.truncate(limit);
-
-        let results: Vec<SearchResult> = similarities
-            .into_iter()
-            .map(|(info, score)| SearchResult {
-                score: score as usize,
-                hit_types: vec![],
-                file_info: info,
-                matched_keywords: HashSet::new(),
-                matched_chunk_ids: HashSet::new(),
-                similarity_type: Some(SimilarityType::AudioFingerprint),
-                source_device: None,
-            })
-            .collect();
-
-        Ok(results)
+        find_similars_by_fingerprint_value(&source_fingerprint, Some(file_info.id), limit).await
     }
 
     /// Find similar audio files based on transcription text embeddings
@@ -163,4 +123,56 @@ impl AudioSimilarityDetector {
 
         Ok(results)
     }
+}
+
+/// Find similar music files with an in-memory source fingerprint
+/// 使用内存中的源指纹检索相似音乐（已索引与外部现场计算共用）
+///
+/// `exclude_file_id` is None for external files that have no index row.
+pub async fn find_similars_by_fingerprint_value(
+    source_fingerprint: &MusicFingerprint,
+    exclude_file_id: Option<i64>,
+    limit: usize,
+) -> Result<Vec<SearchResult>, AppError> {
+    // Query Music type files directly using audio_type index (category=3, audio_type=2)
+    let music_file_ids = file_info_repo::list_ids_by_category_and_audio_type(3, AudioType::Music as i32)?;
+    let music_files = file_info_repo::list_by_ids(&music_file_ids)?;
+
+    let mut similarities: Vec<(FileInfo, f32)> = Vec::new();
+
+    for candidate in music_files {
+        if Some(candidate.id) == exclude_file_id {
+            continue;
+        }
+
+        // Read fingerprint from database and calculate similarity score
+        // 从数据库读取指纹并计算相似度
+        if let Some(candidate_bytes) = candidate.audio_fingerprint.as_ref() {
+            if let Some(candidate_fp) = MusicFingerprint::from_bytes(candidate_bytes) {
+                let similarity = compare_music_fingerprints(source_fingerprint, &candidate_fp);
+
+                if similarity >= 30.0 {
+                    similarities.push((candidate, similarity));
+                }
+            }
+        }
+    }
+
+    similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    similarities.truncate(limit);
+
+    let results: Vec<SearchResult> = similarities
+        .into_iter()
+        .map(|(info, score)| SearchResult {
+            score: score as usize,
+            hit_types: vec![],
+            file_info: info,
+            matched_keywords: HashSet::new(),
+            matched_chunk_ids: HashSet::new(),
+            similarity_type: Some(SimilarityType::AudioFingerprint),
+            source_device: None,
+        })
+        .collect();
+
+    Ok(results)
 }

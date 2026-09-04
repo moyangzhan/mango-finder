@@ -90,3 +90,22 @@ pub(crate) fn truncate_to_char_limit(content: &mut String, limit: usize) {
         }
     }
 }
+
+/// Remove extracted images left over by external (un-indexed) document queries.
+/// 清理外部文档查询遗留的抽取图片。
+///
+/// External queries parse with file_id = 0, so their images land in bucket 0000
+/// with a `0_` prefix and are never referenced by any index row. Real indexed
+/// files use ids >= 1 in the same bucket and are not affected.
+pub fn cleanup_external_query_images() {
+    let dir = get_images_dir(0);
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().starts_with("0_") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}

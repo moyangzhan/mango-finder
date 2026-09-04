@@ -5,11 +5,14 @@ use std::net::{TcpListener, UdpSocket};
 use std::path::Path;
 use std::time::Instant;
 
+use mango_finder_lib::entities::FileInfo;
+use mango_finder_lib::enums::FileCategory;
 use mango_finder_lib::searcher;
 use mango_finder_lib::similarity::similarity_service;
 use mango_finder_lib::indexer_service;
 use mango_finder_lib::repositories::{file_info_repo, file_content_embedding_repo, file_content_fts_repo, file_metadata_embedding_repo, device_repo, indexing_task_repo, config_repo};
-use mango_finder_lib::global::{CLIENT_ID, STORAGE_PATH, DB_PATH, EMBEDDING_MODEL_PATH, EMBEDDING_TOKENIZER_PATH, ACTIVE_LOCALE};
+use mango_finder_lib::global::{CLIENT_ID, STORAGE_PATH, DB_PATH, EMBEDDING_MODEL_PATH, EMBEDDING_TOKENIZER_PATH, ACTIVE_LOCALE, FS_WATCHER_SETTING};
+use mango_finder_lib::structs::file_metadata::AudioType;
 
 use crate::output;
 
@@ -50,16 +53,19 @@ pub enum Commands {
         help_doc: bool,
     },
 
-    /// Find similar files by file ID
+    /// Find similar files by file ID, file name, or absolute path
     Similar {
-        /// File ID
-        file_id: i64,
+        /// File ID, file name, or absolute path
+        file: String,
         /// Source device ID (optional)
         #[arg(long)]
         device: Option<String>,
         /// Max results
         #[arg(long, default_value = "10")]
         limit: usize,
+        /// Add an un-indexed external file to the index while querying
+        #[arg(long)]
+        index: bool,
         /// Show detailed help for this command
         #[arg(long = "help-doc")]
         help_doc: bool,
@@ -174,28 +180,300 @@ pub async fn handle_search(query: &str, search_type: &str, device: Option<String
     output::print_success(&data, output_format);
 }
 
-pub async fn handle_similar(file_id: i64, device: Option<String>, limit: usize, output_format: &str) {
+pub async fn handle_similar(file: &str, device: Option<String>, limit: usize, index: bool, output_format: &str) {
     if let Some(_device_id) = device {
         // TODO: 跨设备相似搜索
         output::print_error("Remote device similarity search not yet implemented");
         return;
     }
 
+    let target = match resolve_file_arg(file) {
+        Ok(target) => target,
+        Err(e) => {
+            output::print_error(&e);
+            return;
+        }
+    };
+
     let start = Instant::now();
-    match similarity_service::find_similars_for_local_file(file_id, limit).await {
-        Ok(results) => {
+    match target {
+        SimilarTarget::Indexed { file, same_name_matches } => {
+            match similarity_service::find_similars_for_local_file(file.id, limit).await {
+                Ok(results) => {
+                    let elapsed = start.elapsed();
+                    let mut data = serde_json::json!({
+                        "mode": "indexed",
+                        "file": {
+                            "id": file.id,
+                            "name": file.name,
+                            "path": file.path,
+                        },
+                        "results": results,
+                        "total": results.len(),
+                        "elapsed_ms": elapsed.as_millis()
+                    });
+                    if same_name_matches.len() > 1 {
+                        // 同名文件取 id 最小的一个，其余命中项列出供用户改用 ID 或路径重试
+                        data["notice"] = serde_json::json!(format!(
+                            "{} files share the name '{}'; using id={} ({}). Pass a file ID or absolute path to pick another one.",
+                            same_name_matches.len(),
+                            file.name,
+                            file.id,
+                            file.path
+                        ));
+                        data["matched_files"] = serde_json::json!(
+                            same_name_matches.iter().take(5)
+                                .map(|f| serde_json::json!({"id": f.id, "path": f.path}))
+                                .collect::<Vec<_>>()
+                        );
+                    }
+                    output::print_success(&data, output_format);
+                }
+                Err(e) => {
+                    output::print_error(&format!("Failed to find similar files: {}", e));
+                }
+            }
+        }
+        SimilarTarget::External { path, name } => {
+            warn_external_slowness(&path);
+
+            // --index：先单文件入库（解析与嵌入只做一次），再走已索引快路径查询；
+            // 入库失败时回退纯现场计算并提示
+            if index {
+                // 入库前规范化为绝对路径（Windows 下统一 \），与目录扫描产生的行格式一致，
+                // 避免监听增删、路径比较按字符串匹配时失效
+                let stored_path = normalize_store_path(&path);
+                let indexed_file = match indexer_service::index_file(&stored_path).await {
+                    Ok(()) => file_info_repo::get_by_path(&stored_path).ok().flatten(),
+                    Err(e) => {
+                        log::warn!("Failed to index '{}': {}", stored_path, e);
+                        None
+                    }
+                };
+                if let Some(file) = indexed_file {
+                    match similarity_service::find_similars_for_local_file(file.id, limit).await {
+                        Ok(results) => {
+                            let elapsed = start.elapsed();
+                            let mut data = serde_json::json!({
+                                "mode": "external",
+                                "indexed": true,
+                                "file": {
+                                    "id": file.id,
+                                    "name": file.name,
+                                    "path": file.path,
+                                },
+                                "results": results,
+                                "total": results.len(),
+                                "elapsed_ms": elapsed.as_millis()
+                            });
+                            data["notice"] = serde_json::json!(build_indexed_notice(&file).await);
+                            output::print_success(&data, output_format);
+                            return;
+                        }
+                        Err(e) => {
+                            output::print_error(&format!("Failed to find similar files: {}", e));
+                            return;
+                        }
+                    }
+                }
+                run_external_on_the_fly(
+                    &path, &name, limit, output_format, start,
+                    Some("Note: adding the file to the index failed (see logs); the result was computed on the fly instead.".to_string()),
+                )
+                .await;
+            } else {
+                run_external_on_the_fly(&path, &name, limit, output_format, start, None).await;
+            }
+        }
+    }
+}
+
+/// 现场计算并输出结果；extra_notice 用于附加提示（如 --index 入库失败的说明）
+async fn run_external_on_the_fly(
+    path: &str,
+    name: &str,
+    limit: usize,
+    output_format: &str,
+    start: Instant,
+    extra_notice: Option<String>,
+) {
+    match similarity_service::find_similars_for_external_file(path, limit).await {
+        Ok(outcome) => {
             let elapsed = start.elapsed();
-            let data = serde_json::json!({
-                "results": results,
-                "total": results.len(),
+            let mut data = serde_json::json!({
+                "mode": "external",
+                "file": {
+                    "id": serde_json::Value::Null,
+                    "name": name,
+                    "path": path,
+                },
+                "chunk_count": outcome.chunk_count,
+                "results": outcome.results,
+                "total": outcome.results.len(),
                 "elapsed_ms": elapsed.as_millis()
             });
+            let mut notice = build_external_notice(path, &outcome);
+            if let Some(extra) = extra_notice {
+                notice = format!("{} {}", notice, extra);
+            }
+            data["notice"] = serde_json::json!(notice);
             output::print_success(&data, output_format);
         }
         Err(e) => {
             output::print_error(&format!("Failed to find similar files: {}", e));
         }
     }
+}
+
+/// --index 入库成功后的提示：说明已入库与快路径，路径不在监听目录时补充变更不自动更新的说明
+async fn build_indexed_notice(file: &FileInfo) -> String {
+    let mut notice = format!(
+        "'{}' was not indexed; it has now been added to the index (id={}). Future queries on it use the fast path.",
+        file.path, file.id
+    );
+    if !in_watched_directory(&file.path).await {
+        notice.push_str(" Note: this path is not in a watched directory; changes to the file will not be re-indexed automatically.");
+    }
+    notice
+}
+
+/// 规范化为存储路径格式：绝对路径，Windows 下分隔符统一为反斜杠，
+/// 与目录扫描写入 file_info 的行格式保持一致
+fn normalize_store_path(path: &str) -> String {
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| std::path::PathBuf::from(path));
+    let normalized = absolute.to_string_lossy().into_owned();
+    if std::path::MAIN_SEPARATOR == '\\' {
+        normalized.replace('/', "\\")
+    } else {
+        normalized
+    }
+}
+
+/// 判断路径是否位于任一监听目录之下（含目录本身；分隔符感知，避免同前缀兄弟目录误判）
+async fn in_watched_directory(path: &str) -> bool {
+    let Some(parent) = Path::new(path).parent().and_then(|p| p.to_str()) else {
+        return false;
+    };
+    let setting = FS_WATCHER_SETTING.read().await;
+    setting.directories.iter().any(|dir| {
+        parent == dir.as_str()
+            || parent.starts_with(&format!("{}{}", dir, std::path::MAIN_SEPARATOR))
+            || parent.starts_with(&format!("{}/", dir))
+    })
+}
+
+enum SimilarTarget {
+    /// 已索引文件（file 为解析结果；same_name_matches 仅按文件名解析且存在多个同名文件时非空）
+    Indexed {
+        file: FileInfo,
+        same_name_matches: Vec<FileInfo>,
+    },
+    /// 磁盘上存在但未索引的外部文件，走现场计算
+    External { path: String, name: String },
+}
+
+/// 解析 similar 命令的文件参数：纯数字按文件 ID；含路径分隔符按绝对路径精确匹配（未命中但文件存在时转现场计算）；其余按文件名精确匹配
+fn resolve_file_arg(arg: &str) -> Result<SimilarTarget, String> {
+    // 纯数字优先按 ID 解析（文件名恰为纯数字的情况需改用路径指定）
+    if let Ok(id) = arg.parse::<i64>() {
+        return match file_info_repo::get_by_id(id) {
+            Ok(Some(file)) => Ok(SimilarTarget::Indexed { file, same_name_matches: Vec::new() }),
+            Ok(None) => Err(format!(
+                "File not found by id: {}. Numeric input is treated as a file ID; pass a file name or absolute path instead.",
+                arg
+            )),
+            Err(e) => Err(format!("Failed to get file by id: {}", e)),
+        };
+    }
+
+    if arg.contains('\\') || arg.contains('/') {
+        // 精确匹配失败时尝试翻转分隔符（Windows 下索引中的路径为 \，而输入常为 /）
+        let flipped: String = arg
+            .chars()
+            .map(|c| match c { '\\' => '/', '/' => '\\', _ => c })
+            .collect();
+        for candidate in [arg, flipped.as_str()] {
+            match file_info_repo::get_by_path(candidate) {
+                Ok(Some(file)) => return Ok(SimilarTarget::Indexed { file, same_name_matches: Vec::new() }),
+                Ok(None) => {}
+                Err(e) => return Err(format!("Failed to get file by path: {}", e)),
+            }
+        }
+        // 未索引但磁盘上存在的文件转现场计算（不写索引，速度取决于文件类型）
+        let path = Path::new(arg);
+        if path.is_dir() {
+            return Err(format!("Path is a directory, not a file: {}", arg));
+        }
+        if path.exists() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            return Ok(SimilarTarget::External { path: arg.to_string(), name });
+        }
+        return Err(format!("File not found by path: {}", arg));
+    }
+
+    match file_info_repo::list_by_name(arg) {
+        Ok(matches) if matches.is_empty() => Err(format!(
+            "File not found by name: {}. Bare names only match indexed files; pass an absolute path to query an un-indexed file.",
+            arg
+        )),
+        Ok(matches) => {
+            let file = matches[0].clone();
+            Ok(SimilarTarget::Indexed { file, same_name_matches: matches })
+        }
+        Err(e) => Err(format!("Failed to get file by name: {}", e)),
+    }
+}
+
+/// 现场计算前按文件类别向 stderr 提示耗时预期（--quiet 时不输出）
+fn warn_external_slowness(path: &str) {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    match FileCategory::from_ext(&ext) {
+        FileCategory::Document => {
+            log::warn!(
+                "'{}' is not indexed; parsing and embedding it on the fly. Model load plus per-chunk inference may make this slow for large files.",
+                path
+            );
+        }
+        FileCategory::Image => {
+            log::warn!(
+                "'{}' is not indexed; computing its perceptual hash and caption embedding on the fly (loads the vision model, usually a few seconds).",
+                path
+            );
+        }
+        FileCategory::Audio => {
+            log::warn!(
+                "'{}' is not indexed; fingerprinting or transcribing it on the fly. Whisper transcription of long audio may take minutes.",
+                path
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 现场计算完成后按实际处理路径组装结果中的提示文案
+fn build_external_notice(path: &str, outcome: &similarity_service::ExternalSimilarOutcome) -> String {
+    let index_tip = "Index the directory with 'mfd index start <dir>' to make repeat queries fast.";
+    let what = match outcome.audio_type {
+        Some(AudioType::Music | AudioType::Mixed) => {
+            "its audio fingerprint was extracted on the fly".to_string()
+        }
+        Some(_) => format!(
+            "it was transcribed with Whisper and {} chunk(s) were embedded on the fly",
+            outcome.chunk_count
+        ),
+        None if outcome.category == FileCategory::Image => {
+            "its perceptual hash and caption embedding were computed on the fly".to_string()
+        }
+        None => format!(
+            "it was parsed and {} chunk(s) were embedded on the fly",
+            outcome.chunk_count
+        ),
+    };
+    format!("'{}' is not indexed; {}. Nothing was written to the index. {}", path, what, index_tip)
 }
 
 pub async fn handle_index(action: IndexAction, output_format: &str) {
@@ -696,52 +974,88 @@ NOTES:
                 r#"similar - 查找相似文件
 
 用法:
-    mfd similar <file_id> [选项]
+    mfd similar <file> [选项]
 
 参数:
-    <file_id>    文件 ID
+    <file>    文件 ID、文件名或绝对路径
 
 选项:
     --device <id>      远程设备 ID (可选)
     --limit <n>        最大结果数 (默认: 10)
+    --index            外部文件查完的同时加入索引 (下次查询走快路径)
     --output <format>  输出格式: json (默认), table
     --quiet            静默模式
     -h, --help         显示帮助
 
 示例:
-    # 查找相似文件
+    # 按文件 ID 查找相似文件
     mfd similar 123
+
+    # 按文件名查找
+    mfd similar "report.docx"
+
+    # 按绝对路径查找
+    mfd similar "C:\Documents\report.docx"
+
+    # 未索引的外部文件按绝对路径现场计算 (不写索引)
+    mfd similar "D:\Downloads\new_report.pdf"
+
+    # 外部文件查完的同时加入索引
+    mfd similar "D:\Downloads\new_report.pdf" --index
 
     # 限制结果数
     mfd similar 123 --limit 5
 
 说明:
+    - 参数解析顺序: 纯数字按文件 ID；含路径分隔符按绝对路径精确匹配；其余按文件名精确匹配
+    - 文件名匹配到多个同名文件时使用 id 最小的一个，输出中的 notice 和 matched_files 会列出其余匹配
+    - 绝对路径未索引但磁盘存在时进入现场模式 (mode=external)：解析/打标/转写后现场计算嵌入再检索，不写索引
+    - 现场模式耗时提示: 文档需加载嵌入模型逐块计算；图片需加载视觉模型打标；长音频 Whisper 转写可能需要数分钟
+    - --index 仅对外部文件生效：先入库再查询，解析与嵌入只做一次；路径不在监听目录时，文件变更不会自动更新
     - 基于文件内容相似度，而非文件名
     - 支持文档 (语义)、图片 (感知哈希)、音频 (指纹)"#
             } else {
-                r#"similar - Find similar files by file ID
+                r#"similar - Find similar files
 
 USAGE:
-    mfd similar <file_id> [OPTIONS]
+    mfd similar <file> [OPTIONS]
 
 ARGS:
-    <file_id>    File ID to find similar files for
+    <file>    File ID, file name, or absolute path
 
 OPTIONS:
     --device <id>      Remote device ID (optional)
     --limit <n>        Max results (default: 10)
+    --index            Add an un-indexed external file to the index while querying
     --output <format>  Output format: json (default), table
     --quiet            Suppress logs
     -h, --help         Print help
 
 EXAMPLES:
-    # Find similar files
+    # Find similar files by file ID
     mfd similar 123
+
+    # Find similar files by file name
+    mfd similar "report.docx"
+
+    # Find similar files by absolute path
+    mfd similar "C:\Documents\report.docx"
+
+    # Un-indexed external file by absolute path (on-the-fly, nothing written to the index)
+    mfd similar "D:\Downloads\new_report.pdf"
+
+    # Add the external file to the index while querying
+    mfd similar "D:\Downloads\new_report.pdf" --index
 
     # Limit results
     mfd similar 123 --limit 5
 
 NOTES:
+    - Argument resolution: pure digits are treated as a file ID; values containing a path separator match the absolute path exactly; anything else matches the file name exactly
+    - When multiple files share the name, the one with the smallest id is used; notice and matched_files in the output list the other matches
+    - An absolute path that exists on disk but is not indexed switches to on-the-fly mode (mode=external): the file is parsed/captioned/transcribed, embedded in memory, then searched; the index is not modified
+    - On-the-fly speed hints: documents load the embedding model and embed chunk by chunk; images load the vision model for captioning; Whisper transcription of long audio may take minutes
+    - --index applies to external files only: the file is indexed first, then queried, so parsing and embedding run once; if the path is outside watched directories, later changes are not re-indexed automatically
     - Similarity is based on file content, not filename
     - Works for documents (semantic), images (perceptual hash), and audio (fingerprint)"#
             }

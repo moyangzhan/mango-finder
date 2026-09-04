@@ -58,12 +58,47 @@ mfd search "report.docx" --type keyword --limit 5
 ### similar - Find Similar Files
 
 ```bash
-mfd similar <file_id> [--device <id>] [--limit <n>]
+mfd similar <file> [--device <id>] [--limit <n>] [--index]
 ```
+
+**Parameters:**
+- `file`: file ID, file name, or absolute path
+  - Pure digits are treated as a file ID
+  - Values containing a path separator (`\` or `/`) match the absolute path exactly; a path that is not indexed but exists on disk switches to **on-the-fly mode** (see below)
+  - Anything else matches the file name exactly; when multiple files share the name, the one with the smallest id is used, and `notice` plus `matched_files` (up to 5) in the output list the other matches so you can retry with an ID or path
+
+**On-the-fly mode (un-indexed external files):**
+- When an absolute path misses the index but exists on disk, the file is parsed / captioned / transcribed and embedded in memory before searching; **nothing is written to the index**
+- The output carries `"mode": "external"`, a `notice` (cost explanation and indexing suggestion), and `chunk_count`; `file.id` is `null`
+- A stderr hint is printed before the work starts (suppressed by `--quiet`); expected cost per type:
+  - Documents: embedding model load + per-chunk inference; large files are slow
+  - Images: perceptual hash (milliseconds) + vision model captioning, usually seconds; OCR is skipped automatically when its models are missing
+  - Music audio: fingerprint extraction (no model), fast
+  - Speech audio: Whisper transcription; long audio may take minutes
+- Video and unknown types are not supported; the command errors and suggests `mfd index start` first
+
+**`--index` (add the external file to the index):**
+- Applies to external files only: the file is indexed first (parsing and embedding run once), then queried via the fast path; a no-op for already indexed files
+- The output carries `"indexed": true` with the newly assigned `file.id`, and the `notice` confirms indexing
+- If the path is outside watched directories (fs_watcher setting), the `notice` adds that later changes are not re-indexed automatically
+- If indexing fails, the command falls back to pure on-the-fly computation and says so in the `notice`
 
 **Examples:**
 ```bash
+# By file ID
 mfd similar 123 --limit 5
+
+# By file name
+mfd similar "report.docx"
+
+# By absolute path
+mfd similar "C:\Documents\report.docx"
+
+# Un-indexed external file (on-the-fly, nothing written to the index)
+mfd similar "D:\Downloads\new_report.pdf"
+
+# Add the external file to the index while querying
+mfd similar "D:\Downloads\new_report.pdf" --index
 ```
 
 ### index - Index Management

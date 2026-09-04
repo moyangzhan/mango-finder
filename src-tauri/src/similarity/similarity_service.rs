@@ -3,13 +3,24 @@
 //! This module provides unified similarity search functionality that combines
 //! local and remote device searches.
 
+use crate::audio_parser::AudioParser;
 use crate::cluster::http_client;
+use crate::embedding_service_manager;
 use crate::entities::FileInfo;
-use crate::enums::PairingStatus;
-use crate::global::CLIENT_ID;
-use crate::repositories::{device_repo, file_info_repo};
-use crate::similarity::{local_similarity_service, remote_similarity_service};
+use crate::enums::{FileCategory, PairingStatus, SimilarityType};
+use crate::global::{CLIENT_ID, EXT_TO_DOC_LOADER, MAX_DOCUMENT_LOAD_CHARS};
+use crate::image_parser;
+use crate::repositories::{device_repo, file_content_embedding_repo, file_info_repo};
+use crate::similarity::{
+    audio_similarity, document_similarity, image_similarity, local_similarity_service,
+    remote_similarity_service,
+};
+use crate::structs::file_metadata::AudioType;
+use crate::structs::image_similarity_candidate::ImageSimilarityCandidate;
 use crate::structs::search_result::{SearchResult, SourceDevice};
+use crate::structs::sparse_vector::SparseVector;
+use crate::utils::audio_util;
+use crate::utils::text_util;
 
 /// Find similar files for a local file
 /// 为本地文件查找相似文件
@@ -130,4 +141,269 @@ pub async fn find_similars_for_remote_file(
     // 3. Return results
     log::info!("Total results from remote: {}", remote_results.len());
     Ok(remote_results)
+}
+
+/// Outcome of an on-the-fly similarity query for an un-indexed external file
+/// 未索引外部文件现场相似度查询的结果
+pub struct ExternalSimilarOutcome {
+    pub results: Vec<SearchResult>,
+    /// Number of chunk embeddings computed on the fly (documents / transcribed
+    /// audio); 0 for images and music
+    pub chunk_count: usize,
+    /// Detected audio subtype, present only for audio files
+    pub audio_type: Option<AudioType>,
+    /// Category the file was processed as
+    /// 实际按哪种类别处理
+    pub category: FileCategory,
+}
+
+/// Find similar indexed files for an external local file that is not indexed.
+/// 为未索引的外部本地文件查找相似文件
+///
+/// The file is parsed / captioned / transcribed on the fly and its embeddings
+/// are computed in memory; nothing is written to the index.
+pub async fn find_similars_for_external_file(
+    path: &str,
+    limit: usize,
+) -> Result<ExternalSimilarOutcome, String> {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    match FileCategory::from_ext(&ext) {
+        FileCategory::Document => find_similars_for_external_document(path, &ext, limit).await,
+        FileCategory::Image => find_similars_for_external_image(path, limit).await,
+        FileCategory::Audio => find_similars_for_external_audio(path, limit).await,
+        _ => Err(format!(
+            "On-the-fly similarity is not supported for {} files; index it first with 'mfd index start <dir>'",
+            if ext.is_empty() { "extension-less".to_string() } else { format!(".{}", ext) }
+        )),
+    }
+}
+
+/// 文档：解析取文本 → 分块嵌入 → 库内检索
+async fn find_similars_for_external_document(
+    path: &str,
+    ext: &str,
+    limit: usize,
+) -> Result<ExternalSimilarOutcome, String> {
+    let doc_loader = EXT_TO_DOC_LOADER
+        .read()
+        .await
+        .get(ext)
+        .cloned()
+        .ok_or_else(|| format!("Unsupported document extension: .{}", ext))?;
+
+    let name = std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    let path_owned = path.to_string();
+    let parse_result = tokio::task::spawn_blocking(move || {
+        doc_loader.load_max_with_id(std::path::Path::new(&path_owned), 0, &name, MAX_DOCUMENT_LOAD_CHARS)
+    })
+    .await
+    .map_err(|e| format!("Failed to parse file: {}", e))?;
+    // 外部查询以 file_id=0 解析，抽取图片（`0_` 前缀）无索引记录引用，解析完即清理
+    crate::document_loaders::cleanup_external_query_images();
+    let content = parse_result.map_err(|e| format!("Failed to parse file: {}", e))?;
+
+    if content.trim().is_empty() {
+        return Ok(ExternalSimilarOutcome {
+            results: Vec::new(),
+            chunk_count: 0,
+            audio_type: None,
+            category: FileCategory::Document,
+        });
+    }
+
+    let chunks = embed_text_to_chunks(&text_util::collapse_newlines(&content)).await?;
+    let chunk_count = chunks.len();
+    let results = document_similarity::find_similars_from_chunks(
+        &chunks,
+        1,
+        None,
+        limit,
+        SimilarityType::DocumentSemantic,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(ExternalSimilarOutcome {
+        results,
+        chunk_count,
+        audio_type: None,
+        category: FileCategory::Document,
+    })
+}
+
+/// 图片：现场感知哈希 + 打标嵌入；打标/嵌入失败时退化为纯视觉哈希全量比对
+async fn find_similars_for_external_image(
+    path: &str,
+    limit: usize,
+) -> Result<ExternalSimilarOutcome, String> {
+    let source_hash_bytes = image_similarity::calculate_image_hash(path)
+        .ok_or_else(|| format!("Failed to decode image: {}", path))?;
+    let source_hash = image_similarity::bytes_to_image_hash(&source_hash_bytes);
+
+    let path_owned = path.to_string();
+    let content = tokio::task::spawn_blocking(move || {
+        image_parser::build_local_analysis_text(std::path::Path::new(&path_owned))
+    })
+    .await
+    .unwrap_or_default();
+
+    // 有语义向量时用 ANN 取候选；否则扫描全部图片哈希做纯视觉比对
+    let mut chunk_count = 0;
+    let candidates = if content.trim().is_empty() {
+        visual_scan_candidates()?
+    } else {
+        // 与索引写入路径保持一致：嵌入前折叠连续换行
+        match embed_text_to_chunks(&text_util::collapse_newlines(&content)).await {
+            Ok(chunks) if !chunks.is_empty() => {
+                chunk_count = chunks.len();
+                file_content_embedding_repo::find_image_similarity_candidates_by_vector(
+                    &chunks[0].0,
+                    image_similarity::ANN_CANDIDATE_LIMIT,
+                )
+                .map_err(|e| e.to_string())?
+            }
+            Ok(_) => visual_scan_candidates()?,
+            Err(e) => {
+                log::warn!("Failed to embed image caption, falling back to visual-only scan: {}", e);
+                visual_scan_candidates()?
+            }
+        }
+    };
+
+    let results =
+        image_similarity::score_image_candidates(&source_hash, &candidates, None, limit)
+            .map_err(|e| e.to_string())?;
+
+    Ok(ExternalSimilarOutcome {
+        results,
+        chunk_count,
+        audio_type: None,
+        category: FileCategory::Image,
+    })
+}
+
+/// 音频：分类与索引期同构（特征优先、转写内容兜底）；音乐/混合走指纹比对，语音/未知走转写嵌入检索
+async fn find_similars_for_external_audio(
+    path: &str,
+    limit: usize,
+) -> Result<ExternalSimilarOutcome, String> {
+    let feature_type = audio_util::detect_audio_type_from_file(path);
+
+    // 特征明确为音乐时无需转写；其余（语音或特征不明）转写后按索引期同一规则定类型
+    let transcription = if matches!(feature_type, AudioType::Music | AudioType::Mixed) {
+        None
+    } else {
+        let parser = AudioParser::new()
+            .map_err(|e| format!("Failed to load Whisper model: {}", e))?;
+        Some(
+            parser
+                .parse(path)
+                .await
+                .map_err(|e| format!("Failed to transcribe audio: {}", e))?,
+        )
+    };
+    let audio_type = match feature_type {
+        AudioType::Music | AudioType::Mixed => feature_type,
+        _ => audio_util::detect_audio_type(
+            &text_util::collapse_newlines(transcription.as_deref().unwrap_or("")),
+            path,
+        ),
+    };
+
+    match audio_type {
+        AudioType::Music | AudioType::Mixed => {
+            let fingerprint = audio_util::extract_music_fingerprint_from_file(path)
+                .ok_or_else(|| format!("Failed to extract audio fingerprint: {}", path))?;
+            let results =
+                audio_similarity::find_similars_by_fingerprint_value(&fingerprint, None, limit)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            Ok(ExternalSimilarOutcome {
+                results,
+                chunk_count: 0,
+                audio_type: Some(audio_type),
+                category: FileCategory::Audio,
+            })
+        }
+        AudioType::Speech | AudioType::Unknown => {
+            let transcription = transcription.unwrap_or_default();
+
+            if transcription.trim().is_empty() {
+                return Ok(ExternalSimilarOutcome {
+                    results: Vec::new(),
+                    chunk_count: 0,
+                    audio_type: Some(audio_type),
+                    category: FileCategory::Audio,
+                });
+            }
+
+            let chunks =
+                embed_text_to_chunks(&text_util::collapse_newlines(&transcription)).await?;
+            let chunk_count = chunks.len();
+            let results = document_similarity::find_similars_from_chunks(
+                &chunks,
+                3,
+                None,
+                limit,
+                SimilarityType::AudioTranscription,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+
+            Ok(ExternalSimilarOutcome {
+                results,
+                chunk_count,
+                audio_type: Some(audio_type),
+                category: FileCategory::Audio,
+            })
+        }
+    }
+}
+
+/// 全量加载图片哈希作为纯视觉比对候选
+fn visual_scan_candidates() -> Result<Vec<ImageSimilarityCandidate>, String> {
+    let rows = file_info_repo::list_image_hashes().map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|(file_id, image_hash)| ImageSimilarityCandidate {
+            file_id,
+            semantic_score: 0,
+            image_hash,
+        })
+        .collect())
+}
+
+/// 文本分块并逐块计算嵌入（仅内存，不写库），供外部文件现场计算使用
+async fn embed_text_to_chunks(
+    content: &str,
+) -> Result<Vec<(Vec<f32>, SparseVector)>, String> {
+    let chunks = {
+        let mut manager = embedding_service_manager::get_manager().write().await;
+        let embedding_service = manager.service().await.map_err(|e| e.to_string())?;
+        text_util::split_text(content, &embedding_service.tokenizer)
+            .map_err(|e| format!("Failed to split text: {}", e))?
+    };
+
+    let mut result = Vec::with_capacity(chunks.len());
+    for chunk in &chunks {
+        if chunk.trim().is_empty() {
+            continue;
+        }
+        let mut manager = embedding_service_manager::get_manager().write().await;
+        let embed_result = manager
+            .embed(chunk)
+            .await
+            .map_err(|e| format!("Failed to embed text: {}", e))?;
+        result.push((embed_result.dense, embed_result.sparse));
+    }
+    Ok(result)
 }

@@ -8,7 +8,6 @@ use crate::model_platform_services::dashscope::DashScope;
 use crate::model_platform_services::openai::OpenAi;
 use crate::model_platform_services::openai_compatible_service::OpenAiCompatibleService;
 use crate::model_platform_services::siliconflow::SiliconFlow;
-use crate::ocr_service;
 use crate::repositories::ai_model_repo;
 use crate::self_hosted_services::ollama::Ollama;
 use crate::self_hosted_services::vllm::Vllm;
@@ -129,23 +128,11 @@ impl IndexingTemplate for ImageIndexer {
         // 1. Try local parser first
         if self.is_local_mode {
             let path = file_info.path.clone();
-            let (blip_caption, ocr_text) = tokio::task::spawn_blocking(move || {
-                let blip_caption = image_parser::generate_caption(std::path::Path::new(&path));
-                let ocr_text = ocr_service::recognize_file(std::path::Path::new(&path));
-                (blip_caption, ocr_text)
+            return tokio::task::spawn_blocking(move || {
+                image_parser::build_local_analysis_text(std::path::Path::new(&path))
             })
             .await
             .unwrap_or_default();
-
-            match (blip_caption.is_empty(), ocr_text.is_empty()) {
-                (true, true) => return String::new(),
-                (true, false) => return format!("## OCR Text\n\n{}", ocr_text),
-                (false, true) => return format!("## Image Description\n\n{}", blip_caption),
-                (false, false) => return format!(
-                    "## Image Description\n\n{}\n\n## OCR Text\n\n{}",
-                    blip_caption, ocr_text
-                ),
-            }
         }
 
         // 2. Try self-hosted service

@@ -3,6 +3,7 @@
 // Public modules (CLI accessible)
 pub mod db_initializer;
 pub mod entities;
+pub mod enums;
 pub mod global;
 pub mod indexer_service;
 pub mod initializer;
@@ -21,7 +22,6 @@ mod db_migrations;
 mod document_loaders;
 mod embedding_service;
 mod embedding_service_manager;
-mod enums;
 mod errors;
 mod fs_watcher;
 mod image_parser;

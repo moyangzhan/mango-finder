@@ -58,12 +58,47 @@ mfd search "report.docx" --type keyword --limit 5
 ### similar - 查找相似文件
 
 ```bash
-mfd similar <file_id> [--device <id>] [--limit <n>]
+mfd similar <file> [--device <id>] [--limit <n>] [--index]
 ```
+
+**参数说明：**
+- `file`：文件 ID、文件名或绝对路径
+  - 纯数字按文件 ID 解析
+  - 含路径分隔符（`\` 或 `/`）按绝对路径精确匹配；路径未索引但磁盘上存在时进入**现场模式**（见下）
+  - 其余按文件名精确匹配；存在多个同名文件时使用 id 最小的一个，输出中的 `notice` 与 `matched_files`（最多 5 条）会列出其余匹配，便于改用 ID 或路径重试
+
+**现场模式（外部未索引文件）：**
+- 绝对路径在索引中未命中但磁盘存在时，自动现场解析/打标/转写并计算嵌入后检索，**不写索引**
+- 输出标识 `"mode": "external"`、`"notice"`（耗时来源与建索引建议）、`"chunk_count"`（分块嵌入数），`file.id` 为 `null`
+- 执行前 stderr 输出耗时提示（`--quiet` 时不输出）；各类耗时预期：
+  - 文档：加载嵌入模型 + 逐分块推理，大文件较慢
+  - 图片：感知哈希（毫秒级）+ 视觉模型打标，通常秒级；OCR 模型缺失时自动跳过
+  - 音频-音乐：提取音频指纹（无模型），较快
+  - 音频-语音：Whisper 转写，长音频可能需要数分钟
+- 视频/未知类型不支持，报错并建议先 `mfd index start` 建索引
+
+**`--index`（外部文件顺手入库）：**
+- 仅对外部文件生效：先单文件入库（解析与嵌入只做一次），再走已索引快路径查询；对已索引文件是空操作
+- 输出含 `"indexed": true` 与新分配的 `file.id`，`notice` 说明已入库
+- 路径不在监听目录（fs_watcher 设置的 directories）时，`notice` 额外提示：文件变更不会自动重新索引
+- 入库失败时自动回退纯现场计算，并在 `notice` 中说明
 
 **示例：**
 ```bash
+# 按文件 ID
 mfd similar 123 --limit 5
+
+# 按文件名
+mfd similar "report.docx"
+
+# 按绝对路径
+mfd similar "C:\Documents\report.docx"
+
+# 未索引的外部文件（现场计算，不写索引）
+mfd similar "D:\Downloads\new_report.pdf"
+
+# 外部文件查完的同时加入索引
+mfd similar "D:\Downloads\new_report.pdf" --index
 ```
 
 ### index - 索引管理

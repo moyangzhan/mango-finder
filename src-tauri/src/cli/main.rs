@@ -57,12 +57,12 @@ fn main() {
                 }
                 commands::handle_search(&query, &r#type, device, limit, &cli.output).await;
             }
-            commands::Commands::Similar { file_id, device, limit, help_doc } => {
+            commands::Commands::Similar { file, device, limit, index, help_doc } => {
                 if help_doc {
                     commands::handle_help(Some("similar"));
                     return;
                 }
-                commands::handle_similar(file_id, device, limit, &cli.output).await;
+                commands::handle_similar(&file, device, limit, index, &cli.output).await;
             }
             commands::Commands::Index { action, help_doc } => {
                 if help_doc {
