@@ -1,17 +1,16 @@
+use crate::cluster;
 use crate::db_initializer;
 use crate::global::{
     ACTIVE_LOCALE, ACTIVE_MODEL_PLATFORM, ACTIVE_SELF_HOSTED_PLATFORM, CLIENT_ID,
     CONFIG_NAME_ACTIVE_LOCALE, CONFIG_NAME_ACTIVE_SELF_HOSTED_PLATFORM, CONFIG_NAME_CLIENT_ID,
     CONFIG_NAME_INDEXER_SETTING, CONFIG_NAME_PROXY, CONFIG_NAME_WATCHER_SETTING,
-    FS_WATCHER_SETTING, INDEXER_SETTING, ONNX_EXEC_PROVIDERS_INITIALIZED,
-    PROXY,
+    FS_WATCHER_SETTING, INDEXER_SETTING, ONNX_EXEC_PROVIDERS_INITIALIZED, PROXY,
 };
-use crate::cluster;
 use crate::repositories::{config_repo, model_platform_repo, self_hosted_platform_repo};
 use crate::structs::fs_watcher_setting::FsWatcherSetting;
-use crate::utils::task_util;
 use crate::structs::indexer_setting::IndexerSetting;
 use crate::structs::proxy_setting::ProxyInfo;
+use crate::utils::task_util;
 use anyhow::Context;
 use log::{error, info};
 use ort::execution_providers::{
@@ -22,14 +21,22 @@ use serde_json;
 use std::sync::LazyLock;
 use tokio::sync::{RwLock as AsyncRwLock, RwLockWriteGuard as AsyncRwLockWriteGuard};
 
-pub async fn process() {
+pub async fn process(standalone: bool) {
     db_initializer::init()
         .context("Failed to initialize database")
         .unwrap_or_else(|e| error!("db init error: {e:?}"));
 
-
-    // Clean up orphaned task locks from a previous crash
-    task_util::cleanup_orphan_task();
+    // Clean up orphaned task locks from a previous crash. Skipped for
+    // standalone (CLI/daemon) processes: the age heuristic cannot tell a
+    // long-running GUI task from a crashed one, and a one-shot CLI clearing
+    // the live GUI's task lock would break cross-process task mutual
+    // exclusion.
+    // 清理上次崩溃遗留的任务锁。standalone(CLI/daemon)进程跳过:该清理按
+    // 时长启发式判断,无法区分"GUI 仍在跑的长任务"与"崩溃残留";一次性
+    // CLI 误清活任务的锁会破坏跨进程的任务互斥。
+    if !standalone {
+        task_util::cleanup_orphan_task();
+    }
 
     // Initialize the client_id
     init_sync_string_setting(CONFIG_NAME_CLIENT_ID, &CLIENT_ID);
@@ -68,7 +75,9 @@ pub async fn process() {
                 .set(true)
                 .unwrap_or_else(|e| error!("{e}"));
         } else {
-            log::warn!("ONNX Runtime execution providers failed to initialize; falling back to CPU");
+            log::warn!(
+                "ONNX Runtime execution providers failed to initialize; falling back to CPU"
+            );
         }
     }
 
@@ -92,10 +101,7 @@ pub async fn process() {
         if let Ok(platform) = self_hosted_platform {
             *crate::write_lock!(ACTIVE_SELF_HOSTED_PLATFORM) = platform;
         } else {
-            error!(
-                "Cannot find self-hosted platform: {}",
-                config.value
-            );
+            error!("Cannot find self-hosted platform: {}", config.value);
         }
     } else {
         error!(
@@ -174,6 +180,10 @@ fn init_sync_string_setting(config_name: &str, lock: &std::sync::RwLock<String>)
         .and_then(|s| (!s.value.is_empty()).then(|| s.value))
     {
         *crate::write_lock!(lock) = setting;
-        info!("init string {} setting: {:?}", config_name, *crate::read_lock!(lock));
+        info!(
+            "init string {} setting: {:?}",
+            config_name,
+            *crate::read_lock!(lock)
+        );
     }
 }

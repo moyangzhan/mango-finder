@@ -35,11 +35,9 @@ pub mod option {
     {
         let opt: Option<String> = Option::deserialize(deserializer)?;
         match opt {
-            Some(s) => {
-                super::str_to_datetime(&s)
-                    .map(Some)
-                    .map_err(serde::de::Error::custom)
-            }
+            Some(s) => super::str_to_datetime(&s)
+                .map(Some)
+                .map_err(serde::de::Error::custom),
             None => Ok(None),
         }
     }
@@ -58,12 +56,10 @@ pub fn str_to_local_datetime(s: &str, fmt: &str) -> Result<DateTime<Local>, AppE
         return Ok(DateTime::default());
     }
     match NaiveDateTime::parse_from_str(s, fmt) {
-        Ok(naive) => {
-            match naive.and_local_timezone(Local).single() {
-                Some(dt) => Ok(dt),
-                None => Ok(DateTime::default()),
-            }
-        }
+        Ok(naive) => match naive.and_local_timezone(Local).single() {
+            Some(dt) => Ok(dt),
+            None => Ok(DateTime::default()),
+        },
         Err(_) => Ok(DateTime::default()),
     }
 }

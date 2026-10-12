@@ -1,10 +1,10 @@
-use crate::image_parser;
+use super::{BUCKET_SIZE, get_images_dir, image_filename};
 use crate::global::{
     ANYTOMD_EXTRA_EXTS, DOCX_EXTS, EXCEL_EXTS, MAX_DOCUMENT_LOAD_CHARS, PLAIN_TEXT_EXTS, PPTX_EXTS,
 };
+use crate::image_parser;
 use crate::ocr_service;
 use crate::traits::document_loader::DocumentLoader;
-use super::{get_images_dir, image_filename, BUCKET_SIZE};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -50,7 +50,13 @@ impl DocumentLoader for AnyToMdLoader {
         self.load_doc(path, &images_dir, 0, max_load_chars)
     }
 
-    fn load_max_with_id(&self, path: &Path, file_id: i64, _file_name: &str, max_load_chars: usize) -> io::Result<String> {
+    fn load_max_with_id(
+        &self,
+        path: &Path,
+        file_id: i64,
+        _file_name: &str,
+        max_load_chars: usize,
+    ) -> io::Result<String> {
         let images_dir = get_images_dir(file_id);
         self.load_doc(path, &images_dir, file_id, max_load_chars)
     }
@@ -64,7 +70,13 @@ impl DocumentLoader for AnyToMdLoader {
 }
 
 impl AnyToMdLoader {
-    fn load_doc(&self, path: &Path, images_dir: &Path, file_id: i64, max_load_chars: usize) -> io::Result<String> {
+    fn load_doc(
+        &self,
+        path: &Path,
+        images_dir: &Path,
+        file_id: i64,
+        max_load_chars: usize,
+    ) -> io::Result<String> {
         // Skip files over 100 MB — too large for in-memory conversion
         const MAX_FILE_SIZE: u64 = 100 * 1024 * 1024;
         if let Ok(meta) = fs::metadata(path) {

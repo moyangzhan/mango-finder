@@ -36,11 +36,7 @@ impl DocumentLoader for OdsLoader {
         Ok(text)
     }
 
-    fn load_file_max(
-        &self,
-        _file: &std::fs::File,
-        _max_load_chars: usize,
-    ) -> io::Result<String> {
+    fn load_file_max(&self, _file: &std::fs::File, _max_load_chars: usize) -> io::Result<String> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "load_file_max is not supported for ODS files, use load_max with Path instead",

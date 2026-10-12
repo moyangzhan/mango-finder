@@ -1,9 +1,12 @@
+use crate::document_loaders::cleanup_extracted_images;
 use crate::entities::{FileInfo, IndexingTask};
 use crate::enums::{CommandResultCode, DownloadEvent};
 use crate::fs_watcher::watcher;
-use crate::global::{FS_WATCHER_SETTING, CONTENT_STORAGE_CHANGING, INDEXING, INDEXING_FROM_WATCHER, SCANNING, STOP_INDEX_SIGNAL, STORAGE_PATH};
+use crate::global::{
+    CONTENT_STORAGE_CHANGING, FS_WATCHER_SETTING, INDEXING, INDEXING_FROM_WATCHER, SCANNING,
+    STOP_INDEX_SIGNAL, STORAGE_PATH,
+};
 use crate::indexer_service;
-use crate::document_loaders::cleanup_extracted_images;
 use crate::repositories::{
     file_content_embedding_repo, file_content_fts_repo, file_info_repo,
     file_metadata_embedding_repo, indexing_task_repo,
@@ -96,7 +99,10 @@ pub async fn count_files() -> Result<i64, String> {
 }
 
 #[command]
-pub async fn load_file_detail(file_id: i64, device_id: Option<String>) -> Result<Option<FileInfo>, String> {
+pub async fn load_file_detail(
+    file_id: i64,
+    device_id: Option<String>,
+) -> Result<Option<FileInfo>, String> {
     // If device_id is provided, fetch from remote device
     if let Some(did) = device_id {
         if !did.is_empty() {
@@ -134,7 +140,11 @@ pub async fn load_file_detail(file_id: i64, device_id: Option<String>) -> Result
                 Some(storage) => {
                     let md_path = std::path::Path::new(storage).join(relative_path);
                     f.content = std::fs::read_to_string(&md_path).unwrap_or_else(|e| {
-                        log::warn!("Failed to read parsed document {}: {}", md_path.display(), e);
+                        log::warn!(
+                            "Failed to read parsed document {}: {}",
+                            md_path.display(),
+                            e
+                        );
                         String::new()
                     });
                 }
@@ -183,10 +193,18 @@ pub async fn delete_index_items(file_ids: Vec<i64>) -> Result<(), String> {
             log::warn!("Failed to delete FTS for file {}: {}", file_id, e);
         }
         if let Err(e) = file_content_embedding_repo::delete_by_file_id(*file_id) {
-            log::warn!("Failed to delete content embedding for file {}: {}", file_id, e);
+            log::warn!(
+                "Failed to delete content embedding for file {}: {}",
+                file_id,
+                e
+            );
         }
         if let Err(e) = file_metadata_embedding_repo::delete_by_file_id(*file_id) {
-            log::warn!("Failed to delete metadata embedding for file {}: {}", file_id, e);
+            log::warn!(
+                "Failed to delete metadata embedding for file {}: {}",
+                file_id,
+                e
+            );
         }
         if let Ok(Some(file)) = file_info_repo::get_by_id(*file_id) {
             searcher::path_search_engine::remove_from_index(&file.path, true).await;
@@ -238,13 +256,10 @@ pub async fn load_chunks(ids: Vec<u32>, device_id: Option<String>) -> Result<Vec
                 .ok_or_else(|| format!("Device not found: {}", did))?;
 
             // Fetch chunks from remote device
-            let chunks = crate::cluster::http_client::fetch_chunks(
-                &ids,
-                &device.ip_address,
-                device.port,
-            )
-            .await
-            .map_err(|e| format!("Failed to fetch chunks from remote device: {}", e))?;
+            let chunks =
+                crate::cluster::http_client::fetch_chunks(&ids, &device.ip_address, device.port)
+                    .await
+                    .map_err(|e| format!("Failed to fetch chunks from remote device: {}", e))?;
 
             return Ok(chunks);
         }

@@ -1,14 +1,13 @@
 use crate::entities::FileMetaEmbedding;
 use crate::repositories::RepositoryError;
 use crate::structs::sparse_vector::SparseVector;
-use crate::utils::app_util::get_db_path;
 use crate::utils::vector_util;
-use rusqlite::{Connection, Result, Row, named_params};
+use rusqlite::{Result, Row, named_params};
 
 pub fn insert(
     file_metadata_embedding: &FileMetaEmbedding,
 ) -> Result<Option<FileMetaEmbedding>, RepositoryError> {
-    let mut conn = Connection::open(get_db_path())?;
+    let mut conn = crate::db_init_manager::open_db()?;
 
     let tx: rusqlite::Transaction<'_> = conn.transaction()?;
 
@@ -55,7 +54,7 @@ pub fn insert(
 }
 
 pub fn update(file_metadata_embedding: &FileMetaEmbedding) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt =
         conn.prepare("update file_metadata_vec set embedding=:embedding where id = :id")?;
     let embedding_bytes = unsafe {
@@ -86,7 +85,7 @@ pub fn hybrid_search(
         )
     };
 
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare( "select v.id, d.file_id, v.distance, d.sparse_weights from ( select id, distance from file_metadata_vec where embedding match :embedding order by distance limit 50 ) v join file_metadata_data d on v.id = d.id order by v.distance asc", )?;
     let rows = stmt.query_map(named_params! {":embedding": embedding_bytes}, |row| {
         let embedding_bytes: Vec<u8> = row.get("embedding").unwrap_or(vec![0; 256 * 4]); // Default to zero vector if embedding is not available
@@ -113,7 +112,13 @@ pub fn hybrid_search(
         .into_iter()
         .filter_map(|res| match res {
             Ok(fme) => {
-                log::debug!("meta search file_id: {}, distance: {}, sparse_score: {}, score: {}", fme.file_id, fme.distance, fme.sparse_score, fme.score);
+                log::debug!(
+                    "meta search file_id: {}, distance: {}, sparse_score: {}, score: {}",
+                    fme.file_id,
+                    fme.distance,
+                    fme.sparse_score,
+                    fme.score
+                );
                 if fme.sparse_score < 0.01 {
                     return None;
                 }
@@ -135,7 +140,7 @@ pub fn delete_by_file_id(file_id: i64) -> Result<usize, RepositoryError> {
     if file_id < 1 {
         return Ok(0);
     }
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("delete from file_metadata_vec where id in (select id from file_metadata_data where file_id = :file_id)")?;
     let _ = stmt.execute(named_params! {":file_id": file_id})?;
     let mut stmt = conn.prepare("delete from file_metadata_data where file_id = :file_id")?;
@@ -152,7 +157,7 @@ pub fn delete_by_file_prefix_path(pre_path: &str) -> Result<usize, RepositoryErr
     } else {
         format!("{}{}%", pre_path, std::path::MAIN_SEPARATOR)
     };
-    let mut conn = Connection::open(get_db_path())?;
+    let mut conn = crate::db_init_manager::open_db()?;
     let tx = conn.transaction()?;
     let affected = {
         let mut stmt_vec = tx.prepare( "delete from file_metadata_vec where id in ( 
@@ -172,7 +177,7 @@ pub fn delete_by_file_prefix_path(pre_path: &str) -> Result<usize, RepositoryErr
 }
 
 pub fn clear() -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("delete from file_metadata_vec")?;
     let affected = stmt.execute([])?;
     let mut stmt = conn.prepare("delete from file_metadata_data")?;

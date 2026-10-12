@@ -34,5 +34,3 @@ pub async fn find_similars_by_file_id(
         }
     }
 }
-
-

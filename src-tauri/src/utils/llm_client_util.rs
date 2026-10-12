@@ -41,7 +41,9 @@ pub fn create_client(
         }
         log::debug!(
             "Using proxy: {}://{}:{}",
-            proxy.protocol, proxy.host, proxy.port
+            proxy.protocol,
+            proxy.host,
+            proxy.port
         );
     }
 

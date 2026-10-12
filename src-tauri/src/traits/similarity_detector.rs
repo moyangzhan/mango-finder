@@ -7,5 +7,9 @@ use async_trait::async_trait;
 /// 检测相似文件的 Trait
 #[async_trait]
 pub trait SimilarityDetector: Send {
-    async fn find_similars(&self, file_info: &FileInfo, limit: usize) -> Result<Vec<SearchResult>, AppError>;
+    async fn find_similars(
+        &self,
+        file_info: &FileInfo,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>, AppError>;
 }

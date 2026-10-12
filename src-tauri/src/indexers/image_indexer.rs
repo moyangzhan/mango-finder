@@ -3,7 +3,6 @@ use crate::enums::{FileCategory, FileParserMode, ModelPlatformName, ModelType};
 use crate::errors::AppError;
 use crate::global::{ACTIVE_MODEL_PLATFORM, ACTIVE_SELF_HOSTED_PLATFORM, INDEXER_SETTING};
 use crate::image_parser;
-use crate::utils::app_util::get_vision_0_path;
 use crate::model_platform_services::dashscope::DashScope;
 use crate::model_platform_services::openai::OpenAi;
 use crate::model_platform_services::openai_compatible_service::OpenAiCompatibleService;
@@ -14,6 +13,7 @@ use crate::self_hosted_services::vllm::Vllm;
 use crate::traits::image_analyzer::ImageAnalyzer;
 use crate::traits::indexing_template::IndexingTemplate;
 use crate::traits::self_hosted_image_analyzer::SelfHostedImageAnalyzer;
+use crate::utils::app_util::get_vision_0_path;
 
 pub struct ImageIndexer {
     category: FileCategory,
@@ -39,7 +39,8 @@ impl ImageIndexer {
                 let model_path = get_vision_0_path();
                 if !std::path::Path::new(&model_path).exists() {
                     return Err(AppError::ImageParserInitError(format!(
-                        "BLIP vision model not found at: {}", model_path
+                        "BLIP vision model not found at: {}",
+                        model_path
                     )));
                 }
                 is_local_mode = true;
@@ -92,9 +93,9 @@ impl ImageIndexer {
                                     "Deepseek model platforms".to_string(),
                                 ));
                             }
-                            _ => {
-                                Box::new(OpenAiCompatibleService::new(&platform_name, &base_url).await)
-                            }
+                            _ => Box::new(
+                                OpenAiCompatibleService::new(&platform_name, &base_url).await,
+                            ),
                         };
                     remote_service_option = Some(platform_service);
                     remote_model_option = Some(ai_model);
@@ -102,9 +103,7 @@ impl ImageIndexer {
             }
         }
 
-        if is_local_mode
-            || remote_service_option.is_some()
-            || self_hosted_service_option.is_some()
+        if is_local_mode || remote_service_option.is_some() || self_hosted_service_option.is_some()
         {
             return Ok(Self {
                 category: FileCategory::Image,

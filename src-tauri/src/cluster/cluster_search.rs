@@ -97,8 +97,7 @@ pub async fn remote_device_search(
         let port = device.port;
 
         join_set.spawn(async move {
-            let result =
-                http_client::search(&query_remote, &search_type_remote, &ip, port).await;
+            let result = http_client::search(&query_remote, &search_type_remote, &ip, port).await;
             match result {
                 Ok(data) => (device_id, device_name, data.results, None),
                 Err(e) => (device_id, device_name, Vec::new(), Some(e)),

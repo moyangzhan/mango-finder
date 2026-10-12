@@ -5,7 +5,7 @@ use crate::global::APP_HANDLE;
 use crate::repositories::{device_repo, pairing_request_repo};
 use crate::structs::cluster_config::ClusterSetting;
 use rust_i18n::t;
-use tauri::{command, Emitter};
+use tauri::{Emitter, command};
 
 // ========== Device commands ==========
 
@@ -35,8 +35,13 @@ pub async fn reject_device(device_id: String) -> Result<(), String> {
     // Update device status to Rejected with remark (local user rejected remote device)
     // 更新设备状态为 Rejected 并附带说明（本机用户拒绝了对方）
     let remark = t!("pairing.remark.user-rejected-device").to_string();
-    device_repo::update_pairing_status_with_remark(device.id, PairingStatus::Rejected, &remark, true)
-        .map_err(|e| e.to_string())?;
+    device_repo::update_pairing_status_with_remark(
+        device.id,
+        PairingStatus::Rejected,
+        &remark,
+        true,
+    )
+    .map_err(|e| e.to_string())?;
 
     if let Ok(Some(request)) = pairing_request_repo::get_latest_by_device_id_any(&device_id) {
         log::info!("Rejecting pairing request {}", request.id);
@@ -61,7 +66,11 @@ pub async fn reject_device(device_id: String) -> Result<(), String> {
         )
         .await
         {
-            log::warn!("Failed to send rejection response to {}: {}", device_id_clone, e);
+            log::warn!(
+                "Failed to send rejection response to {}: {}",
+                device_id_clone,
+                e
+            );
         }
     });
 
@@ -101,8 +110,9 @@ pub async fn reset_pairing_status(device_id: String) -> Result<Device, String> {
 
     // Try to ping the device to check if it's reachable (for info update and pairing decision)
     // 尝试 ping 设备来检查是否可达（用于信息更新和配对决策）
-    let is_reachable =
-        crate::cluster::http_client::ping_and_update_device_info(&mut device).await.is_ok();
+    let is_reachable = crate::cluster::http_client::ping_and_update_device_info(&mut device)
+        .await
+        .is_ok();
 
     // Reset pairing status to None (manual operation)
     let remark = t!("pairing.remark.status-reset").to_string();
@@ -156,7 +166,12 @@ pub async fn reset_pairing_status(device_id: String) -> Result<Device, String> {
         }
     }
 
-    log::info!("Device {} status reset from {:?} to None, reachable={}", device_id, previous_status, is_reachable);
+    log::info!(
+        "Device {} status reset from {:?} to None, reachable={}",
+        device_id,
+        previous_status,
+        is_reachable
+    );
     Ok(device)
 }
 
@@ -282,9 +297,15 @@ pub async fn respond_pairing_request(id: i64, accept: bool) -> Result<(), String
 
     // Update request status with remark
     let (status, remark) = if accept {
-        (crate::enums::PairingRequestStatus::Accepted, t!("pairing.remark.user-accepted").to_string())
+        (
+            crate::enums::PairingRequestStatus::Accepted,
+            t!("pairing.remark.user-accepted").to_string(),
+        )
     } else {
-        (crate::enums::PairingRequestStatus::Rejected, t!("pairing.remark.user-rejected").to_string())
+        (
+            crate::enums::PairingRequestStatus::Rejected,
+            t!("pairing.remark.user-rejected").to_string(),
+        )
     };
     pairing_request_repo::update_status_with_remark(id, status, &remark)
         .map_err(|e| e.to_string())?;
@@ -420,7 +441,10 @@ pub fn toggle_test_mode(enabled: bool) -> Result<bool, String> {
         // Add mock devices if not exist
         // 如果不存在则添加模拟设备
         for (device_id, name, port, index_count) in MOCK_DEVICES {
-            if device_repo::get_by_device_id(device_id).unwrap_or(None).is_none() {
+            if device_repo::get_by_device_id(device_id)
+                .unwrap_or(None)
+                .is_none()
+            {
                 let device = Device {
                     id: 0,
                     device_id: device_id.to_string(),
@@ -442,7 +466,11 @@ pub fn toggle_test_mode(enabled: bool) -> Result<bool, String> {
 
                 match device_repo::insert(&device) {
                     Ok(inserted) => {
-                        log::info!("Added mock device: {} ({})", inserted.name, inserted.device_id);
+                        log::info!(
+                            "Added mock device: {} ({})",
+                            inserted.name,
+                            inserted.device_id
+                        );
                     }
                     Err(e) => {
                         log::warn!("Failed to add mock device {}: {}", device_id, e);

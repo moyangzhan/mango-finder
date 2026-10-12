@@ -1,19 +1,72 @@
+use crate::render;
+pub use crate::render::OutputKind;
 use serde_json::Value;
+use std::sync::OnceLock;
 
-pub fn print_success(data: &Value, format: &str) {
-    match format {
-        "table" => print_table(data),
-        _ => print_json(data),
+/// println! for a pipe-oriented CLI: write errors (e.g. a closed pipe after
+/// `mfd ... | head`) are ignored instead of panicking, so the process exits
+/// cleanly like standard Unix tools.
+/// 面向管道场景的 println!:写失败(如 `mfd ... | head` 提前关闭管道)时
+/// 忽略而非 panic,进程像标准 Unix 工具一样干净退出。
+#[macro_export]
+macro_rules! outln {
+    ($($arg:tt)*) => {{
+        use std::io::Write;
+        let mut out = std::io::stdout().lock();
+        let _ = writeln!(out, $($arg)*);
+    }};
+}
+
+/// eprintln! counterpart of outln!: write errors are ignored
+/// outln! 的 stderr 对应物:写失败同样忽略
+#[macro_export]
+macro_rules! outln_error {
+    ($($arg:tt)*) => {{
+        use std::io::Write;
+        let mut err = std::io::stderr().lock();
+        let _ = writeln!(err, $($arg)*);
+    }};
+}
+
+/// print_error callers do not carry the format argument; the format parsed by
+/// main is recorded here in a global.
+/// print_error 的调用方不携带格式参数，用全局变量记录 main 解析出的输出格式
+static OUTPUT_FORMAT: OnceLock<String> = OnceLock::new();
+
+/// Called from main after parsing CLI args; records this run's output format
+/// 在 main 解析 CLI 参数后调用，记录本次运行的输出格式
+pub fn init(format: &str) {
+    let _ = OUTPUT_FORMAT.set(format.to_string());
+}
+
+fn is_table_mode() -> bool {
+    OUTPUT_FORMAT.get().map(|f| f == "table").unwrap_or(false)
+}
+
+/// Print a success envelope; the output format comes from the global set by
+/// main, so handlers do not thread a format parameter (single source of truth).
+/// 输出成功信封;格式取自 main 设置的全局,handler 无需透传格式参数(单一来源)。
+pub fn print_success(kind: OutputKind, data: &Value) {
+    match is_table_mode() {
+        true => render::render(kind, data),
+        false => print_json(data),
     }
 }
 
 pub fn print_error(message: &str) {
-    let error_response = serde_json::json!({
-        "success": false,
-        "data": null,
-        "error": message
-    });
-    println!("{}", serde_json::to_string_pretty(&error_response).unwrap());
+    // table mode: single-line error to stderr so stdout keeps only table
+    // content; JSON mode keeps the envelope structure.
+    // table 模式错误单行输出到 stderr，stdout 只保留表格内容；JSON 模式保持信封结构
+    if is_table_mode() {
+        outln_error!("{}: {}", t!("cli.table.error"), message);
+    } else {
+        let error_response = serde_json::json!({
+            "success": false,
+            "data": null,
+            "error": message
+        });
+        outln!("{}", serde_json::to_string_pretty(&error_response).unwrap());
+    }
     std::process::exit(1);
 }
 
@@ -23,77 +76,5 @@ fn print_json(data: &Value) {
         "data": data,
         "error": null
     });
-    println!("{}", serde_json::to_string_pretty(&response).unwrap());
-}
-
-fn print_table(data: &Value) {
-    // 简单的表格输出，根据数据类型格式化
-    if let Some(obj) = data.as_object() {
-        for (key, value) in obj {
-            match value {
-                Value::Array(arr) => {
-                    println!("{}: {} items", key, arr.len());
-                    if !arr.is_empty() {
-                        // 如果数组元素是对象，打印表头
-                        if let Some(first_obj) = arr[0].as_object() {
-                            let headers: Vec<&str> = first_obj.keys().map(|s| s.as_str()).collect();
-                            println!("  {}", headers.join(" | "));
-                            println!("  {}", "-".repeat(headers.len() * 15));
-                        }
-                        for (i, item) in arr.iter().enumerate().take(10) {
-                            if let Some(obj) = item.as_object() {
-                                let values: Vec<String> = obj.values().map(|v| format_value(v)).collect();
-                                println!("  [{}] {}", i, values.join(" | "));
-                            } else {
-                                println!("  [{}] {}", i, format_value(item));
-                            }
-                        }
-                        if arr.len() > 10 {
-                            println!("  ... and {} more items", arr.len() - 10);
-                        }
-                    }
-                }
-                Value::Object(_) => {
-                    println!("{}:", key);
-                    print_nested_object(value, 1);
-                }
-                _ => {
-                    println!("{}: {}", key, format_value(value));
-                }
-            }
-        }
-    } else {
-        println!("{}", format_value(data));
-    }
-}
-
-fn print_nested_object(value: &Value, depth: usize) {
-    let indent = "  ".repeat(depth);
-    if let Some(obj) = value.as_object() {
-        for (key, val) in obj {
-            match val {
-                Value::Object(_) => {
-                    println!("{}{}:", indent, key);
-                    print_nested_object(val, depth + 1);
-                }
-                Value::Array(arr) => {
-                    println!("{}{}: {} items", indent, key, arr.len());
-                }
-                _ => {
-                    println!("{}{}: {}", indent, key, format_value(val));
-                }
-            }
-        }
-    }
-}
-
-fn format_value(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Null => "null".to_string(),
-        Value::Array(arr) => format!("[{} items]", arr.len()),
-        Value::Object(obj) => format!("{{{} fields}}", obj.len()),
-    }
+    outln!("{}", serde_json::to_string_pretty(&response).unwrap());
 }

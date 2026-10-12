@@ -1,14 +1,13 @@
 use crate::entities::FileInfo;
 use crate::repositories::RepositoryError;
-use crate::utils::app_util::get_db_path;
 use crate::utils::datetime_util;
 use chrono::{DateTime, Local};
-use rusqlite::{Connection, Result, Row, named_params};
+use rusqlite::{Result, Row, named_params};
 
 const ALL_COLUMNS: &str = "id, name, category, path, file_ext, file_size, content, content_ref_path, content_index_status, content_index_status_msg, meta_index_status, meta_index_status_msg, is_invalid, invalid_reason, md5, metadata, audio_type, image_hash, audio_fingerprint, file_create_time, file_update_time, create_time, update_time";
 
 pub fn insert(file_info: &FileInfo) -> Result<Option<FileInfo>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "insert into file_info(name,category,path,file_ext,file_size,content,content_ref_path,metadata,md5,is_invalid,invalid_reason,file_create_time,file_update_time) values (:name,:category,:path,:file_ext,:file_size,:content,:content_ref_path,:metadata,:md5,:is_invalid,:invalid_reason,:file_create_time,:file_update_time)"
     )?;
@@ -39,7 +38,7 @@ pub fn insert(file_info: &FileInfo) -> Result<Option<FileInfo>, RepositoryError>
 }
 
 pub fn update(file_info: &FileInfo) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "update file_info set name =:name,path=:path,file_ext=:file_ext,file_size=:file_size,content=:content,content_ref_path=:content_ref_path,md5=:md5,is_invalid=:is_invalid,invalid_reason=:invalid_reason,metadata=:metadata,file_update_time=:file_update_time where id = :id",
     )?;
@@ -67,7 +66,7 @@ pub fn update_content_meta(
     content_ref_path: Option<&str>,
     meta: &str,
 ) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt =
         conn.prepare("update file_info set content = :content, content_ref_path = :content_ref_path, metadata = :meta where id = :id")?;
     let affected = stmt.execute(named_params! {
@@ -84,7 +83,7 @@ pub fn update_content_only(
     content: &str,
     content_ref_path: Option<&str>,
 ) -> Result<(), RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     conn.execute(
         "update file_info set content = :content, content_ref_path = :content_ref_path where id = :id",
         named_params! { ":id": &file_id, ":content": &content, ":content_ref_path": &content_ref_path },
@@ -92,9 +91,22 @@ pub fn update_content_only(
     Ok(())
 }
 
+/// Count all indexed files (content_index_status = Indexed) in one query;
+/// category-agnostic total matching the GUI's "indexed files" metric.
+/// 单条查询统计全部已索引文件(content_index_status = Indexed),
+/// 与 GUI 的 indexed_files 口径一致。
+pub fn count_indexed() -> Result<i64, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
+    let count: i64 = conn.query_row(
+        "select count(*) from file_info where content_index_status = 3",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
 
 pub fn count_indexed_by_category(category: i64) -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let count = conn.query_row(
         "select count(*) from file_info where content_index_status = 3 and category = :category",
         named_params! { ":category": category },
@@ -108,7 +120,7 @@ pub fn update_invalid(
     is_invalid: bool,
     invalid_reason: &str,
 ) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("update file_info set is_invalid = :is_invalid,invalid_reason = :invalid_reason where id = :id")?;
     let affected = stmt.execute(named_params! {
         ":id": &file_id,
@@ -123,7 +135,7 @@ pub fn update_content_index_status(
     index_status: i64,
     index_status_reason: &str,
 ) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("update file_info set content_index_status = :index_status, content_index_status_msg = :index_status_msg where id = :id")?;
     let affected = stmt.execute(named_params! {
         ":id": &file_id,
@@ -138,7 +150,7 @@ pub fn update_meta_index_status(
     index_status: i64,
     index_status_reason: &str,
 ) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("update file_info set meta_index_status = :index_status, meta_index_status_msg = :index_status_msg where id = :id")?;
     let affected = stmt.execute(named_params! {
         ":id": &file_id,
@@ -149,7 +161,7 @@ pub fn update_meta_index_status(
 }
 
 pub fn list(page: i64, size: i64) -> Result<Vec<FileInfo>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt =
         conn.prepare("select * from file_info order by id desc limit :size offset :offset")?;
     let rows = stmt.query_map(
@@ -176,7 +188,7 @@ pub fn list_in_columns(
             "select_columns is empty".to_string(),
         ));
     }
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         format!(
             "select {} from file_info limit :size offset :offset",
@@ -199,14 +211,14 @@ pub fn list_in_columns(
 }
 
 pub fn count() -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select count(*) from file_info")?;
     let count = stmt.query_row([], |row| row.get(0))?;
     Ok(count)
 }
 
 pub fn list_paths(page: i64, size: i64, asc: bool) -> Result<Vec<String>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let order_direction = if asc { "asc" } else { "desc" };
     let sql = format!(
         "select path from file_info order by id {} limit :size offset :offset",
@@ -232,7 +244,7 @@ pub fn list_unindexed_files(
     limit: i64,
     category: i64,
 ) -> Result<Vec<FileInfo>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let sql = format!(
         "select {} from file_info where id > :min_id and content_index_status = 1 and category = :category order by id asc limit :limit",
         ALL_COLUMNS
@@ -255,14 +267,14 @@ pub fn list_unindexed_files(
 }
 
 pub fn count_unindexed() -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select count(*) from file_info where content_index_status = 1")?;
     let count = stmt.query_row([], |row| row.get(0))?;
     Ok(count)
 }
 
 pub fn count_unindexed_files(category: i64) -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "select count(*) from file_info where content_index_status = 1 and category = :category",
     )?;
@@ -275,14 +287,16 @@ pub fn list_by_ids(ids: &Vec<i64>) -> Result<Vec<FileInfo>, RepositoryError> {
         return Ok(Vec::new());
     }
 
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
 
     // Process in batches of 500 to avoid oversized SQL statements
     let batch_size = 500;
     let mut result = Vec::new();
 
     for chunk in ids.chunks(batch_size) {
-        let placeholders: Vec<String> = chunk.iter().enumerate()
+        let placeholders: Vec<String> = chunk
+            .iter()
+            .enumerate()
             .map(|(i, _)| format!(":id{}", i))
             .collect();
         let sql = format!(
@@ -291,13 +305,13 @@ pub fn list_by_ids(ids: &Vec<i64>) -> Result<Vec<FileInfo>, RepositoryError> {
             placeholders.join(",")
         );
         let mut stmt = conn.prepare(&sql)?;
-        let params: Vec<(String, i64)> = chunk.iter().enumerate()
+        let params: Vec<(String, i64)> = chunk
+            .iter()
+            .enumerate()
             .map(|(i, id)| (format!(":id{}", i), *id))
             .collect();
         let param_refs: Vec<(&str, &i64)> = params.iter().map(|(k, v)| (k.as_str(), v)).collect();
-        let rows = stmt.query_map(&param_refs[..], |row| {
-            Ok(build_file_info(row)?)
-        })?;
+        let rows = stmt.query_map(&param_refs[..], |row| Ok(build_file_info(row)?))?;
         for item in rows {
             result.push(item?);
         }
@@ -313,7 +327,7 @@ pub fn list_by_min_update_time(
     size: i64,
 ) -> Result<Vec<FileInfo>, RepositoryError> {
     let update_time = datetime_util::datetime_to_str(min_update_time);
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         format!(
             "select {} from file_info where update_time > :min_update_time order by id desc limit :size offset :offset",
@@ -336,7 +350,7 @@ pub fn list_paths_by_min_update_time(
 ) -> Result<Vec<String>, RepositoryError> {
     let update_time = datetime_util::datetime_to_str(min_update_time);
     log::debug!("update_time: {}", update_time);
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "select path from file_info where update_time > :min_update_time order by id desc limit :size offset :offset",
     )?;
@@ -350,7 +364,7 @@ pub fn list_paths_by_min_update_time(
 
 pub fn count_by_min_update_time(min_update_time: &DateTime<Local>) -> Result<i64, RepositoryError> {
     let update_time = datetime_util::datetime_to_str(min_update_time);
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt =
         conn.prepare("select count(*) from file_info where update_time > :min_update_time")?;
     let count = stmt.query_row(named_params! {":min_update_time": update_time}, |row| {
@@ -361,13 +375,10 @@ pub fn count_by_min_update_time(min_update_time: &DateTime<Local>) -> Result<i64
 
 /// Get all file IDs by a single category (for similarity search filtering)
 pub fn list_ids_by_category(category: i64) -> Result<Vec<i64>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let mut stmt = conn.prepare(
-        "select id from file_info where category = :category and is_invalid = 0"
-    )?;
-    let rows = stmt.query_map(named_params! {":category": category}, |row| {
-        row.get(0)
-    })?;
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt =
+        conn.prepare("select id from file_info where category = :category and is_invalid = 0")?;
+    let rows = stmt.query_map(named_params! {":category": category}, |row| row.get(0))?;
     let mut result = Vec::new();
     for item in rows {
         result.push(item?);
@@ -381,7 +392,7 @@ pub fn list_ids_by_category_and_audio_type(
     category: i64,
     audio_type: i32,
 ) -> Result<Vec<i64>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "select id from file_info where category = :category and audio_type = :audio_type and is_invalid = 0"
     )?;
@@ -402,9 +413,8 @@ pub fn list_ids_by_category_and_audio_type(
 /// Update audio_type for a file
 /// 更新文件的音频类型
 pub fn update_audio_type(file_id: i64, audio_type: i32) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let mut stmt =
-        conn.prepare("update file_info set audio_type = :audio_type where id = :id")?;
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt = conn.prepare("update file_info set audio_type = :audio_type where id = :id")?;
     let affected = stmt.execute(named_params! {
         ":id": &file_id,
         ":audio_type": &audio_type,
@@ -415,9 +425,8 @@ pub fn update_audio_type(file_id: i64, audio_type: i32) -> Result<usize, Reposit
 /// Update image_hash for a file (for image similarity search)
 /// 更新文件的图像哈希（用于图像相似性搜索）
 pub fn update_image_hash(file_id: i64, image_hash: &[u8]) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let mut stmt =
-        conn.prepare("update file_info set image_hash = :image_hash where id = :id")?;
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt = conn.prepare("update file_info set image_hash = :image_hash where id = :id")?;
     let affected = stmt.execute(named_params! {
         ":id": &file_id,
         ":image_hash": image_hash,
@@ -427,8 +436,11 @@ pub fn update_image_hash(file_id: i64, image_hash: &[u8]) -> Result<usize, Repos
 
 /// Update audio_fingerprint for a file (for music similarity search)
 /// 更新文件的音频指纹（用于音乐相似性搜索）
-pub fn update_audio_fingerprint(file_id: i64, audio_fingerprint: &[u8]) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+pub fn update_audio_fingerprint(
+    file_id: i64,
+    audio_fingerprint: &[u8],
+) -> Result<usize, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt =
         conn.prepare("update file_info set audio_fingerprint = :audio_fingerprint where id = :id")?;
     let affected = stmt.execute(named_params! {
@@ -440,7 +452,7 @@ pub fn update_audio_fingerprint(file_id: i64, audio_fingerprint: &[u8]) -> Resul
 
 /// Get all files by a single category (for similarity search)
 pub fn list_by_category(category: i64) -> Result<Vec<FileInfo>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let sql = format!(
         "select {} from file_info where category = :category and is_invalid = 0",
         ALL_COLUMNS
@@ -458,7 +470,7 @@ pub fn list_by_category(category: i64) -> Result<Vec<FileInfo>, RepositoryError>
 
 /// Count files by category (for migration progress)
 pub fn count_by_category(category: i64) -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let count = conn.query_row(
         "select count(*) from file_info where category = :category and is_invalid = 0",
         named_params! { ":category": category },
@@ -473,7 +485,7 @@ pub fn list_by_category_paged(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<FileInfo>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let sql = format!(
         "select {} from file_info where category = :category and is_invalid = 0 order by id asc limit :limit offset :offset",
         ALL_COLUMNS
@@ -504,7 +516,7 @@ pub fn list_by_categories(categories: &[i64]) -> Result<Vec<FileInfo>, Repositor
         .map(|c| c.to_string())
         .collect::<Vec<_>>()
         .join(",");
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let sql = format!(
         "select {} from file_info where category in ({}) and is_invalid = 0",
         ALL_COLUMNS, categories_str
@@ -519,7 +531,7 @@ pub fn list_by_categories(categories: &[i64]) -> Result<Vec<FileInfo>, Repositor
 }
 
 pub fn get_by_id(file_id: i64) -> Result<Option<FileInfo>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select * from file_info where id = ?1")?;
     match stmt.query_row([file_id], |row: &Row<'_>| Ok(build_file_info(row)?)) {
         Ok(hit) => return Ok(Some(hit)),
@@ -532,7 +544,7 @@ pub fn get_by_id(file_id: i64) -> Result<Option<FileInfo>, RepositoryError> {
 }
 
 pub fn get_by_md5(md5: &str) -> Result<Option<FileInfo>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select * from file_info where md5 = ?1 limit 1")?;
     match stmt.query_row([md5], |row: &Row<'_>| Ok(build_file_info(row)?)) {
         Ok(hit) => return Ok(Some(hit)),
@@ -545,7 +557,7 @@ pub fn get_by_md5(md5: &str) -> Result<Option<FileInfo>, RepositoryError> {
 }
 
 pub fn get_by_path(path: &str) -> Result<Option<FileInfo>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select * from file_info where path = ?1 limit 1")?;
     match stmt.query_row([path], |row: &Row<'_>| Ok(build_file_info(row)?)) {
         Ok(hit) => return Ok(Some(hit)),
@@ -556,7 +568,7 @@ pub fn get_by_path(path: &str) -> Result<Option<FileInfo>, RepositoryError> {
 }
 
 pub fn list_by_name(name: &str) -> Result<Vec<FileInfo>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select * from file_info where name = ?1 order by id asc")?;
     let rows = stmt.query_map([name], |row| Ok(build_file_info(row)?))?;
     let mut result = Vec::new();
@@ -569,9 +581,10 @@ pub fn list_by_name(name: &str) -> Result<Vec<FileInfo>, RepositoryError> {
 /// List id + image_hash of all image files with a stored hash
 /// 列出所有已存储感知哈希的图片文件（供外部文件纯视觉比对使用）
 pub fn list_image_hashes() -> Result<Vec<(i64, Option<Vec<u8>>)>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let mut stmt =
-        conn.prepare("select id, image_hash from file_info where category = 2 and image_hash is not null")?;
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt = conn.prepare(
+        "select id, image_hash from file_info where category = 2 and image_hash is not null",
+    )?;
     let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
     let mut result = Vec::new();
     for item in rows {
@@ -581,7 +594,7 @@ pub fn list_image_hashes() -> Result<Vec<(i64, Option<Vec<u8>>)>, RepositoryErro
 }
 
 pub fn delete_by_id(file_id: i64) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("delete from file_info where id = ?1")?;
     let affected = stmt.execute([file_id])?;
     log::debug!("delete file_info by id affected: {:?}", affected);
@@ -589,7 +602,7 @@ pub fn delete_by_id(file_id: i64) -> Result<usize, RepositoryError> {
 }
 
 pub fn delete_by_path(path: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("delete from file_info where path = ?1")?;
     let affected = stmt.execute([path])?;
     log::debug!("delete file_info by path affected: {:?}", affected);
@@ -597,7 +610,7 @@ pub fn delete_by_path(path: &str) -> Result<usize, RepositoryError> {
 }
 
 pub fn clear() -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("delete from file_info")?;
     let affected = stmt.execute([])?;
     Ok(affected)
@@ -612,7 +625,7 @@ pub fn delete_by_prefix_path(pre_path: &str) -> Result<usize, RepositoryError> {
     } else {
         format!("{}{}%", pre_path, std::path::MAIN_SEPARATOR)
     };
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let affected = conn.execute(
         "DELETE FROM file_info WHERE path = ?1 OR path LIKE ?2",
         (pre_path, pattern),
@@ -630,7 +643,7 @@ pub fn count_by_prefix_path(pre_path: &str) -> Result<i64, RepositoryError> {
     } else {
         format!("{}{}%", pre_path, std::path::MAIN_SEPARATOR)
     };
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select count(*) from file_info where path LIKE ?1")?;
     let count = stmt.query_row([pattern], |row| row.get(0))?;
     Ok(count)
@@ -645,10 +658,8 @@ pub fn list_paths_by_prefix_path(pre_path: &str) -> Result<Vec<String>, Reposito
     } else {
         format!("{}{}%", pre_path, std::path::MAIN_SEPARATOR)
     };
-    let conn = Connection::open(get_db_path())?;
-    let mut stmt = conn.prepare(
-        "SELECT path FROM file_info WHERE path = ?1 OR path LIKE ?2",
-    )?;
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt = conn.prepare("SELECT path FROM file_info WHERE path = ?1 OR path LIKE ?2")?;
     let paths = stmt
         .query_map((pre_path, pattern), |row| row.get(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -664,7 +675,7 @@ pub fn replace_directory_prefix_path(
     } else {
         format!("{}{}%", old_pre_path, std::path::MAIN_SEPARATOR)
     };
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let affected = conn.execute(
         "UPDATE file_info SET path = REPLACE(path, ?1, ?2) WHERE path LIKE ?3",
         (old_pre_path, new_pre_path, pattern),
@@ -674,7 +685,7 @@ pub fn replace_directory_prefix_path(
 }
 
 pub fn rename(old_path: &str, new_path: &str, new_name: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let affected = conn.execute(
         "UPDATE file_info SET path = ?1, name = ?2 WHERE path = ?3",
         (new_path, new_name, old_path),

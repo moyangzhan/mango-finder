@@ -1,12 +1,12 @@
+pub mod cluster_config;
 pub mod command_result;
+pub mod embed_result;
 pub mod embedding_progress;
 pub mod file_metadata;
 pub mod fs_watcher_setting;
 pub mod image_similarity_candidate;
 pub mod indexer_setting;
 pub mod indexing_summary;
-pub mod cluster_config;
 pub mod proxy_setting;
 pub mod search_result;
 pub mod sparse_vector;
-pub mod embed_result;

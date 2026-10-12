@@ -6,10 +6,12 @@ use crate::global::{
     CONFIG_NAME_ACTIVE_SELF_HOSTED_PLATFORM, CONFIG_NAME_INDEXER_SETTING, CONFIG_NAME_PROXY,
 };
 use crate::indexer_service;
-use crate::repositories::{ai_model_repo, config_repo, file_info_repo, model_platform_repo, self_hosted_platform_repo};
+use crate::repositories::{
+    ai_model_repo, config_repo, file_info_repo, model_platform_repo, self_hosted_platform_repo,
+};
 use crate::structs::proxy_setting::ProxyInfo;
 use crate::utils::app_util;
-use tauri::{command, AppHandle};
+use tauri::{AppHandle, command};
 
 // ========== Locale commands ==========
 
@@ -83,7 +85,10 @@ pub async fn update_model_platform(platform: ModelPlatform) -> Result<usize, App
                 *guard = one;
             }
             Err(e) => {
-                log::error!("Failed to acquire write lock for ACTIVE_MODEL_PLATFORM: {}", e);
+                log::error!(
+                    "Failed to acquire write lock for ACTIVE_MODEL_PLATFORM: {}",
+                    e
+                );
             }
         }
     }
@@ -102,19 +107,17 @@ pub async fn check_self_hosted_platform(platform: SelfHostedPlatform) -> Result<
     // 1. Check platform availability
     let base_url = format!("http://{}:{}", platform.host, platform.port);
     let client = reqwest::Client::new();
-    let resp = client.get(&base_url).send().await.map_err(|_| {
-        format!(
-            "Unable to connect to {}:{}",
-            platform.host, platform.port
-        )
-    })?;
+    let resp = client
+        .get(&base_url)
+        .send()
+        .await
+        .map_err(|_| format!("Unable to connect to {}:{}", platform.host, platform.port))?;
     if !resp.status().is_success() {
         return Err(format!("Platform returned HTTP {}", resp.status()));
     }
 
     // 2. Check if configured models are available
-    let openai_client = create_client_for_self_hosted(&platform)
-        .map_err(|e| e.to_string())?;
+    let openai_client = create_client_for_self_hosted(&platform).map_err(|e| e.to_string())?;
     let models = openai_client
         .models()
         .list()
@@ -205,7 +208,10 @@ pub async fn update_self_hosted_platform(platform: SelfHostedPlatform) -> Result
                 *guard = one;
             }
             Err(e) => {
-                log::error!("Failed to acquire write lock for ACTIVE_SELF_HOSTED_PLATFORM: {}", e);
+                log::error!(
+                    "Failed to acquire write lock for ACTIVE_SELF_HOSTED_PLATFORM: {}",
+                    e
+                );
             }
         }
     }
@@ -317,7 +323,8 @@ pub async fn count_indexed_files(category: &str) -> Result<i64, String> {
         "audio" => 3,
         _ => return Err(format!("Unknown category: {}", category)),
     };
-    file_info_repo::count_indexed_by_category(cat).map_err(|e: crate::repositories::RepositoryError| e.to_string())
+    file_info_repo::count_indexed_by_category(cat)
+        .map_err(|e: crate::repositories::RepositoryError| e.to_string())
 }
 
 // ========== Config commands ==========

@@ -1,16 +1,14 @@
+use crate::document_loaders::cleanup_extracted_images;
 use crate::embedding_service::EmbeddingService;
 use crate::entities::IndexingTask;
 use crate::enums::{ContentStorageChangeEvent, FileCategory, IndexingEvent};
-use chrono::Utc;
 use crate::errors::AppError;
 use crate::global::{
-    CONFIG_NAME_INDEXER_SETTING, CONTENT_STORAGE_CHANGING,
-    FS_WATCHER_SETTING, IGNORE_HIDDEN_DIRS, INDEXER_SETTING,
-    INDEXING, SCANNING, SCANNING_TOTAL, STOP_INDEX_SIGNAL, STORAGE_PATH,
+    CONFIG_NAME_INDEXER_SETTING, CONTENT_STORAGE_CHANGING, FS_WATCHER_SETTING, IGNORE_HIDDEN_DIRS,
+    INDEXER_SETTING, INDEXING, SCANNING, SCANNING_TOTAL, STOP_INDEX_SIGNAL, STORAGE_PATH,
 };
 use crate::indexers;
 use crate::initializer;
-use crate::document_loaders::cleanup_extracted_images;
 use crate::repositories::{
     config_repo, file_content_embedding_repo, file_content_fts_repo, file_info_repo,
     file_metadata_embedding_repo, indexing_task_repo,
@@ -19,6 +17,7 @@ use crate::scanner;
 use crate::structs::indexer_setting::IndexerSetting;
 use crate::traits::indexing_template::IndexingTemplate;
 use crate::utils::{frontend_util, indexing_task_util, task_util};
+use chrono::Utc;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -83,7 +82,10 @@ pub async fn start_content_storage_change(category: &str, new_mode: &str) -> Res
 
     let old_mode = {
         let setting = INDEXER_SETTING.read().await;
-        setting.content_storage.get_for_category(&category_enum).to_string()
+        setting
+            .content_storage
+            .get_for_category(&category_enum)
+            .to_string()
     };
 
     if old_mode == new_mode {
@@ -95,7 +97,9 @@ pub async fn start_content_storage_change(category: &str, new_mode: &str) -> Res
     // If the change fails later, revert_and_persist will restore the old value.
     {
         let mut setting = INDEXER_SETTING.write().await;
-        setting.content_storage.set_for_category(category, new_mode.to_string());
+        setting
+            .content_storage
+            .set_for_category(category, new_mode.to_string());
     }
     persist_indexer_setting().await;
 
@@ -125,7 +129,14 @@ pub async fn start_content_storage_change(category: &str, new_mode: &str) -> Res
                 },
             );
 
-            let inner = change_content_storage_inner(&category_str, &category_enum, &old_mode, &new_mode, total).await;
+            let inner = change_content_storage_inner(
+                &category_str,
+                &category_enum,
+                &old_mode,
+                &new_mode,
+                total,
+            )
+            .await;
             match inner {
                 Ok((changed, failed)) => {
                     frontend_util::send_event(
@@ -172,7 +183,9 @@ pub async fn start_content_storage_change(category: &str, new_mode: &str) -> Res
 
 async fn revert_and_persist(category_str: &str, old_mode: &str) {
     let mut setting = INDEXER_SETTING.write().await;
-    setting.content_storage.set_for_category(category_str, old_mode.to_string());
+    setting
+        .content_storage
+        .set_for_category(category_str, old_mode.to_string());
     drop(setting);
     persist_indexer_setting().await;
 }
@@ -193,7 +206,8 @@ async fn change_content_storage_inner(
     new_mode: &str,
     total: i64,
 ) -> Result<(i64, i64), String> {
-    let storage_path = STORAGE_PATH.get()
+    let storage_path = STORAGE_PATH
+        .get()
         .cloned()
         .ok_or_else(|| "Storage path not initialized".to_string())?;
     if storage_path.is_empty() {
@@ -206,9 +220,8 @@ async fn change_content_storage_inner(
     let mut last_progress = 0i64;
 
     while offset < total {
-        let files = file_info_repo::list_by_category_paged(
-            category.value(), batch_size, offset,
-        ).map_err(|e| e.to_string())?;
+        let files = file_info_repo::list_by_category_paged(category.value(), batch_size, offset)
+            .map_err(|e| e.to_string())?;
 
         if files.is_empty() {
             break;
@@ -228,7 +241,9 @@ async fn change_content_storage_inner(
                 return Err("Storage change cancelled".to_string());
             }
 
-            match change_content_storage_one(file, old_mode, new_mode, &storage_path, category, 0).await {
+            match change_content_storage_one(file, old_mode, new_mode, &storage_path, category, 0)
+                .await
+            {
                 Ok(true) => changed += 1,
                 Ok(false) => {} // no change needed
                 Err(e) => {
@@ -257,7 +272,11 @@ async fn change_content_storage_inner(
 
     log::info!(
         "Content storage change complete: category={}, {}→{}, changed={}, failed={}",
-        category_str, old_mode, new_mode, changed, failed
+        category_str,
+        old_mode,
+        new_mode,
+        changed,
+        failed
     );
     Ok((changed, failed))
 }
@@ -273,117 +292,141 @@ fn change_content_storage_one<'a>(
     depth: u32,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, String>> + Send + 'a>> {
     Box::pin(async move {
-    let is_file_mode = file.content_ref_path.is_some();
+        let is_file_mode = file.content_ref_path.is_some();
 
-    match (old_mode, new_mode) {
-        // database → file: DB has content, write to .md
-        ("database", "file") => {
-            if is_file_mode || file.content.is_empty() {
-                return Ok(false); // already in file mode or no content
+        match (old_mode, new_mode) {
+            // database → file: DB has content, write to .md
+            ("database", "file") => {
+                if is_file_mode || file.content.is_empty() {
+                    return Ok(false); // already in file mode or no content
+                }
+                // Skip overly large content to avoid memory spike
+                const MAX_MIGRATE_CONTENT_SIZE: usize = 50 * 1024 * 1024; // 50 MB
+                if file.content.len() > MAX_MIGRATE_CONTENT_SIZE {
+                    log::warn!(
+                        "Skipping migration for file {}: content too large ({} bytes)",
+                        file.id,
+                        file.content.len()
+                    );
+                    return Ok(false);
+                }
+                let relative_path = crate::document_loaders::md_relative_path(file.id, &file.name);
+                let md_path = std::path::Path::new(storage_path).join(&relative_path);
+                if let Some(parent) = md_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                std::fs::write(&md_path, &file.content)
+                    .map_err(|e| format!("write {}: {}", md_path.display(), e))?;
+                file_info_repo::update_content_only(file.id, "", Some(&relative_path))
+                    .map_err(|e| e.to_string())?;
+                Ok(true)
             }
-            // Skip overly large content to avoid memory spike
-            const MAX_MIGRATE_CONTENT_SIZE: usize = 50 * 1024 * 1024; // 50 MB
-            if file.content.len() > MAX_MIGRATE_CONTENT_SIZE {
-                log::warn!("Skipping migration for file {}: content too large ({} bytes)", file.id, file.content.len());
-                return Ok(false);
-            }
-            let relative_path = crate::document_loaders::md_relative_path(file.id, &file.name);
-            let md_path = std::path::Path::new(storage_path).join(&relative_path);
-            if let Some(parent) = md_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            std::fs::write(&md_path, &file.content)
-                .map_err(|e| format!("write {}: {}", md_path.display(), e))?;
-            file_info_repo::update_content_only(file.id, "", Some(&relative_path))
-                .map_err(|e| e.to_string())?;
-            Ok(true)
-        }
 
-        // database → none: clear content (document only)
-        ("database", "none") => {
-            if file.content.is_empty() || is_file_mode {
-                return Ok(false);
+            // database → none: clear content (document only)
+            ("database", "none") => {
+                if file.content.is_empty() || is_file_mode {
+                    return Ok(false);
+                }
+                file_info_repo::update_content_only(file.id, "", None)
+                    .map_err(|e| e.to_string())?;
+                Ok(true)
             }
-            file_info_repo::update_content_only(file.id, "", None)
-                .map_err(|e| e.to_string())?;
-            Ok(true)
-        }
 
-        // file → database: read .md → write to DB → delete .md
-        ("file", "database") => {
-            if !is_file_mode {
-                return Ok(false); // not in file mode
-            }
-            let relative_path = file.content_ref_path.as_deref()
-                .ok_or_else(|| format!("Missing content_ref_path for file {}", file.id))?;
-            let md_path = std::path::Path::new(storage_path).join(relative_path);
-            let content = std::fs::read_to_string(&md_path)
-                .map_err(|e| format!("read {}: {}", md_path.display(), e))?;
-            // Write to DB first, then delete file to avoid data loss on crash
-            file_info_repo::update_content_only(file.id, &content, None)
-                .map_err(|e| e.to_string())?;
-            if let Err(e) = std::fs::remove_file(&md_path) {
-                log::warn!("Failed to delete .md file after storage change {}: {}", relative_path, e);
-            }
-            Ok(true)
-        }
-
-        // file → none: delete .md + clear DB (document only)
-        ("file", "none") => {
-            if let Some(ref relative_path) = file.content_ref_path {
+            // file → database: read .md → write to DB → delete .md
+            ("file", "database") => {
+                if !is_file_mode {
+                    return Ok(false); // not in file mode
+                }
+                let relative_path = file
+                    .content_ref_path
+                    .as_deref()
+                    .ok_or_else(|| format!("Missing content_ref_path for file {}", file.id))?;
                 let md_path = std::path::Path::new(storage_path).join(relative_path);
-                let _ = std::fs::remove_file(&md_path);
+                let content = std::fs::read_to_string(&md_path)
+                    .map_err(|e| format!("read {}: {}", md_path.display(), e))?;
+                // Write to DB first, then delete file to avoid data loss on crash
+                file_info_repo::update_content_only(file.id, &content, None)
+                    .map_err(|e| e.to_string())?;
+                if let Err(e) = std::fs::remove_file(&md_path) {
+                    log::warn!(
+                        "Failed to delete .md file after storage change {}: {}",
+                        relative_path,
+                        e
+                    );
+                }
+                Ok(true)
             }
-            file_info_repo::update_content_only(file.id, "", None)
-                .map_err(|e| e.to_string())?;
-            Ok(true)
-        }
 
-        // none → database: re-parse file → save to DB
-        ("none", "database") => {
-            let content = reparse_file(file, category).await?;
-            if content.is_empty() {
-                return Ok(false);
+            // file → none: delete .md + clear DB (document only)
+            ("file", "none") => {
+                if let Some(ref relative_path) = file.content_ref_path {
+                    let md_path = std::path::Path::new(storage_path).join(relative_path);
+                    let _ = std::fs::remove_file(&md_path);
+                }
+                file_info_repo::update_content_only(file.id, "", None)
+                    .map_err(|e| e.to_string())?;
+                Ok(true)
             }
-            file_info_repo::update_content_only(file.id, &content, None)
-                .map_err(|e| e.to_string())?;
-            Ok(true)
-        }
 
-        // none → file: re-parse file → write .md → save relative path
-        ("none", "file") => {
-            let content = reparse_file(file, category).await?;
-            if content.is_empty() {
-                return Ok(false);
+            // none → database: re-parse file → save to DB
+            ("none", "database") => {
+                let content = reparse_file(file, category).await?;
+                if content.is_empty() {
+                    return Ok(false);
+                }
+                file_info_repo::update_content_only(file.id, &content, None)
+                    .map_err(|e| e.to_string())?;
+                Ok(true)
             }
-            let relative_path = crate::document_loaders::md_relative_path(file.id, &file.name);
-            let md_path = std::path::Path::new(storage_path).join(&relative_path);
-            if let Some(parent) = md_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            std::fs::write(&md_path, &content)
-                .map_err(|e| format!("write {}: {}", md_path.display(), e))?;
-            file_info_repo::update_content_only(file.id, "", Some(&relative_path))
-                .map_err(|e| e.to_string())?;
-            Ok(true)
-        }
 
-        // Fallback: detect actual state from content field and change accordingly
-        _ => {
-            if depth >= 1 {
-                return Err(format!(
-                    "Storage change recursion limit reached for file {} (old={}, new={})",
-                    file.id, old_mode, new_mode
-                ));
+            // none → file: re-parse file → write .md → save relative path
+            ("none", "file") => {
+                let content = reparse_file(file, category).await?;
+                if content.is_empty() {
+                    return Ok(false);
+                }
+                let relative_path = crate::document_loaders::md_relative_path(file.id, &file.name);
+                let md_path = std::path::Path::new(storage_path).join(&relative_path);
+                if let Some(parent) = md_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                std::fs::write(&md_path, &content)
+                    .map_err(|e| format!("write {}: {}", md_path.display(), e))?;
+                file_info_repo::update_content_only(file.id, "", Some(&relative_path))
+                    .map_err(|e| e.to_string())?;
+                Ok(true)
             }
-            // Handle cross-direction cases (e.g., old was "none" but content exists from prior migration)
-            let actual_old = if is_file_mode { "file" } else if file.content.is_empty() { "none" } else { "database" };
-            if actual_old == new_mode {
-                return Ok(false);
+
+            // Fallback: detect actual state from content field and change accordingly
+            _ => {
+                if depth >= 1 {
+                    return Err(format!(
+                        "Storage change recursion limit reached for file {} (old={}, new={})",
+                        file.id, old_mode, new_mode
+                    ));
+                }
+                // Handle cross-direction cases (e.g., old was "none" but content exists from prior migration)
+                let actual_old = if is_file_mode {
+                    "file"
+                } else if file.content.is_empty() {
+                    "none"
+                } else {
+                    "database"
+                };
+                if actual_old == new_mode {
+                    return Ok(false);
+                }
+                change_content_storage_one(
+                    file,
+                    actual_old,
+                    new_mode,
+                    storage_path,
+                    category,
+                    depth + 1,
+                )
+                .await
             }
-            change_content_storage_one(file, actual_old, new_mode, storage_path, category, depth + 1).await
         }
-    }
     })
 }
 
@@ -411,7 +454,12 @@ async fn reparse_file(
                     let file_id = file.id;
                     let file_name = file.name.clone();
                     tokio::task::spawn_blocking(move || {
-                        doc_loader.load_max_with_id(std::path::Path::new(&file_path), file_id, &file_name, MAX_DOCUMENT_LOAD_CHARS)
+                        doc_loader.load_max_with_id(
+                            std::path::Path::new(&file_path),
+                            file_id,
+                            &file_name,
+                            MAX_DOCUMENT_LOAD_CHARS,
+                        )
                     })
                     .await
                     .map_err(|e| format!("Re-parse task panicked: {}", e))?
@@ -422,7 +470,10 @@ async fn reparse_file(
         }
         _ => {
             // Image/audio re-parsing requires model inference, not supported in migration
-            log::warn!("Re-parsing not supported for {:?} files in migration", category);
+            log::warn!(
+                "Re-parsing not supported for {:?} files in migration",
+                category
+            );
             Ok(String::new())
         }
     }
@@ -631,7 +682,10 @@ pub async fn sync_offline_changes() -> Result<(), String> {
         }
     }
 
-    log::info!("Offline sync: removed {} deleted file records", deleted_count);
+    log::info!(
+        "Offline sync: removed {} deleted file records",
+        deleted_count
+    );
 
     // Scan + embed via existing pipeline
     let mut all_paths = dir_paths;
@@ -658,11 +712,19 @@ async fn collect_existing_file_paths(dirs: &[String]) -> HashSet<String> {
 async fn collect_files_recursive(dir: &str, result: &mut HashSet<String>) {
     let indexer_setting = INDEXER_SETTING.read().await.clone();
     let shared_result = Arc::new(std::sync::Mutex::new(std::mem::take(result)));
-    collect_files_recursive_inner(dir.to_string(), shared_result.clone(), Arc::new(indexer_setting), 0).await;
+    collect_files_recursive_inner(
+        dir.to_string(),
+        shared_result.clone(),
+        Arc::new(indexer_setting),
+        0,
+    )
+    .await;
     let extracted = match Arc::try_unwrap(shared_result) {
         Ok(mutex) => mutex.into_inner().unwrap_or_else(|e| e.into_inner()),
         Err(arc) => {
-            log::warn!("collect_files_recursive: Arc still had multiple references, falling back to lock");
+            log::warn!(
+                "collect_files_recursive: Arc still had multiple references, falling back to lock"
+            );
             arc.lock().unwrap_or_else(|e| e.into_inner()).clone()
         }
     };
@@ -678,55 +740,61 @@ fn collect_files_recursive_inner(
     depth: u32,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
     Box::pin(async move {
-    if depth > MAX_DIR_DEPTH {
-        log::warn!("Directory traversal depth limit reached: {}", dir);
-        return;
-    }
-    let mut entries = match tokio::fs::read_dir(&dir).await {
-        Ok(e) => e,
-        Err(e) => {
-            log::warn!("Failed to read directory {}: {}", dir, e);
+        if depth > MAX_DIR_DEPTH {
+            log::warn!("Directory traversal depth limit reached: {}", dir);
             return;
         }
-    };
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let path_buf = entry.path();
-        let path_str = match path_buf.to_str() {
-            Some(s) => s.to_string(),
-            None => continue,
+        let mut entries = match tokio::fs::read_dir(&dir).await {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!("Failed to read directory {}: {}", dir, e);
+                return;
+            }
         };
-        if path_buf.is_file() {
-            if scanner::is_valid_file_with(&path_buf).await {
-                result.lock().unwrap_or_else(|e| e.into_inner()).insert(path_str);
-            }
-        } else if path_buf.is_dir() {
-            let dir_name = path_buf
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
-            if indexer_setting.ignore_dirs.contains(&dir_name.to_string()) {
-                continue;
-            }
-            if IGNORE_HIDDEN_DIRS && dir_name.starts_with('.') {
-                continue;
-            }
-            let mut skip = false;
-            for ignore_path in &indexer_setting.ignore_path_prefixes {
-                if path_str.starts_with(ignore_path) {
-                    skip = true;
-                    break;
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path_buf = entry.path();
+            let path_str = match path_buf.to_str() {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            if path_buf.is_file() {
+                if scanner::is_valid_file_with(&path_buf).await {
+                    result
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(path_str);
                 }
+            } else if path_buf.is_dir() {
+                let dir_name = path_buf.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if indexer_setting.ignore_dirs.contains(&dir_name.to_string()) {
+                    continue;
+                }
+                if IGNORE_HIDDEN_DIRS && dir_name.starts_with('.') {
+                    continue;
+                }
+                let mut skip = false;
+                for ignore_path in &indexer_setting.ignore_path_prefixes {
+                    if path_str.starts_with(ignore_path) {
+                        skip = true;
+                        break;
+                    }
+                }
+                if skip {
+                    continue;
+                }
+                // Skip symlinks to avoid infinite loops from circular links
+                if path_buf.is_symlink() {
+                    continue;
+                }
+                collect_files_recursive_inner(
+                    path_str,
+                    result.clone(),
+                    indexer_setting.clone(),
+                    depth + 1,
+                )
+                .await;
             }
-            if skip {
-                continue;
-            }
-            // Skip symlinks to avoid infinite loops from circular links
-            if path_buf.is_symlink() {
-                continue;
-            }
-            collect_files_recursive_inner(path_str, result.clone(), indexer_setting.clone(), depth + 1).await;
         }
-    }
     })
 }
 
@@ -772,15 +840,21 @@ pub async fn index_file(path: &str) -> Result<(), String> {
     match category {
         FileCategory::Document => {
             let document_indexer = indexers::document_indexer::DocumentIndexer::new();
-            document_indexer.embedding_one_file(&file_info, &storage_mode).await?;
+            document_indexer
+                .embedding_one_file(&file_info, &storage_mode)
+                .await?;
         }
         FileCategory::Image => {
             let image_indexer = indexers::image_indexer::ImageIndexer::new().await?;
-            image_indexer.embedding_one_file(&file_info, &storage_mode).await?;
+            image_indexer
+                .embedding_one_file(&file_info, &storage_mode)
+                .await?;
         }
         FileCategory::Audio => {
             let audio_indexer = indexers::audio_indexer::AudioIndexer::new().await?;
-            audio_indexer.embedding_one_file(&file_info, &storage_mode).await?;
+            audio_indexer
+                .embedding_one_file(&file_info, &storage_mode)
+                .await?;
         }
         _ => {}
     }

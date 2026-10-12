@@ -116,7 +116,10 @@ pub async fn start(paths: &Vec<String>, indexing_task: Arc<IndexingTask>, from: 
             log::error!("Task failed: {}", e);
         }
     }
-    log::info!("Scan process was finished. Total files: {}", SCANNING_TOTAL.load(Ordering::SeqCst));
+    log::info!(
+        "Scan process was finished. Total files: {}",
+        SCANNING_TOTAL.load(Ordering::SeqCst)
+    );
     SCANNING.store(false, Ordering::SeqCst);
 }
 
@@ -323,7 +326,11 @@ pub async fn add_or_update_file_info(input_path: String) -> Result<(), IndexingE
                 log::warn!("Failed to create file record: {}", path.display());
             }
             Err(op) => {
-                log::error!("Failed to create file record: {}, error: {}", path.display(), op);
+                log::error!(
+                    "Failed to create file record: {}, error: {}",
+                    path.display(),
+                    op
+                );
             }
         }
     }

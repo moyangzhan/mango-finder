@@ -1,4 +1,6 @@
-use crate::utils::app_util::{get_ocr_cls_model_path, get_ocr_det_model_path, get_ocr_dict_path, get_ocr_rec_model_path};
+use crate::utils::app_util::{
+    get_ocr_cls_model_path, get_ocr_det_model_path, get_ocr_dict_path, get_ocr_rec_model_path,
+};
 use kreuzberg_paddle_ocr::OcrLite;
 use log::{info, warn};
 use std::path::Path;
@@ -133,7 +135,11 @@ pub fn recognize_file(image_path: &Path) -> String {
     if let Ok(meta) = std::fs::metadata(image_path) {
         const MAX_IMAGE_SIZE: u64 = 40 * 1024 * 1024;
         if meta.len() > MAX_IMAGE_SIZE {
-            warn!("OCR skipped, image too large ({} bytes): {}", meta.len(), image_path.display());
+            warn!(
+                "OCR skipped, image too large ({} bytes): {}",
+                meta.len(),
+                image_path.display()
+            );
             return String::new();
         }
     }

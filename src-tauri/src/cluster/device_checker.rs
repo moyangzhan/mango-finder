@@ -89,7 +89,8 @@ pub async fn stop_status_checker() {
 
 /// Check if any checker is running
 pub fn is_checker_running() -> bool {
-    ONLINE_CHECKER_RUNNING.load(Ordering::SeqCst) || EXPIRATION_CHECKER_RUNNING.load(Ordering::SeqCst)
+    ONLINE_CHECKER_RUNNING.load(Ordering::SeqCst)
+        || EXPIRATION_CHECKER_RUNNING.load(Ordering::SeqCst)
 }
 
 // ============================================
@@ -171,7 +172,8 @@ async fn start_expiration_timer() {
     );
 
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(EXPIRATION_CHECK_INTERVAL_SECS));
+        let mut interval =
+            tokio::time::interval(Duration::from_secs(EXPIRATION_CHECK_INTERVAL_SECS));
 
         loop {
             tokio::select! {

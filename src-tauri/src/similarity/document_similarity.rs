@@ -14,7 +14,11 @@ pub struct DocumentSimilarityDetector;
 impl SimilarityDetector for DocumentSimilarityDetector {
     /// Find similar documents using multi-chunk search with score aggregation
     /// 使用多片段搜索和分数聚合查找相似文档
-    async fn find_similars(&self, file_info: &FileInfo, limit: usize) -> Result<Vec<SearchResult>, AppError> {
+    async fn find_similars(
+        &self,
+        file_info: &FileInfo,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>, AppError> {
         let embeddings = file_content_embedding_repo::list_by_file_id(file_info.id)?;
 
         if embeddings.is_empty() {
@@ -26,7 +30,14 @@ impl SimilarityDetector for DocumentSimilarityDetector {
             .map(|e| (e.embedding.to_vec(), e.sparse_vec))
             .collect();
 
-        find_similars_from_chunks(&chunks, 1, Some(file_info.id), limit, SimilarityType::DocumentSemantic).await
+        find_similars_from_chunks(
+            &chunks,
+            1,
+            Some(file_info.id),
+            limit,
+            SimilarityType::DocumentSemantic,
+        )
+        .await
     }
 }
 

@@ -3,11 +3,11 @@
 //! This module defines the common request/response types used by both
 //! HTTP server and HTTP client for inter-device communication.
 
-use axum::response::{IntoResponse, Json, Response};
-use serde::{Deserialize, Serialize};
 use crate::enums::PairingResponseStatus;
 use crate::structs::cluster_config::DeviceCapabilities;
 use crate::structs::search_result::SearchResult;
+use axum::response::{IntoResponse, Json, Response};
+use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // Error Codes / 错误码
@@ -76,6 +76,44 @@ pub struct PingData {
     pub last_index_time: Option<String>,
     pub capabilities: DeviceCapabilities,
     pub timestamp: i64,
+}
+
+// ============================================================================
+// Local API /cli (CLI 等本机客户端)
+// ============================================================================
+
+/// POST /cli/search request
+/// POST /cli/search 请求
+#[derive(Debug, Deserialize)]
+pub struct CliSearchRequest {
+    pub query: String,
+    /// "keyword" | "semantic" (default)
+    pub search_type: Option<String>,
+    pub limit: Option<usize>,
+}
+
+/// POST /cli/search response
+/// POST /cli/search 响应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliSearchData {
+    pub results: Vec<SearchResult>,
+    /// Full match count before applying limit
+    /// 应用 limit 前的完整匹配数
+    pub total: usize,
+}
+
+/// POST /cli/similar/:file_id request
+/// POST /cli/similar/:file_id 请求
+#[derive(Debug, Deserialize)]
+pub struct CliSimilarRequest {
+    pub limit: Option<usize>,
+}
+
+/// POST /cli/similar/:file_id response
+/// POST /cli/similar/:file_id 响应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliSimilarData {
+    pub results: Vec<SearchResult>,
 }
 
 // ============================================================================

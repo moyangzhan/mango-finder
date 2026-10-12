@@ -231,11 +231,33 @@ mfd locale zh-CN
 mfd locale en-US
 ```
 
+### shutdown - 关闭本地服务
+
+```bash
+mfd shutdown
+```
+
+**说明：**
+- 关闭 CLI 按需拉起的本地常驻服务（daemon），释放其占用的模型内存
+- 若服务由 GUI 提供（多机互联开启），则不会关闭，提示服务随 GUI 退出
+- 服务关闭后，下一次需要服务的命令会自动重新拉起
+
+## 本地服务（快速路径）
+
+`search`（语义/关键词）和 `similar`（已索引文件）会优先复用本机常驻服务中的热模型，避免每次查询重新加载模型：
+
+- **GUI 正在运行且开启多机互联**：直接使用 GUI 进程内的服务，模型冷启动只发生一次
+- **服务不存在**：自动在后台拉起 `mfd serve`（daemon，仅监听 127.0.0.1，空闲 30 分钟自动退出），首条命令包含启动耗时（约 1-3 秒），之后毫秒级
+- **拉起失败或服务不可用**：静默回落进程内查询（较慢但结果一致），stderr 有日志说明
+- 任何启动顺序都会收敛到单一宿主：GUI 启动时若端口被自家 daemon 占用，会先请其退出再接管
+
+两条路径的输出结构完全一致，调用方无感知。路径选择日志输出到 stderr（`--quiet` 时不输出）。
+
 ## 全局选项
 
 | 选项 | 环境变量 | 说明 |
 |------|----------|------|
-| `--output json\|table` | `MANGO_FINDER_OUTPUT` | 输出格式，默认 `json` |
+| `--output json\|table` | `MANGO_FINDER_OUTPUT` | 输出格式，默认 `json`。`table` 为人类可读输出（对齐表格、按命令选取重点列、表头跟随 locale），结果仍输出到 stdout |
 | `--quiet` | `MANGO_FINDER_QUIET` | 静默模式，只输出结果，不输出日志 |
 
 ## 环境变量
@@ -248,6 +270,12 @@ export MANGO_FINDER_OUTPUT=table
 
 # 启用静默模式
 export MANGO_FINDER_QUIET=1
+
+# 不自动拉起本地服务 daemon（服务不存在时直接走进程内查询）
+export MANGO_FINDER_NO_DAEMON=1
+
+# 本地服务空闲退出阈值（秒，默认 1800，测试用）
+export MANGO_FINDER_DAEMON_IDLE_SECS=60
 ```
 
 ## 输出格式

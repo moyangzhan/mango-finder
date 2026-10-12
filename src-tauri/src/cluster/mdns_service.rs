@@ -1,8 +1,8 @@
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Emitter;
 use tokio::sync::RwLock as AsyncRwLock;
 
@@ -35,7 +35,8 @@ pub async fn start_mdns_broadcast(device_name: String, port: i32) -> Result<(), 
     }
 
     // Create service daemon
-    let daemon = ServiceDaemon::new().map_err(|e| format!("Failed to create mDNS daemon: {}", e))?;
+    let daemon =
+        ServiceDaemon::new().map_err(|e| format!("Failed to create mDNS daemon: {}", e))?;
 
     // Get local IP address
     let local_ip = super::http_client::get_local_ip()?;
@@ -69,7 +70,12 @@ pub async fn start_mdns_broadcast(device_name: String, port: i32) -> Result<(), 
         .register(service_info)
         .map_err(|e| format!("Failed to register mDNS service: {}", e))?;
 
-    log::info!("mDNS broadcast started: {} at {}:{}", device_name, local_ip, port);
+    log::info!(
+        "mDNS broadcast started: {} at {}:{}",
+        device_name,
+        local_ip,
+        port
+    );
 
     // Store daemon reference
     let service = Arc::new(AsyncRwLock::new(Some(daemon)));
@@ -127,8 +133,8 @@ pub async fn start_mdns_browsing() -> Result<(), String> {
     log::info!("Starting mDNS browsing, local IP: {}", local_ip);
 
     // Create a separate daemon for browsing
-    let daemon = ServiceDaemon::new()
-        .map_err(|e| format!("Failed to create mDNS browser daemon: {}", e))?;
+    let daemon =
+        ServiceDaemon::new().map_err(|e| format!("Failed to create mDNS browser daemon: {}", e))?;
 
     let receiver = daemon
         .browse(SERVICE_TYPE)
@@ -147,12 +153,21 @@ pub async fn start_mdns_browsing() -> Result<(), String> {
                 }
                 Err(e) => {
                     let err_str = e.to_string();
-                    if err_str.contains("timeout") || err_str.contains("timed out") || err_str.contains("TimedOut") {
+                    if err_str.contains("timeout")
+                        || err_str.contains("timed out")
+                        || err_str.contains("TimedOut")
+                    {
                         // Continue waiting - these are normal timeout events
                         continue;
-                    } else if err_str.contains("valid addrs") || err_str.contains("link-local") || err_str.contains("IPv6") {
+                    } else if err_str.contains("valid addrs")
+                        || err_str.contains("link-local")
+                        || err_str.contains("IPv6")
+                    {
                         // IPv6 link-local address resolution issues - log warning but continue
-                        log::warn!("mDNS address resolution issue (likely IPv6 link-local): {}", e);
+                        log::warn!(
+                            "mDNS address resolution issue (likely IPv6 link-local): {}",
+                            e
+                        );
                         continue;
                     } else {
                         log::error!("mDNS browsing error: {}", e);
@@ -250,7 +265,10 @@ async fn handle_mdns_event(event: ServiceEvent) {
 
             // 如果没有解析到地址，记录警告并跳过
             if host.is_empty() {
-                log::warn!("Device {} resolved but no valid address found, skipping", name);
+                log::warn!(
+                    "Device {} resolved but no valid address found, skipping",
+                    name
+                );
                 return;
             }
 
@@ -262,7 +280,12 @@ async fn handle_mdns_event(event: ServiceEvent) {
             } else {
                 "IPv6 global"
             };
-            log::debug!("Device {} selected address: {} ({})", name, host, selected_type);
+            log::debug!(
+                "Device {} selected address: {} ({})",
+                name,
+                host,
+                selected_type
+            );
 
             // Extract TXT records
             let txt = info.get_properties();
@@ -297,9 +320,7 @@ async fn handle_mdns_event(event: ServiceEvent) {
             }
 
             // Check for existing device
-            let existing_device = device_repo::get_by_device_id(&device_id)
-                .ok()
-                .flatten();
+            let existing_device = device_repo::get_by_device_id(&device_id).ok().flatten();
 
             // Skip devices that were rejected by local user (Rejected)
             // 跳过本机用户拒绝的设备（Rejected）
@@ -312,7 +333,13 @@ async fn handle_mdns_event(event: ServiceEvent) {
                 }
             }
 
-            log::info!("Discovered device: {} ({}) at {}:{}", device_name, device_id, host, port);
+            log::info!(
+                "Discovered device: {} ({}) at {}:{}",
+                device_name,
+                device_id,
+                host,
+                port
+            );
 
             let is_new_device = existing_device.is_none();
 
@@ -359,14 +386,25 @@ async fn handle_mdns_event(event: ServiceEvent) {
                     if is_new_device {
                         let setting = super::get_cluster_setting().await;
                         if setting.auto_request_pairing {
-                            log::info!("Auto sending pairing request to {} ({})", device.name, device_id);
+                            log::info!(
+                                "Auto sending pairing request to {} ({})",
+                                device.name,
+                                device_id
+                            );
                             let device_id_clone = device_id.clone();
                             let device_name = device.name.clone();
                             let ip = device.ip_address.clone();
                             let port = device.port;
 
                             tokio::spawn(async move {
-                                if let Err(e) = super::http_client::send_pairing_request(&device_id_clone, &device_name, &ip, port).await {
+                                if let Err(e) = super::http_client::send_pairing_request(
+                                    &device_id_clone,
+                                    &device_name,
+                                    &ip,
+                                    port,
+                                )
+                                .await
+                                {
                                     log::error!("Failed to auto send pairing request: {}", e);
                                 }
                             });
@@ -391,4 +429,3 @@ async fn handle_mdns_event(event: ServiceEvent) {
         }
     }
 }
-

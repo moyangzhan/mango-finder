@@ -91,7 +91,10 @@ mod tests {
 
     #[test]
     fn test_url_encode_path() {
-        assert_eq!(url_encode("C:/Users/test/file.txt"), "C:/Users/test/file.txt");
+        assert_eq!(
+            url_encode("C:/Users/test/file.txt"),
+            "C:/Users/test/file.txt"
+        );
     }
 
     #[test]

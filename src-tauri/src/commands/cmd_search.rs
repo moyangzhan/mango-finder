@@ -32,10 +32,9 @@ pub async fn local_device_search(
     query: &str,
     search_type: &str,
 ) -> Result<LocalDeviceSearchResult, String> {
-    let results = match search_type {
-        "keyword" => searcher::keyword_search(query).await,
-        _ => searcher::semantic_search(query).await,
-    };
+    // 与 CLI/daemon 同源分发(searcher::search_by_type),三处行为保持一致
+    // Same dispatch source as CLI/daemon (searcher::search_by_type)
+    let results = searcher::search_by_type(query, Some(search_type)).await;
     let total = results.len();
     Ok(LocalDeviceSearchResult { results, total })
 }
@@ -47,8 +46,7 @@ pub async fn remote_device_search(
     device_ids: Option<Vec<String>>,
 ) -> Result<crate::cluster::cluster_search::RemoteDeviceSearchResult, String> {
     let result =
-        crate::cluster::cluster_search::remote_device_search(query, search_type, device_ids)
-            .await;
+        crate::cluster::cluster_search::remote_device_search(query, search_type, device_ids).await;
     Ok(result)
 }
 
@@ -111,7 +109,7 @@ pub async fn fetch_remote_file(device_id: String, file_id: i64) -> Result<Vec<u8
 
     // Build URL with file_id
     let url = format!(
-        "http://{}:{}/file/{}",
+        "http://{}:{}/cluster/file/{}",
         device.ip_address, device.port, file_id
     );
 

@@ -51,14 +51,16 @@ impl<'a> AudioIndexer {
                             ModelPlatformName::OpenAi => Box::new(OpenAi::new().await),
                             ModelPlatformName::SiliconFlow => Box::new(SiliconFlow::new().await),
                             ModelPlatformName::DashScope | ModelPlatformName::DeepSeek => {
-                                log::warn!("DeepSeek and DashScope do not support audio analysis yet.");
+                                log::warn!(
+                                    "DeepSeek and DashScope do not support audio analysis yet."
+                                );
                                 return Err(AppError::UnsupportedAudioAnalyze(
                                     "Deepseek and Dashscope".to_string(),
                                 ));
                             }
-                            _ => {
-                                Box::new(OpenAiCompatibleService::new(&platform_name, &base_url).await)
-                            }
+                            _ => Box::new(
+                                OpenAiCompatibleService::new(&platform_name, &base_url).await,
+                            ),
                         };
 
                     remote_service_option = Some(platform_service);

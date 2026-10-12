@@ -45,8 +45,9 @@ impl EmbeddingService {
                 error!("Failed to load model: {:?}", e);
                 AppError::ModelServiceInitError(e.to_string())
             })?;
-        let tokenizer = Tokenizer::from_file(tokenizer_path)
-            .map_err(|e| AppError::ModelServiceInitError(format!("Failed to load tokenizer: {}", e)))?;
+        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| {
+            AppError::ModelServiceInitError(format!("Failed to load tokenizer: {}", e))
+        })?;
         info!("EmbeddingService::new succeeded");
         Ok(EmbeddingService {
             session: ThreadSafeSession {

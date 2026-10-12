@@ -153,7 +153,9 @@ pub fn extract_audio_features(samples: &[f32]) -> AudioFeatures {
     // 计算过零率
     let mut zero_crossings = 0usize;
     for i in 1..samples.len() {
-        if (samples[i - 1] >= 0.0 && samples[i] < 0.0) || (samples[i - 1] < 0.0 && samples[i] >= 0.0) {
+        if (samples[i - 1] >= 0.0 && samples[i] < 0.0)
+            || (samples[i - 1] < 0.0 && samples[i] >= 0.0)
+        {
             zero_crossings += 1;
         }
     }
@@ -168,7 +170,8 @@ pub fn extract_audio_features(samples: &[f32]) -> AudioFeatures {
     // 计算能量方差
     let energy_variance = if energies.len() > 1 {
         let mean = avg_energy;
-        let variance: f32 = energies.iter().map(|&e| (e - mean).powi(2)).sum::<f32>() / (energies.len() - 1) as f32;
+        let variance: f32 =
+            energies.iter().map(|&e| (e - mean).powi(2)).sum::<f32>() / (energies.len() - 1) as f32;
         variance
     } else {
         0.0
@@ -234,7 +237,11 @@ pub fn detect_audio_type_by_features(samples: &[f32]) -> AudioType {
     // Calculate variance of segment energies
     // 计算分段能量的方差
     let mean_energy: f32 = segment_energies.iter().sum::<f32>() / segment_energies.len() as f32;
-    let energy_var: f32 = segment_energies.iter().map(|&e| (e - mean_energy).powi(2)).sum::<f32>() / segment_energies.len() as f32;
+    let energy_var: f32 = segment_energies
+        .iter()
+        .map(|&e| (e - mean_energy).powi(2))
+        .sum::<f32>()
+        / segment_energies.len() as f32;
 
     // Classification based on features
     // 基于特征分类
@@ -332,7 +339,8 @@ impl MusicFingerprint {
             spectral_histogram[i] = f32::from_le_bytes(bytes[i * 4..(i + 1) * 4].try_into().ok()?);
         }
         for i in 0..8 {
-            energy_bands[i] = f32::from_le_bytes(bytes[40 + i * 4..40 + (i + 1) * 4].try_into().ok()?);
+            energy_bands[i] =
+                f32::from_le_bytes(bytes[40 + i * 4..40 + (i + 1) * 4].try_into().ok()?);
         }
         let avg_zcr = f32::from_le_bytes(bytes[72..76].try_into().ok()?);
         let tempo_estimate = f32::from_le_bytes(bytes[76..80].try_into().ok()?);
@@ -484,7 +492,8 @@ fn estimate_tempo(samples: &[f32]) -> f32 {
         return 0.0;
     }
 
-    let avg_interval: f32 = filtered_intervals.iter().sum::<f32>() / filtered_intervals.len() as f32;
+    let avg_interval: f32 =
+        filtered_intervals.iter().sum::<f32>() / filtered_intervals.len() as f32;
     let bpm = 60.0 / avg_interval;
 
     bpm.clamp(30.0, 200.0)

@@ -1,11 +1,10 @@
 use crate::entities::ModelPlatform;
 use crate::repositories::RepositoryError;
-use crate::utils::app_util::get_db_path;
 use crate::utils::datetime_util;
-use rusqlite::{Connection, Result, Row, named_params};
+use rusqlite::{Result, Row, named_params};
 
 pub fn get_one(name: &str) -> Result<ModelPlatform, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select * from model_platform where name = ?1 limit 1")?;
     let one = stmt.query_row([name], |row| Ok(build_model_platform(row)?))?;
     return Ok(one);
@@ -17,7 +16,7 @@ pub fn list(names: &Vec<String>) -> Result<Vec<ModelPlatform>, RepositoryError> 
         .map(|s| s.as_str())
         .collect::<Vec<_>>()
         .join("','");
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         format!(
             "select * from model_platform where name in ('{}')",
@@ -34,7 +33,7 @@ pub fn list(names: &Vec<String>) -> Result<Vec<ModelPlatform>, RepositoryError> 
 }
 
 pub fn update_by_name(name: &str, platform: &ModelPlatform) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "update model_platform set title = :title, base_url= :base_url, api_key= :api_key, logo= :logo, remark= :remark, is_proxy_enable= :is_proxy_enable,is_openai_api_compatible= :is_openai_api_compatible, update_time = datetime('now', 'localtime') where name = :name",
     )?;

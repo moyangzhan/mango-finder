@@ -17,10 +17,7 @@ pub use crate::cluster::http_client::SimilarFeatures;
 
 /// Find similar files across remote devices
 /// 在远程设备上查找相似文件
-pub async fn remote_find_similars(
-    file_info: &FileInfo,
-    limit: usize,
-) -> Vec<SearchResult> {
+pub async fn remote_find_similars(file_info: &FileInfo, limit: usize) -> Vec<SearchResult> {
     // Generate a new request_id for this initial search
     let request_id = uuid::Uuid::new_v4().to_string();
     remote_find_similars_with_exclude(file_info, limit, &[], &request_id).await
@@ -71,7 +68,8 @@ pub async fn remote_find_similars_with_exclude(
                 limit,
                 &ip,
                 port,
-            ).await;
+            )
+            .await;
             match result {
                 Ok(data) => (device_id, device_name, data.results),
                 Err(e) => {

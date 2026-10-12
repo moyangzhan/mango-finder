@@ -35,7 +35,7 @@ impl DocumentLoader for OdtLoader {
     fn load_file_max(&self, _file: &std::fs::File, _max_load_chars: usize) -> io::Result<String> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "load_file_max with File is not supported for odt files, use load_max() with Path instead"
+            "load_file_max with File is not supported for odt files, use load_max() with Path instead",
         ))
     }
 }

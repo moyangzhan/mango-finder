@@ -1,11 +1,10 @@
 use crate::entities::AiModel;
 use crate::repositories::RepositoryError;
-use crate::utils::app_util::get_db_path;
 use crate::utils::datetime_util;
-use rusqlite::{Connection, Result, Row, named_params};
+use rusqlite::{Result, Row, named_params};
 
 pub fn get_one(platform: &str, name: &str) -> Result<Option<AiModel>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "SELECT * FROM ai_model where name =:name and platform=:platform and is_enable=1 limit 1",
     )?;
@@ -21,7 +20,7 @@ pub fn get_one(platform: &str, name: &str) -> Result<Option<AiModel>, Repository
 }
 
 pub fn get_one_by_type(platform: &str, one_type: &str) -> Result<Option<AiModel>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "select * from ai_model where model_types like '%' || :one_type || '%' and platform=:platform and is_enable=1 limit 1",
     )?;
@@ -37,7 +36,7 @@ pub fn get_one_by_type(platform: &str, one_type: &str) -> Result<Option<AiModel>
 }
 
 pub fn insert(ai_model: &AiModel) -> Result<AiModel, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "insert into ai_model(name,title,model_types,setting,remark,platform,context_window,max_input_tokens,max_output_tokens,input_types,properties,is_reasoner,is_thinking_closable,is_free,is_enable) values (:name,:title,:model_types,:setting,:remark,:platform,:context_window,:max_input_tokens,:max_output_tokens,:input_types,:properties,:is_reasoner,:is_thinking_closable,:is_free,:is_enable)"
     )?;
@@ -65,7 +64,7 @@ pub fn insert(ai_model: &AiModel) -> Result<AiModel, RepositoryError> {
 }
 
 pub fn update(ai_model: &AiModel) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "update ai_model set name =:name,title=:title,model_types=:model_types,setting=:setting,remark=:remark,platform=:platform,context_window=:context_window,max_input_tokens=:max_input_tokens,max_output_tokens=:max_output_tokens,input_types=:input_types,properties=:properties,is_reasoner=:is_reasoner,is_thinking_closable=:is_thinking_closable,is_free=:is_free,is_enable=:is_enable, update_time = datetime('now', 'localtime') where id = :id",
     )?;
@@ -91,8 +90,13 @@ pub fn update(ai_model: &AiModel) -> Result<usize, RepositoryError> {
     Ok(affected)
 }
 
-pub fn update_basic(id: i64, name: &str, title: &str, remark: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+pub fn update_basic(
+    id: i64,
+    name: &str,
+    title: &str,
+    remark: &str,
+) -> Result<usize, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "update ai_model set name = :name, title = :title, remark = :remark, update_time = datetime('now', 'localtime') where id = :id",
     )?;
@@ -106,13 +110,10 @@ pub fn update_basic(id: i64, name: &str, title: &str, remark: &str) -> Result<us
 }
 
 pub fn list_by_platform(platform: &str) -> Result<Vec<AiModel>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let mut stmt = conn.prepare(
-        "select * from ai_model where platform = :platform and is_enable = 1",
-    )?;
-    let rows = stmt.query_map(&[(":platform", platform)], |row| {
-        Ok(build_ai_model(row)?)
-    })?;
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt =
+        conn.prepare("select * from ai_model where platform = :platform and is_enable = 1")?;
+    let rows = stmt.query_map(&[(":platform", platform)], |row| Ok(build_ai_model(row)?))?;
     let mut result = Vec::new();
     for item in rows {
         result.push(item?);

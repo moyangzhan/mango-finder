@@ -1,6 +1,6 @@
 pub mod anytomd_loader;
-pub mod ods;
 pub mod odp;
+pub mod ods;
 pub mod odt;
 pub mod open_doc;
 pub mod pdfplumber_loader;
@@ -32,10 +32,7 @@ pub(crate) fn cleanup_extracted_images(file_id: i64) {
 /// Get the extracted_images bucket directory for a file ID.
 /// Structure: `extracted_images/{bucket}/` where bucket = (id - 1) / 1000
 pub(crate) fn get_images_dir(file_id: i64) -> PathBuf {
-    let extracted_path = EXTRACTED_IMAGES_PATH
-        .get()
-        .cloned()
-        .unwrap_or_default();
+    let extracted_path = EXTRACTED_IMAGES_PATH.get().cloned().unwrap_or_default();
     let bucket = if file_id > 0 {
         (file_id - 1) / BUCKET_SIZE
     } else {
@@ -53,7 +50,10 @@ pub(crate) fn image_filename(file_id: i64, suffix: &str) -> String {
 fn sanitize_fs_name(file_id: i64, file_name: &str) -> String {
     const MAX_NAME_LEN: usize = 80;
     // Strip extension (e.g. "report.pdf" → "report")
-    let stem = file_name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(file_name);
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
     let sanitized: String = stem
         .chars()
         .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
@@ -79,7 +79,11 @@ pub(crate) fn md_relative_path(file_id: i64, file_name: &str) -> String {
     } else {
         0
     };
-    format!("parsed_documents/{:04}/{}.md", bucket, sanitize_fs_name(file_id, file_name))
+    format!(
+        "parsed_documents/{:04}/{}.md",
+        bucket,
+        sanitize_fs_name(file_id, file_name)
+    )
 }
 
 /// Truncate content in-place to at most `limit` chars.

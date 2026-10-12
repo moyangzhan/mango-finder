@@ -28,7 +28,11 @@ impl SimilarityDetector for ImageSimilarityDetector {
     /// 1. 使用 sqlite-vec ANN 搜索语义相似性（嵌入向量）
     /// 2. 对候选结果计算感知哈希距离
     /// 3. 合并分数：max(视觉分数, 语义分数)
-    async fn find_similars(&self, file_info: &FileInfo, limit: usize) -> Result<Vec<SearchResult>, AppError> {
+    async fn find_similars(
+        &self,
+        file_info: &FileInfo,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>, AppError> {
         // Get source hash: use stored hash if available, otherwise calculate from file
         let source_hash = match &file_info.image_hash {
             Some(hash_bytes) => bytes_to_image_hash(hash_bytes),
@@ -50,7 +54,10 @@ impl SimilarityDetector for ImageSimilarityDetector {
         };
 
         // Stage 1: Use ANN search to find semantic candidates
-        let candidates = file_content_embedding_repo::find_image_similarity_candidates(file_info.id, ANN_CANDIDATE_LIMIT)?;
+        let candidates = file_content_embedding_repo::find_image_similarity_candidates(
+            file_info.id,
+            ANN_CANDIDATE_LIMIT,
+        )?;
 
         if candidates.is_empty() {
             return Ok(Vec::new());
@@ -80,20 +87,19 @@ pub fn score_image_candidates(
         }
 
         // Calculate visual similarity score using stored hash
-        let visual_score = match calculate_visual_score_from_stored(source_hash, &candidate.image_hash) {
-            Some(score) => score,
-            None => continue,
-        };
+        let visual_score =
+            match calculate_visual_score_from_stored(source_hash, &candidate.image_hash) {
+                Some(score) => score,
+                None => continue,
+            };
 
         // Use pre-computed semantic score from ANN search
         let semantic_score = candidate.semantic_score;
 
-        // Take maximum of visual and semantic scores, and determine which type was used
-        let (final_score, similarity_type) = if visual_score >= semantic_score {
-            (visual_score, SimilarityType::ImageHash)
-        } else {
-            (semantic_score, SimilarityType::ImageSemantic)
-        };
+        // Take maximum of visual and semantic scores via the shared helper,
+        // so the rule lives in exactly one place.
+        // 复用共享 helper 取视觉/语义最大值,规则只维护一份
+        let (final_score, similarity_type) = merge_hybrid_scores(visual_score, semantic_score);
 
         // Only include if similarity >= 30%
         if final_score >= 30 {
@@ -211,10 +217,7 @@ pub fn calculate_visual_score(source_hash: &ImageHash, candidate_hash_bytes: &[u
 
 /// Merge visual and semantic scores, taking the maximum
 /// 合并视觉和语义分数，取最大值
-pub fn merge_hybrid_scores(
-    visual_score: usize,
-    semantic_score: usize,
-) -> (usize, SimilarityType) {
+pub fn merge_hybrid_scores(visual_score: usize, semantic_score: usize) -> (usize, SimilarityType) {
     if visual_score >= semantic_score {
         (visual_score, SimilarityType::ImageHash)
     } else {

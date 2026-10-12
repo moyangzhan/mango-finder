@@ -3,14 +3,13 @@ use crate::global::SHORT_QUERY_LEN;
 use crate::repositories::RepositoryError;
 use crate::structs::image_similarity_candidate::ImageSimilarityCandidate;
 use crate::structs::sparse_vector::SparseVector;
-use crate::utils::app_util::get_db_path;
 use crate::utils::vector_util::calculate_content_score;
-use rusqlite::{Connection, Result, Row, named_params};
+use rusqlite::{Result, Row, named_params};
 
 pub fn insert(
     file_content_embedding: &FileContentEmbedding,
 ) -> Result<Option<FileContentEmbedding>, RepositoryError> {
-    let mut conn = Connection::open(get_db_path())?;
+    let mut conn = crate::db_init_manager::open_db()?;
     let tx = conn.transaction()?;
 
     let file_content_embedding = {
@@ -57,7 +56,7 @@ pub fn insert(
 }
 
 pub fn update(file_content_embedding: &FileContentEmbedding) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt =
         conn.prepare("update file_content_vec set embedding=:embedding where id = :id")?;
     let embedding_bytes = unsafe {
@@ -92,9 +91,11 @@ pub fn hybrid_search(
     };
     log::debug!(
         "content hybrid_search, query_sparse_indices: {:?}, query_sparse_values: {:?}, min_score: {}",
-        query_sparse_indices, query_sparse_values, min_score
+        query_sparse_indices,
+        query_sparse_values,
+        min_score
     );
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select v.id, d.file_id, d.chunk_index, d.chunk_text, v.distance, d.sparse_weights from ( select id, distance from file_content_vec where embedding match :embedding order by distance limit 50 ) v join file_content_data d on v.id = d.id order by v.distance asc")?;
     let rows = stmt.query_map(named_params! {":embedding": embedding_bytes}, |row| {
         let embedding_bytes: Vec<u8> = row.get("embedding").unwrap_or(vec![0; 1024 * 4]); // Default to zero vector if embedding is not available
@@ -153,7 +154,7 @@ pub fn list_chunks_by_ids(ids: &Vec<u32>) -> Result<Vec<String>, RepositoryError
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let ids_str = ids
         .iter()
         .map(|id| id.to_string())
@@ -181,7 +182,7 @@ pub fn delete_by_file_id(file_id: i64) -> Result<usize, RepositoryError> {
     if file_id < 1 {
         return Ok(0);
     }
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("delete from file_content_vec where id in (select id from file_content_data where file_id = :file_id)")?;
     let _ = stmt.execute(named_params! {":file_id": file_id})?;
     let mut stmt = conn.prepare("delete from file_content_data where file_id = :file_id")?;
@@ -198,7 +199,7 @@ pub fn delete_by_file_prefix_path(file_prefix_path: &str) -> Result<usize, Repos
     } else {
         format!("{}{}%", file_prefix_path, std::path::MAIN_SEPARATOR)
     };
-    let mut conn = Connection::open(get_db_path())?;
+    let mut conn = crate::db_init_manager::open_db()?;
     let tx = conn.transaction()?;
     let affected = {
         let mut stmt_vec = tx.prepare( "delete from file_content_vec where id in ( 
@@ -218,7 +219,7 @@ pub fn delete_by_file_prefix_path(file_prefix_path: &str) -> Result<usize, Repos
 }
 
 pub fn clear() -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("delete from file_content_vec")?;
     let affected = stmt.execute([])?;
     let mut stmt = conn.prepare("delete from file_content_data")?;
@@ -247,7 +248,7 @@ fn build_file_content_embedding(row: &Row<'_>) -> Result<FileContentEmbedding, R
 }
 
 pub fn count() -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("SELECT COUNT(*) FROM file_content_vec")?;
     let count: i64 = stmt.query_row([], |row| row.get(0))?;
     return Ok(count);
@@ -255,13 +256,13 @@ pub fn count() -> Result<i64, RepositoryError> {
 
 /// Get all embeddings for a specific file (for document similarity)
 pub fn list_by_file_id(file_id: i64) -> Result<Vec<FileContentEmbedding>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "SELECT v.id, d.file_id, d.chunk_index, d.chunk_text, v.embedding, d.sparse_weights
          FROM file_content_vec v
          JOIN file_content_data d ON v.id = d.id
          WHERE d.file_id = ?1
-         ORDER BY d.chunk_index ASC"
+         ORDER BY d.chunk_index ASC",
     )?;
 
     let rows = stmt.query_map([file_id], |row| {
@@ -298,7 +299,7 @@ pub fn find_image_similarity_candidates(
     source_file_id: i64,
     limit: usize,
 ) -> Result<Vec<ImageSimilarityCandidate>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
 
     // Get source embedding
     let source_embedding: Option<Vec<u8>> = conn
@@ -311,62 +312,10 @@ pub fn find_image_similarity_candidates(
         )
         .ok();
 
-    let source_embedding = match source_embedding {
-        Some(emb) => emb,
-        None => return Ok(Vec::new()),
-    };
-
-    // Use ANN search to find similar embeddings, then join with file_info for image_hash
-    let sql = format!(
-        r#"
-        SELECT
-            d.file_id,
-            v.distance,
-            f.image_hash
-        FROM (
-            SELECT id, distance
-            FROM file_content_vec
-            WHERE embedding MATCH :embedding
-            ORDER BY distance
-            LIMIT {}
-        ) v
-        JOIN file_content_data d ON v.id = d.id
-        JOIN file_info f ON d.file_id = f.id
-        WHERE f.category = 2
-        GROUP BY d.file_id
-    "#,
-        limit * 2
-    );
-
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(
-        rusqlite::named_params! {
-            ":embedding": &source_embedding
-        },
-        |row| {
-            let file_id: i64 = row.get(0)?;
-            let distance: f32 = row.get(1)?;
-            let image_hash: Option<Vec<u8>> = row.get(2)?;
-
-            // Convert distance to score (distance 0 = 100, distance 1 = 0)
-            let semantic_score = ((1.0 - distance) * 100.0).max(0.0).min(100.0) as usize;
-
-            Ok(ImageSimilarityCandidate {
-                file_id,
-                semantic_score,
-                image_hash,
-            })
-        },
-    )?;
-
-    let mut candidates = Vec::new();
-    for row in rows {
-        if let Ok(candidate) = row {
-            candidates.push(candidate);
-        }
+    match source_embedding {
+        Some(emb) => find_image_candidates_by_embedding_bytes(&emb, limit),
+        None => Ok(Vec::new()),
     }
-
-    Ok(candidates)
 }
 
 /// Same as `find_image_similarity_candidates`, but the query vector is provided
@@ -383,9 +332,23 @@ pub fn find_image_similarity_candidates_by_vector(
             dense_embedding.len() * std::mem::size_of::<f32>(),
         )
     };
+    find_image_candidates_by_embedding_bytes(embedding_bytes, limit)
+}
 
-    let conn = Connection::open(get_db_path())?;
+/// Single implementation of the image-candidate ANN query (previously
+/// duplicated between the by-file-id and by-vector variants — any tuning of
+/// the SQL or score formula must stay in one place so indexed-file and
+/// external-file similarity behave identically).
+/// 图片候选 ANN 查询的唯一实现(此前在 by-file-id 与 by-vector 两个变体间
+/// 重复 —— SQL 或评分公式的任何调整只落一处,保证已索引文件与外部文件的
+/// 相似行为一致)。
+fn find_image_candidates_by_embedding_bytes(
+    embedding_bytes: &[u8],
+    limit: usize,
+) -> Result<Vec<ImageSimilarityCandidate>, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
 
+    // Use ANN search to find similar embeddings, then join with file_info for image_hash
     let sql = format!(
         r#"
         SELECT

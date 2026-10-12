@@ -231,11 +231,33 @@ mfd locale zh-CN
 mfd locale en-US
 ```
 
+### shutdown - Stop the local service
+
+```bash
+mfd shutdown
+```
+
+**Notes:**
+- Stops the on-demand local daemon spawned by the CLI, releasing its model memory
+- If the service is hosted by the GUI (multi-device enabled), it is not stopped; the message notes it stops when the GUI exits
+- After shutdown, the next command that needs the service spawns it again automatically
+
+## Local Service (Fast Path)
+
+`search` (semantic/keyword) and `similar` (indexed files) reuse the warm embedding model in the local resident service instead of reloading it per query:
+
+- **GUI running with multi-device enabled**: uses the GUI's in-process service; the model loads only once
+- **No service running**: spawns `mfd serve` in the background (a daemon listening on 127.0.0.1 only, auto-exits after 30 minutes idle). The first command includes startup cost (~1-3s); subsequent queries are milliseconds
+- **Spawn or request failure**: silently falls back to in-process search (slower, identical results); a log line on stderr explains the path
+- Any startup order converges to a single host: if the GUI finds the port held by its own daemon at startup, it asks the daemon to exit and takes over
+
+Output structure is identical across both paths. Path selection is logged to stderr (suppressed by `--quiet`).
+
 ## Global Options
 
 | Option | Environment Variable | Description |
 |--------|---------------------|-------------|
-| `--output json\|table` | `MANGO_FINDER_OUTPUT` | Output format, default `json` |
+| `--output json\|table` | `MANGO_FINDER_OUTPUT` | Output format, default `json`. `table` renders human-readable output (aligned tables, per-command columns, headers follow the active locale); results still go to stdout |
 | `--quiet` | `MANGO_FINDER_QUIET` | Suppress logs, only output result |
 
 ## Environment Variables
@@ -248,6 +270,12 @@ export MANGO_FINDER_OUTPUT=table
 
 # Enable quiet mode
 export MANGO_FINDER_QUIET=1
+
+# Do not auto-spawn the local service daemon (fall back to in-process search)
+export MANGO_FINDER_NO_DAEMON=1
+
+# Local service idle exit threshold in seconds (default 1800, for testing)
+export MANGO_FINDER_DAEMON_IDLE_SECS=60
 ```
 
 ## Output Format

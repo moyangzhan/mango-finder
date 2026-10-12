@@ -178,7 +178,11 @@ pub async fn find_similars_for_external_file(
         FileCategory::Audio => find_similars_for_external_audio(path, limit).await,
         _ => Err(format!(
             "On-the-fly similarity is not supported for {} files; index it first with 'mfd index start <dir>'",
-            if ext.is_empty() { "extension-less".to_string() } else { format!(".{}", ext) }
+            if ext.is_empty() {
+                "extension-less".to_string()
+            } else {
+                format!(".{}", ext)
+            }
         )),
     }
 }
@@ -203,7 +207,12 @@ async fn find_similars_for_external_document(
         .to_string();
     let path_owned = path.to_string();
     let parse_result = tokio::task::spawn_blocking(move || {
-        doc_loader.load_max_with_id(std::path::Path::new(&path_owned), 0, &name, MAX_DOCUMENT_LOAD_CHARS)
+        doc_loader.load_max_with_id(
+            std::path::Path::new(&path_owned),
+            0,
+            &name,
+            MAX_DOCUMENT_LOAD_CHARS,
+        )
     })
     .await
     .map_err(|e| format!("Failed to parse file: {}", e))?;
@@ -245,43 +254,65 @@ async fn find_similars_for_external_image(
     path: &str,
     limit: usize,
 ) -> Result<ExternalSimilarOutcome, String> {
-    let source_hash_bytes = image_similarity::calculate_image_hash(path)
-        .ok_or_else(|| format!("Failed to decode image: {}", path))?;
+    // 解码与打标都是同步重活,放 spawn_blocking 避免阻塞 tokio worker;
+    // 两者分开执行,打标 panic(JoinError)不会丢弃已算出的哈希
+    // Decoding and captioning are heavy sync work — off the async worker via
+    // spawn_blocking; run them separately so a captioning panic (JoinError)
+    // cannot discard the already-computed hash.
+    let hash_path = path.to_string();
+    let source_hash_bytes =
+        tokio::task::spawn_blocking(move || image_similarity::calculate_image_hash(&hash_path))
+            .await
+            .unwrap_or(None);
+    let source_hash_bytes =
+        source_hash_bytes.ok_or_else(|| format!("Failed to decode image: {}", path))?;
     let source_hash = image_similarity::bytes_to_image_hash(&source_hash_bytes);
 
-    let path_owned = path.to_string();
+    let caption_path = path.to_string();
     let content = tokio::task::spawn_blocking(move || {
-        image_parser::build_local_analysis_text(std::path::Path::new(&path_owned))
+        image_parser::build_local_analysis_text(std::path::Path::new(&caption_path))
     })
     .await
     .unwrap_or_default();
 
-    // 有语义向量时用 ANN 取候选；否则扫描全部图片哈希做纯视觉比对
+    // 有语义向量时用 ANN 取候选；否则扫描全部图片哈希做纯视觉比对。
+    // 三种"无向量"情形(打标为空/无分块/嵌入失败)统一收敛到同一个回退
+    // 分支,回退行为只维护一处
+    // With a semantic vector use ANN candidates; otherwise scan all image
+    // hashes for pure visual comparison. The three "no vector" cases (empty
+    // caption / no chunks / embed failure) collapse into a single fallback
+    // branch, so the fallback behavior is maintained in one place.
     let mut chunk_count = 0;
-    let candidates = if content.trim().is_empty() {
-        visual_scan_candidates()?
+    let caption_chunks: Option<Vec<_>> = if content.trim().is_empty() {
+        None
     } else {
         // 与索引写入路径保持一致：嵌入前折叠连续换行
         match embed_text_to_chunks(&text_util::collapse_newlines(&content)).await {
-            Ok(chunks) if !chunks.is_empty() => {
-                chunk_count = chunks.len();
-                file_content_embedding_repo::find_image_similarity_candidates_by_vector(
-                    &chunks[0].0,
-                    image_similarity::ANN_CANDIDATE_LIMIT,
-                )
-                .map_err(|e| e.to_string())?
-            }
-            Ok(_) => visual_scan_candidates()?,
+            Ok(chunks) if chunks.is_empty() => None,
+            Ok(chunks) => Some(chunks),
             Err(e) => {
-                log::warn!("Failed to embed image caption, falling back to visual-only scan: {}", e);
-                visual_scan_candidates()?
+                log::warn!(
+                    "Failed to embed image caption, falling back to visual-only scan: {}",
+                    e
+                );
+                None
             }
         }
     };
+    let candidates = match caption_chunks {
+        Some(chunks) => {
+            chunk_count = chunks.len();
+            file_content_embedding_repo::find_image_similarity_candidates_by_vector(
+                &chunks[0].0,
+                image_similarity::ANN_CANDIDATE_LIMIT,
+            )
+            .map_err(|e| e.to_string())?
+        }
+        None => visual_scan_candidates()?,
+    };
 
-    let results =
-        image_similarity::score_image_candidates(&source_hash, &candidates, None, limit)
-            .map_err(|e| e.to_string())?;
+    let results = image_similarity::score_image_candidates(&source_hash, &candidates, None, limit)
+        .map_err(|e| e.to_string())?;
 
     Ok(ExternalSimilarOutcome {
         results,
@@ -302,8 +333,8 @@ async fn find_similars_for_external_audio(
     let transcription = if matches!(feature_type, AudioType::Music | AudioType::Mixed) {
         None
     } else {
-        let parser = AudioParser::new()
-            .map_err(|e| format!("Failed to load Whisper model: {}", e))?;
+        let parser =
+            AudioParser::new().map_err(|e| format!("Failed to load Whisper model: {}", e))?;
         Some(
             parser
                 .parse(path)
@@ -383,9 +414,7 @@ fn visual_scan_candidates() -> Result<Vec<ImageSimilarityCandidate>, String> {
 }
 
 /// 文本分块并逐块计算嵌入（仅内存，不写库），供外部文件现场计算使用
-async fn embed_text_to_chunks(
-    content: &str,
-) -> Result<Vec<(Vec<f32>, SparseVector)>, String> {
+async fn embed_text_to_chunks(content: &str) -> Result<Vec<(Vec<f32>, SparseVector)>, String> {
     let chunks = {
         let mut manager = embedding_service_manager::get_manager().write().await;
         let embedding_service = manager.service().await.map_err(|e| e.to_string())?;

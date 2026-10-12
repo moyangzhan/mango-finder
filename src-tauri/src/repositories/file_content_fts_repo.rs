@@ -1,9 +1,8 @@
 use crate::entities::FtsSearchResult;
 use crate::repositories::RepositoryError;
-use crate::utils::app_util::get_db_path;
 use crate::utils::jieba_util;
 use regex::Regex;
-use rusqlite::{Connection, Result, named_params, params};
+use rusqlite::{Result, named_params, params};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -12,7 +11,7 @@ pub async fn insert(file_id: i64, chunk_id: i64, chunk_text: &str) -> Result<(),
         return Ok(());
     }
     let content = jieba_util::tokenize(chunk_text).await;
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt =
         conn.prepare("insert into file_content_fts (file_id, chunk_id, content) values (:file_id, :chunk_id, :content)")?;
     let last_insert_rowid = stmt.insert(named_params! {
@@ -32,7 +31,7 @@ pub async fn update(file_id: i64, chunk_id: i64, chunk_text: &str) -> Result<(),
         return Ok(());
     }
     let content = jieba_util::tokenize(chunk_text).await;
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt =
         conn.prepare("update file_content_fts set content = :content where file_id = :file_id and chunk_id = :chunk_id")?;
     let affected = stmt.execute(named_params! {
@@ -45,10 +44,13 @@ pub async fn update(file_id: i64, chunk_id: i64, chunk_text: &str) -> Result<(),
 }
 
 pub fn delete_by_file_id(file_id: i64) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("delete from file_content_fts where file_id = ?1")?;
     let affected = stmt.execute([file_id])?;
-    log::debug!("delete file_content_fts by file id affected: {:?}", affected);
+    log::debug!(
+        "delete file_content_fts by file id affected: {:?}",
+        affected
+    );
     Ok(affected)
 }
 
@@ -61,15 +63,18 @@ pub fn delete_by_prefix_path(pre_path: &str) -> Result<usize, RepositoryError> {
     } else {
         format!("{}{}%", pre_path, std::path::MAIN_SEPARATOR)
     };
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("delete from file_content_fts join file_info on file_content_fts.file_id = file_info.id where file_info.path = ?1 or file_info.path like ?2")?;
     let affected = stmt.execute((pre_path, pattern))?;
-    log::debug!("delete file_content_fts by prefix path affected: {:?}", affected);
+    log::debug!(
+        "delete file_content_fts by prefix path affected: {:?}",
+        affected
+    );
     Ok(affected)
 }
 
 pub fn clear() -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("delete from file_content_fts")?;
     let affected = stmt.execute([])?;
     log::debug!("clear file_content_fts affected: {:?}", affected);
@@ -89,7 +94,7 @@ pub async fn search(query: &str, limit: usize) -> Result<Vec<FtsSearchResult>, R
         .map(|k| k.to_string())
         .collect::<Vec<_>>()
         .join(" OR ");
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let max_rows = if keywords.len() <= 2 { 500 } else { 700 };
     let mut stmt = conn.prepare(
         r#"

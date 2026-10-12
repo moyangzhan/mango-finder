@@ -1,6 +1,7 @@
 use crate::cluster::api_types::{
-    CommonResponse, PingData, SearchData, ChunksData, ChunksRequest, FindSimilarsData,
-    CODE_MISSING_DEVICE_ID, CODE_DEVICE_NOT_PAIRED, CODE_NOT_FOUND, CODE_INTERNAL_ERROR,
+    CODE_DEVICE_NOT_PAIRED, CODE_INTERNAL_ERROR, CODE_MISSING_DEVICE_ID, CODE_NOT_FOUND,
+    ChunksData, ChunksRequest, CliSearchData, CliSearchRequest, CliSimilarData, CliSimilarRequest,
+    CommonResponse, FindSimilarsData, PingData, SearchData,
 };
 use crate::entities::{Device, PairingRequest};
 use crate::enums::{OnlineStatus, PairingRequestStatus, PairingResponseStatus, PairingStatus};
@@ -9,26 +10,29 @@ use crate::repositories::{
     device_repo, file_content_embedding_repo, file_info_repo, pairing_request_repo,
 };
 use crate::searcher;
+use crate::similarity::similarity_service;
 use crate::structs::cluster_config::{
     DeviceCapabilities, PairingRequestPayload, PairingResponsePayload, RemoteFindSimilarsRequest,
     RemoteSearchRequest, ResetNotifyPayload,
 };
-use rust_i18n::t;
 use axum::{
     Router,
     body::Body,
-    extract::{Path, State},
+    extract::{ConnectInfo, Path, Request, State},
     http::{HeaderMap, StatusCode, header},
-    response::{Json, Response},
+    middleware::{self, Next},
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
 };
+use rust_i18n::t;
 use serde::Serialize;
 use serde_json::{Value, json};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use tauri::Emitter;
 use tokio::sync::watch;
 
@@ -49,6 +53,40 @@ static PROCESSED_REQUESTS: std::sync::RwLock<Option<HashMap<String, Instant>>> =
 /// Cache expiration time in seconds (10 minutes)
 /// 缓存过期时间（10分钟）
 const REQUEST_CACHE_TTL_SECS: u64 = 600;
+
+/// Whether this process runs as the CLI daemon host
+/// (decides whether /cli/shutdown actually exits)
+/// 当前进程是否以 CLI daemon 宿主身份运行(决定 /cli/shutdown 是否真正退出)
+pub static IS_DAEMON: AtomicBool = AtomicBool::new(false);
+
+/// Timestamp of the last /cli request (basis for daemon idle exit;
+/// /ping probes do not count)
+/// 最近一次 /cli 请求时间(daemon 空闲退出依据;/ping 探测不计入)
+static LAST_CLI_REQUEST: std::sync::RwLock<Option<Instant>> = std::sync::RwLock::new(None);
+
+/// Mark this process as the CLI daemon host and start the idle timer
+/// 标记当前进程为 CLI daemon 宿主,并启动空闲计时
+pub fn mark_daemon() {
+    IS_DAEMON.store(true, Ordering::Relaxed);
+    touch_cli_request();
+}
+
+/// Record one /cli request (refreshes the daemon idle timer)
+/// 记录一次 /cli 请求(刷新 daemon 空闲计时)
+pub fn touch_cli_request() {
+    if let Ok(mut guard) = LAST_CLI_REQUEST.write() {
+        *guard = Some(Instant::now());
+    }
+}
+
+/// Seconds since the last /cli request (None when there has never been one)
+/// 距最近一次 /cli 请求的秒数(从未请求过返回 None)
+pub fn cli_idle_secs() -> Option<u64> {
+    LAST_CLI_REQUEST
+        .read()
+        .ok()
+        .and_then(|g| g.map(|t| t.elapsed().as_secs()))
+}
 
 // ============================================================================
 // Helper Functions / 辅助函数
@@ -73,12 +111,22 @@ fn verify_paired_device<T: Serialize>(headers: &HeaderMap) -> Result<&str, Commo
     match device {
         Some(d) if d.pairing_status == PairingStatus::Paired => Ok(requester_id),
         Some(d) => {
-            log::warn!("Device {} not paired, status: {:?}", requester_id, d.pairing_status);
-            Err(CommonResponse::error(CODE_DEVICE_NOT_PAIRED, "Device not paired"))
+            log::warn!(
+                "Device {} not paired, status: {:?}",
+                requester_id,
+                d.pairing_status
+            );
+            Err(CommonResponse::error(
+                CODE_DEVICE_NOT_PAIRED,
+                "Device not paired",
+            ))
         }
         None => {
             log::warn!("Device {} not found", requester_id);
-            Err(CommonResponse::error(CODE_DEVICE_NOT_PAIRED, "Device not found"))
+            Err(CommonResponse::error(
+                CODE_DEVICE_NOT_PAIRED,
+                "Device not found",
+            ))
         }
     }
 }
@@ -102,7 +150,11 @@ fn verify_paired_device_status(headers: &HeaderMap) -> Result<&str, StatusCode> 
     match device {
         Some(d) if d.pairing_status == PairingStatus::Paired => Ok(requester_id),
         Some(d) => {
-            log::warn!("Device {} not paired, status: {:?}", requester_id, d.pairing_status);
+            log::warn!(
+                "Device {} not paired, status: {:?}",
+                requester_id,
+                d.pairing_status
+            );
             Err(StatusCode::FORBIDDEN)
         }
         None => {
@@ -110,6 +162,136 @@ fn verify_paired_device_status(headers: &HeaderMap) -> Result<&str, StatusCode> 
             Err(StatusCode::FORBIDDEN)
         }
     }
+}
+
+// ============================================================================
+// Local API /cli - endpoints for local (on-machine) clients
+// Local API /cli - 本机客户端(CLI)端点
+// ============================================================================
+
+/// /cli auth: loopback connections only, X-Device-ID must be the local
+/// CLIENT_ID, and the Host header must be a loopback literal. Local processes
+/// share the same trust domain as the database (they can read it directly).
+/// The Host check blocks DNS-rebinding pages: a rebound browser origin
+/// connects from 127.0.0.1 and can read device_id from the unauthenticated
+/// /ping, but its Host header carries the attacker hostname, not a loopback
+/// literal. Remote devices do not use these endpoints and go through cluster
+/// pairing.
+/// /cli 鉴权:仅允许回环连接、X-Device-ID 须为本机 CLIENT_ID,且 Host 头
+/// 必须是回环字面量。本机进程与数据库同信任域(可直接读库)。Host 校验
+/// 用于阻断 DNS rebinding 页面:重绑定源的浏览器请求虽来自 127.0.0.1、
+/// 也能从无鉴权的 /ping 读到 device_id,但其 Host 头是攻击者域名而非回环
+/// 字面量。远程设备不走这组端点,仍走 cluster 配对校验。
+async fn verify_loopback(req: Request, next: Next) -> Response {
+    let own_id = crate::read_lock!(CLIENT_ID).clone();
+    let allowed = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.ip().is_loopback())
+        .unwrap_or(false)
+        && req
+            .headers()
+            .get("X-Device-ID")
+            .and_then(|v| v.to_str().ok())
+            .map(|id| id == own_id)
+            .unwrap_or(false)
+        && req
+            .headers()
+            .get(header::HOST)
+            .and_then(|v| v.to_str().ok())
+            .map(is_loopback_host)
+            .unwrap_or(false);
+    if !allowed {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    touch_cli_request();
+    next.run(req).await
+}
+
+/// Whether a Host header value (e.g. "127.0.0.1:10678") names a loopback
+/// literal ("127.0.0.1", "localhost", "[::1]"), ignoring the port.
+/// Host 头值(如 "127.0.0.1:10678")是否为回环字面量("127.0.0.1"、
+/// "localhost"、"[::1]"),忽略端口。
+fn is_loopback_host(host: &str) -> bool {
+    let host = host.trim();
+    // IPv6 字面量带端口时形如 "[::1]:port"
+    if let Some(rest) = host.strip_prefix("[::1]") {
+        return rest.is_empty() || rest.starts_with(':');
+    }
+    let name = host.split(':').next().unwrap_or("");
+    name.eq_ignore_ascii_case("localhost") || name == "127.0.0.1"
+}
+
+/// POST /cli/search - query entry for local clients.
+/// Calls the same searcher function as the CLI's in-process path,
+/// so behavior is identical field by field.
+/// POST /cli/search - 本地客户端查询入口。
+/// 与 CLI 进程内路径调用相同的 searcher 函数,行为逐字段一致
+async fn cli_search(Json(req): Json<CliSearchRequest>) -> CommonResponse<CliSearchData> {
+    let results = searcher::search_by_type(&req.query, req.search_type.as_deref()).await;
+    let total = results.len();
+    let results: Vec<_> = results.into_iter().take(req.limit.unwrap_or(10)).collect();
+    CommonResponse::success(CliSearchData { results, total })
+}
+
+/// POST /cli/similar/:file_id - local similarity query.
+/// Calls the same similarity_service function as the CLI's in-process path
+/// (includes cross-device aggregation when the cluster is enabled).
+/// POST /cli/similar/:file_id - 本地相似查询。
+/// 与 CLI 进程内路径调用相同的 similarity_service 函数(集群开启时含跨设备聚合)
+async fn cli_similar(
+    Path(file_id): Path<i64>,
+    Json(req): Json<CliSimilarRequest>,
+) -> CommonResponse<CliSimilarData> {
+    match similarity_service::find_similars_for_local_file(file_id, req.limit.unwrap_or(10)).await {
+        Ok(results) => CommonResponse::success(CliSimilarData { results }),
+        Err(e) => CommonResponse::error(
+            CODE_INTERNAL_ERROR,
+            &format!("Failed to find similar files: {}", e),
+        ),
+    }
+}
+
+/// POST /cli/shutdown - ask the daemon host to exit; a GUI host ignores it
+/// (its service follows the GUI's lifetime). Callers distinguish the host
+/// by pinging again after shutdown. Auth is the loopback + X-Device-ID
+/// middleware on /cli/*.
+/// POST /cli/shutdown - 请求 daemon 宿主退出;GUI 宿主忽略(服务随 GUI 生命周期)。
+/// 调用方通过 shutdown 后的二次 ping 感知宿主身份。鉴权由 /cli/* 的
+/// 回环 + X-Device-ID 中间件承担
+/// Wait (bounded at 10s) until the serve task has actually stopped — i.e.
+/// all in-flight responses are written and the listener released. Callers
+/// use this after `stop_http_server` before exiting the process.
+/// 等待(上限 10s)serve 任务真正停止 —— 在途响应已写完、监听已释放。
+/// 调用方在 `stop_http_server` 之后、进程退出之前使用。
+pub async fn wait_server_stopped() {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if !server_already_running() {
+            return;
+        }
+    }
+}
+
+async fn cli_shutdown() -> CommonResponse<()> {
+    if IS_DAEMON.load(Ordering::Relaxed) {
+        tokio::spawn(async {
+            // Graceful drain instead of a fixed sleep: stop sends the signal,
+            // then we wait until the serve task actually finished (it clears
+            // SHUTDOWN_SENDER once all in-flight responses are written). This
+            // both flushes our own response and avoids killing other CLIs'
+            // in-flight queries. Bounded at 10s for safety.
+            // 优雅排水而非固定 sleep:stop 发信号后,等待 serve 任务真正结束
+            // (全部在途响应写完后会清空 SHUTDOWN_SENDER)。既保证本响应写回,
+            // 也不会杀掉其他 CLI 的在途查询;上限 10s 兜底。
+            stop_http_server().await;
+            wait_server_stopped().await;
+            log::info!("CLI daemon exiting on /cli/shutdown");
+            std::process::exit(0);
+        });
+    }
+    CommonResponse::success(())
 }
 
 /// Initialize the processed requests cache
@@ -137,7 +319,10 @@ fn check_and_mark_request(request_id: &str) -> bool {
         // Check if already processed
         if let Some(&timestamp) = cache.get(request_id) {
             if now.duration_since(timestamp).as_secs() < REQUEST_CACHE_TTL_SECS {
-                log::warn!("Request {} already processed, ignoring to prevent loop", request_id);
+                log::warn!(
+                    "Request {} already processed, ignoring to prevent loop",
+                    request_id
+                );
                 return true;
             }
             // Expired, remove old entry
@@ -184,11 +369,15 @@ pub async fn is_port_available(port: i32) -> bool {
     create_exclusive_socket(port).is_ok()
 }
 
-/// Create a socket with exclusive address use
-/// 创建独占地址的 socket
+/// Create a socket with exclusive address use, bound to 0.0.0.0
+/// 创建独占地址的 socket（绑定 0.0.0.0）
 fn create_exclusive_socket(port: i32) -> Result<tokio::net::TcpListener, std::io::Error> {
-    let addr = SocketAddr::from(([0, 0, 0, 0], port as u16));
+    create_exclusive_socket_on(SocketAddr::from(([0, 0, 0, 0], port as u16)))
+}
 
+/// Create a socket with exclusive address use on the given address
+/// 创建独占地址的 socket，绑定到指定地址
+fn create_exclusive_socket_on(addr: SocketAddr) -> Result<tokio::net::TcpListener, std::io::Error> {
     // Create socket with socket2
     let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
 
@@ -197,7 +386,9 @@ fn create_exclusive_socket(port: i32) -> Result<tokio::net::TcpListener, std::io
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawSocket;
-        use windows_sys::Win32::Networking::WinSock::{setsockopt, SO_EXCLUSIVEADDRUSE, SOL_SOCKET};
+        use windows_sys::Win32::Networking::WinSock::{
+            SO_EXCLUSIVEADDRUSE, SOL_SOCKET, setsockopt,
+        };
 
         socket.set_reuse_address(false)?;
 
@@ -245,50 +436,46 @@ fn create_exclusive_socket(port: i32) -> Result<tokio::net::TcpListener, std::io
 pub async fn start_http_server() -> Result<(), String> {
     // Check if server is already running
     // 检查服务器是否已经在运行
-    if let Ok(guard) = SHUTDOWN_SENDER.read() {
-        if guard.is_some() {
-            log::info!("HTTP server is already running, skip start");
-            return Ok(());
-        }
+    if server_already_running() {
+        log::info!("HTTP server is already running, skip start");
+        return Ok(());
     }
 
-    // Load port from database
-    let setting = super::get_cluster_setting().await;
-    let port = if setting.port > 0 {
-        setting.port
-    } else {
-        DEFAULT_PORT
-    };
+    let (port, device_id, device_name) = resolve_identity().await;
 
-    let device_id = crate::read_lock!(CLIENT_ID).clone();
-    let device_name = if setting.device_name.is_empty() {
-        hostname::get()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "MangoFinder".to_string())
-    } else {
-        setting.device_name
-    };
-
-    // Try binding to the configured port with exclusive access
-    // 使用独占模式绑定端口
-    let addr = SocketAddr::from(([0, 0, 0, 0], port as u16));
+    // Bind with exclusive access; if the port is held by our own CLI daemon,
+    // ask it to yield first (close-then-start, so the daemon's model memory is
+    // released before this process warms up its own). Retry a few times: a
+    // concurrent CLI invocation may spawn a fresh daemon into the gap between
+    // the old daemon's exit and our rebind — yield it too instead of failing.
+    // 绑定失败时先尝试请自家 CLI daemon 让位(先关后开,避免双份模型常驻)。
+    // 重试数次:并发 CLI 命令可能在旧 daemon 退出与本进程重绑的间隙里拉起新
+    // daemon —— 对它继续让位,而不是直接失败。
     let listener = match create_exclusive_socket(port) {
         Ok(l) => l,
         Err(e) => {
-            let error_msg = format!("Port {} is already in use: {}", port, e);
-            log::error!("Failed to bind port {}: {}", port, e);
-
-            // Notify frontend about port binding failure (user-friendly message)
-            // 通知前端端口绑定失败（用户友好的信息）
-            if let Some(app_handle) = APP_HANDLE.get() {
-                if let Err(emit_err) = app_handle.emit("cluster-port-error", &serde_json::json!({
-                    "port": port
-                })) {
-                    log::error!("Failed to emit cluster-port-error event: {}", emit_err);
+            let mut last_err = e;
+            let mut bound = None;
+            for _ in 0..5 {
+                if !try_yield_to_cli_daemon(port).await {
+                    break;
+                }
+                match create_exclusive_socket(port) {
+                    Ok(l) => {
+                        bound = Some(l);
+                        break;
+                    }
+                    Err(retry_err) => last_err = retry_err,
                 }
             }
-
-            return Err(error_msg);
+            match bound {
+                Some(l) => l,
+                None => {
+                    log::error!("Failed to bind port {}: {}", port, last_err);
+                    emit_port_error(port);
+                    return Err(format!("Port {} is already in use: {}", port, last_err));
+                }
+            }
         }
     };
 
@@ -297,7 +484,90 @@ pub async fn start_http_server() -> Result<(), String> {
         log::error!("Failed to update cluster port: {}", e);
     }
 
-    log::info!("HTTP server listening on {}", addr);
+    serve_on(listener, device_id, device_name, port).await
+}
+
+/// Clamp to the valid port range (single source shared with the CLI's
+/// local_port): out-of-range values fall back to the default so `as u16`
+/// truncation can never make bind/probe/check disagree.
+/// 钳制到合法端口区间(与 CLI 的 local_port 共用的单一来源):超范围值统一
+/// 回退默认端口,`as u16` 截断不会让绑定/探测/check 落在不同端口上。
+pub fn clamp_port(port: i32) -> i32 {
+    if (1..=65535).contains(&port) {
+        port
+    } else {
+        DEFAULT_PORT
+    }
+}
+
+/// Resolve the shared server identity: port (DB cluster_setting with the
+/// typed default) plus device_id/device_name for ServerState.
+/// 解析公共服务身份:端口(DB cluster_setting,类型默认值兜底)与
+/// ServerState 所需的 device_id/device_name。
+async fn resolve_identity() -> (i32, String, String) {
+    let setting = super::get_cluster_setting().await;
+    let port = clamp_port(setting.port);
+    let device_id = crate::read_lock!(CLIENT_ID).clone();
+    let device_name = if setting.device_name.is_empty() {
+        hostname::get()
+            .map(|h| h.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "MangoFinder".to_string())
+    } else {
+        setting.device_name
+    };
+    (port, device_id, device_name)
+}
+
+/// Whether the HTTP server is already running in this process
+/// 本进程内服务是否已在运行
+fn server_already_running() -> bool {
+    SHUTDOWN_SENDER.read().map(|g| g.is_some()).unwrap_or(false)
+}
+
+/// Start the HTTP server bound to loopback only (CLI daemon host, `mfd serve`)
+/// 以 CLI daemon 宿主身份启动,仅绑定回环地址,不向局域网暴露
+pub async fn start_http_server_loopback() -> Result<(), String> {
+    if server_already_running() {
+        log::info!("HTTP server is already running, skip start");
+        return Ok(());
+    }
+    let (port, device_id, device_name) = resolve_identity().await;
+
+    // The daemon never yields: a busy port means a host already exists,
+    // which the CLI-side single-instance check guards against.
+    // daemon 不做让位:端口被占说明已有宿主,由 CLI 侧的单实例检查兜底
+    let addr = SocketAddr::from(([127, 0, 0, 1], port as u16));
+    let listener = create_exclusive_socket_on(addr)
+        .map_err(|e| format!("Port {} is already in use: {}", port, e))?;
+
+    serve_on(listener, device_id, device_name, port).await
+}
+
+/// Notify frontend about port binding failure (user-friendly message)
+/// 通知前端端口绑定失败（用户友好的信息）
+fn emit_port_error(port: i32) {
+    if let Some(app_handle) = APP_HANDLE.get() {
+        if let Err(emit_err) =
+            app_handle.emit("cluster-port-error", &serde_json::json!({ "port": port }))
+        {
+            log::error!("Failed to emit cluster-port-error event: {}", emit_err);
+        }
+    }
+}
+
+/// Shared server setup: routes, shutdown channel, background serve task
+/// 公共启动逻辑:路由、关闭通道、后台 serve
+async fn serve_on(
+    listener: tokio::net::TcpListener,
+    device_id: String,
+    device_name: String,
+    port: i32,
+) -> Result<(), String> {
+    let local_addr = listener
+        .local_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| format!("port {}", port));
+    log::info!("HTTP server listening on {}", local_addr);
 
     init_request_cache();
 
@@ -307,20 +577,34 @@ pub async fn start_http_server() -> Result<(), String> {
         port,
     });
 
+    // /cli local API: local clients only, loopback + local CLIENT_ID double-check
+    // /cli 本地 API:仅供本机客户端,回环 + 本机 CLIENT_ID 双校验
+    let cli_routes = Router::new()
+        .route("/cli/search", post(cli_search))
+        .route("/cli/similar/:file_id", post(cli_similar))
+        .route("/cli/shutdown", post(cli_shutdown))
+        .layer(middleware::from_fn(verify_loopback));
+
     let app = Router::new()
         .route("/ping", get(handle_ping))
-        .route("/search", post(handle_search))
-        .route("/chunks", post(handle_chunks))
-        .route("/file/:file_id/cluster_similars", post(handle_find_similars))
-        .route("/file/:file_id", get(handle_file_download))
-        .route("/file/:file_id/content", get(handle_file_content))
-        .route("/pairing/request", post(handle_pairing_request))
-        .route("/pairing/respond", post(handle_pairing_respond))
-        .route("/pairing/reset_notify", post(handle_reset_notify))
+        // Inter-device protocol gets a /cluster prefix, separated from the
+        // /cli (local) namespace. No legacy-path compatibility: devices are
+        // expected to upgrade together.
+        // 设备间协议加 /cluster 前缀,与 /cli(本机)命名空间区分;
+        // 不保留旧路径兼容:多设备约定一起升级
+        .route("/cluster/search", post(handle_search))
+        .route("/cluster/chunks", post(handle_chunks))
+        .route(
+            "/cluster/file/:file_id/similars",
+            post(handle_find_similars),
+        )
+        .route("/cluster/file/:file_id", get(handle_file_download))
+        .route("/cluster/file/:file_id/content", get(handle_file_content))
+        .route("/cluster/pairing/request", post(handle_pairing_request))
+        .route("/cluster/pairing/respond", post(handle_pairing_respond))
+        .route("/cluster/pairing/reset_notify", post(handle_reset_notify))
+        .merge(cli_routes)
         .with_state(state);
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], port as u16));
-    log::info!("HTTP server listening on {}", addr);
 
     // Setup shutdown channel
     let (shutdown_sender, mut shutdown_receiver) = watch::channel(false);
@@ -332,18 +616,75 @@ pub async fn start_http_server() -> Result<(), String> {
 
     // Spawn the server in a background task so this function returns immediately
     tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, app.into_make_service())
-            .with_graceful_shutdown(async move {
-                shutdown_receiver.changed().await.ok();
-                log::info!("HTTP server shutdown signal received");
-            })
-            .await
+        if let Err(e) = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            shutdown_receiver.changed().await.ok();
+            log::info!("HTTP server shutdown signal received");
+        })
+        .await
         {
             log::error!("HTTP server error: {}", e);
+        }
+        // The server has actually stopped: clear the sender so a later
+        // start_http_server (port change, disable→re-enable) can bind again
+        // instead of seeing a stale "already running" flag.
+        // 服务已实际停止:清空 sender,后续 start_http_server(改端口、
+        // 关闭再开启集群)才能重新绑定,而不是被残留标记误判为已运行
+        if let Ok(mut guard) = SHUTDOWN_SENDER.write() {
+            *guard = None;
         }
     });
 
     Ok(())
+}
+
+/// Port held by our own CLI daemon: ask it to exit and wait until it really
+/// does (probe no longer `Ours`) before the caller rebinds — close first,
+/// then start. The probe/shutdown handshake is shared with the CLI via
+/// `cluster::local_probe`.
+/// 端口被自家 CLI daemon 占用时:请求其退出并等待端口真正释放(探测不再是
+/// 自家服务),再由调用方重绑 —— 先关后开。探测/关闭握手与 CLI 共用
+/// `cluster::local_probe`。
+async fn try_yield_to_cli_daemon(port: i32) -> bool {
+    use super::local_probe::{self, LocalProbe};
+
+    // Only our own daemon yields; a GUI host or a foreign holder does not
+    // 只有自家 daemon 会退出;GUI 宿主或外部占用者不会让位
+    if local_probe::probe(port).await != LocalProbe::Ours {
+        return false;
+    }
+    let _ = local_probe::request_shutdown(port).await;
+
+    // Wait for the real exit (up to 12s, two consecutive non-Ours probes):
+    // the daemon's graceful drain is itself bounded at 10s (in-flight
+    // responses), so a 5s budget would misjudge a legitimately draining
+    // daemon as stuck. Mirrors handle_shutdown's guard so a momentarily slow
+    // /ping cannot be misread as "exited".
+    // 等待真正退出(上限 12s,连续两次探测非自家):daemon 的优雅排水上限
+    // 10s(在途响应),5s 预算会把正常排水中的 daemon 误判为卡死。与
+    // handle_shutdown 的防护一致,单次慢 /ping 不会被误读为"已退出"。
+    let deadline = Instant::now() + Duration::from_secs(12);
+    let mut consecutive_gone = 0;
+    loop {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        if local_probe::probe(port).await != LocalProbe::Ours {
+            consecutive_gone += 1;
+            if consecutive_gone >= 2 {
+                log::info!("CLI daemon on port {} has yielded", port);
+                return true;
+            }
+        } else {
+            consecutive_gone = 0;
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+    }
+    log::warn!("CLI daemon on port {} did not exit in time", port);
+    false
 }
 
 /// Stop HTTP server
@@ -383,7 +724,12 @@ async fn handle_search(
     headers: HeaderMap,
     Json(req): Json<RemoteSearchRequest>,
 ) -> CommonResponse<SearchData> {
-    log::info!("POST /search query={}, type={}, limit={}", req.query, req.search_type, req.limit);
+    log::info!(
+        "POST /cluster/search query={}, type={}, limit={}",
+        req.query,
+        req.search_type,
+        req.limit
+    );
     // Verify requester is paired
     let _requester_id: &str = match verify_paired_device(&headers) {
         Ok(id) => id,
@@ -458,7 +804,12 @@ async fn handle_find_similars(
     Path(file_id): Path<i64>,
     Json(req): Json<RemoteFindSimilarsRequest>,
 ) -> CommonResponse<FindSimilarsData> {
-    log::info!("POST /file/{}/cluster_similars request_id={}, limit={}", file_id, req.request_id, req.limit);
+    log::info!(
+        "POST /file/{}/cluster_similars request_id={}, limit={}",
+        file_id,
+        req.request_id,
+        req.limit
+    );
 
     // Verify requester is paired first
     let requester_id: &str = match verify_paired_device(&headers) {
@@ -486,11 +837,17 @@ async fn handle_find_similars(
         Ok(Some(f)) => f,
         Ok(None) => {
             log::warn!("File not found: {}", file_id);
-            return CommonResponse::error(CODE_NOT_FOUND, &t!("message.file-not-found").to_string());
+            return CommonResponse::error(
+                CODE_NOT_FOUND,
+                &t!("message.file-not-found").to_string(),
+            );
         }
         Err(e) => {
             log::error!("Failed to get file: {}", e);
-            return CommonResponse::error(CODE_INTERNAL_ERROR, &t!("message.internal-error").to_string());
+            return CommonResponse::error(
+                CODE_INTERNAL_ERROR,
+                &t!("message.internal-error").to_string(),
+            );
         }
     };
 
@@ -504,22 +861,31 @@ async fn handle_find_similars(
     }
 
     // 1. Search locally
-    let local_results = match crate::similarity::local_similarity_service::find_similars_by_file_id(&file_info, limit).await {
+    let local_results = match crate::similarity::local_similarity_service::find_similars_by_file_id(
+        &file_info, limit,
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => {
             log::error!("Failed to find local similar files: {}", e);
-            return CommonResponse::error(CODE_INTERNAL_ERROR, &t!("message.internal-error").to_string());
+            return CommonResponse::error(
+                CODE_INTERNAL_ERROR,
+                &t!("message.internal-error").to_string(),
+            );
         }
     };
 
     // 2. Search on other remote devices (with updated exclude list)
     //    Pass the same request_id to prevent loops
-    let remote_results = crate::similarity::remote_similarity_service::remote_find_similars_with_exclude(
-        &file_info,
-        limit,
-        &exclude_device_ids,
-        &req.request_id,
-    ).await;
+    let remote_results =
+        crate::similarity::remote_similarity_service::remote_find_similars_with_exclude(
+            &file_info,
+            limit,
+            &exclude_device_ids,
+            &req.request_id,
+        )
+        .await;
 
     // 3. Merge results
     let mut all_results = local_results;
@@ -568,7 +934,11 @@ async fn handle_file_download(
         StatusCode::NOT_FOUND
     })?;
     if file_meta.len() > MAX_DOWNLOAD_SIZE {
-        log::warn!("File too large for download ({} bytes): {}", file_meta.len(), file_path);
+        log::warn!(
+            "File too large for download ({} bytes): {}",
+            file_meta.len(),
+            file_path
+        );
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
     let file_data = std::fs::read(file_path).map_err(|e| {
@@ -603,12 +973,14 @@ async fn handle_file_download(
 
     // Build response with file data
     // Sanitize filename and encode per RFC 5987 to handle special characters and prevent header injection
-    let safe_filename = file_info.name
+    let safe_filename = file_info
+        .name
         .replace('\\', "")
         .replace('"', "")
         .replace('\r', "")
         .replace('\n', "");
-    let encoded_filename: String = safe_filename.bytes()
+    let encoded_filename: String = safe_filename
+        .bytes()
         .flat_map(|b| {
             if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' {
                 vec![b as char]
@@ -658,7 +1030,11 @@ async fn handle_file_content(
         if let Some(storage) = STORAGE_PATH.get() {
             let md_path = std::path::Path::new(storage).join(relative_path);
             file_info.content = std::fs::read_to_string(&md_path).unwrap_or_else(|e| {
-                log::warn!("Failed to read parsed document {}: {}", md_path.display(), e);
+                log::warn!(
+                    "Failed to read parsed document {}: {}",
+                    md_path.display(),
+                    e
+                );
                 String::new()
             });
         } else {
@@ -769,7 +1145,12 @@ fn handle_auto_pair(payload: &PairingRequestPayload) -> Option<Result<Json<Value
     // Update device to paired status (automatic process)
     if let Ok(Some(device)) = device_repo::get_by_device_id(&payload.device_id) {
         let remark = t!("pairing.remark.auto-paired");
-        let _ = device_repo::update_pairing_status_with_remark(device.id, PairingStatus::Paired, &remark, false);
+        let _ = device_repo::update_pairing_status_with_remark(
+            device.id,
+            PairingStatus::Paired,
+            &remark,
+            false,
+        );
     }
 
     // Update outgoing request to accepted
@@ -823,7 +1204,12 @@ async fn handle_auto_accept(
 
     // Update pairing status with remark (upsert doesn't set pairing_remark)
     let remark = t!("pairing.remark.auto-accepted");
-    let _ = device_repo::update_pairing_status_with_remark(inserted_device.id, PairingStatus::Paired, &remark, false);
+    let _ = device_repo::update_pairing_status_with_remark(
+        inserted_device.id,
+        PairingStatus::Paired,
+        &remark,
+        false,
+    );
 
     // Log the request
     let request = PairingRequest {
@@ -874,11 +1260,17 @@ fn handle_pending_request(payload: &PairingRequestPayload) -> Result<Json<Value>
         discovery_method: "mdns".to_string(),
         ..Default::default()
     };
-    let upserted_device = device_repo::upsert(&device).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let upserted_device =
+        device_repo::upsert(&device).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Update pairing status with remark (upsert doesn't set pairing_remark)
     let remark = t!("pairing.remark.waiting-approval").to_string();
-    let _ = device_repo::update_pairing_status_with_remark(upserted_device.id, PairingStatus::PendingIn, &remark, false);
+    let _ = device_repo::update_pairing_status_with_remark(
+        upserted_device.id,
+        PairingStatus::PendingIn,
+        &remark,
+        false,
+    );
 
     // Notify frontend about pending request
     notify_pairing_handled(payload, "pending");
@@ -935,16 +1327,19 @@ async fn handle_pairing_respond(
     // Update device pairing status - use responder_id to find the remote device
     if let Ok(Some(device)) = device_repo::get_by_device_id(&payload.responder_id) {
         let (new_status, remark) = if payload.approved {
-            (PairingStatus::Paired, t!("pairing.remark.remote-accepted").to_string())
+            (
+                PairingStatus::Paired,
+                t!("pairing.remark.remote-accepted").to_string(),
+            )
         } else {
             // Remote device rejected our request, mark as blocked
             // 对方拒绝了本机的请求，标记为 blocked
-            (PairingStatus::Blocked, t!("pairing.remark.remote-rejected").to_string())
+            (
+                PairingStatus::Blocked,
+                t!("pairing.remark.remote-rejected").to_string(),
+            )
         };
-        log::info!(
-            "Updating device pairing status to {:?}",
-            new_status
-        );
+        log::info!("Updating device pairing status to {:?}", new_status);
         device_repo::update_pairing_status_with_remark(device.id, new_status, &remark, false)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
@@ -955,9 +1350,15 @@ async fn handle_pairing_respond(
         pairing_request_repo::get_latest_by_device_id_any(&payload.responder_id)
     {
         let (status, remark) = if payload.approved {
-            (PairingRequestStatus::Accepted, t!("pairing.remark.remote-accepted").to_string())
+            (
+                PairingRequestStatus::Accepted,
+                t!("pairing.remark.remote-accepted").to_string(),
+            )
         } else {
-            (PairingRequestStatus::Rejected, t!("pairing.remark.remote-rejected").to_string())
+            (
+                PairingRequestStatus::Rejected,
+                t!("pairing.remark.remote-rejected").to_string(),
+            )
         };
         let _ = pairing_request_repo::update_status_with_remark(latest_request.id, status, &remark);
     }
@@ -999,11 +1400,20 @@ async fn handle_reset_notify(
         // Note: is_manual=true because remote reset is triggered by user action on remote device
         // 注意: is_manual=true 因为远程重置是由对方设备上的用户操作触发的
         let remark = t!("pairing.remark.remote-reset").to_string();
-        device_repo::update_pairing_status_with_remark(device.id, PairingStatus::None, &remark, true)
-            .map_err(|e| {
-                log::error!("Failed to update pairing status for device {}: {:?}", payload.from_device_id, e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+        device_repo::update_pairing_status_with_remark(
+            device.id,
+            PairingStatus::None,
+            &remark,
+            true,
+        )
+        .map_err(|e| {
+            log::error!(
+                "Failed to update pairing status for device {}: {:?}",
+                payload.from_device_id,
+                e
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
         // Update the latest pairing request record for this device
         // 更新该设备最新的配对请求记录

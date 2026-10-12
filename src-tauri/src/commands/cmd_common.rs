@@ -7,7 +7,7 @@ use chrono::Utc;
 use std::fs::read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
-use tauri::{command, AppHandle, Manager};
+use tauri::{AppHandle, Manager, command};
 
 #[command]
 pub async fn ui_mounted(app: AppHandle) -> Result<(), String> {

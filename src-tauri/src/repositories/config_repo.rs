@@ -1,10 +1,9 @@
 use crate::entities::Config;
 use crate::repositories::RepositoryError;
-use crate::utils::app_util::get_db_path;
-use rusqlite::{Connection, Result};
+use rusqlite::Result;
 
 pub fn get_one(config_name: &str) -> Result<Option<Config>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select * from config where name = ?1 limit 1")?;
     let hit_config = match stmt.query_row([config_name], |row| {
         Ok(Config {
@@ -23,7 +22,7 @@ pub fn get_one(config_name: &str) -> Result<Option<Config>, RepositoryError> {
 }
 
 pub fn get_val(config_name: &str) -> String {
-    let conn = match Connection::open(get_db_path()) {
+    let conn = match crate::db_init_manager::open_db() {
         Ok(c) => c,
         Err(e) => {
             log::error!("Failed to open db: {}", e);
@@ -48,21 +47,21 @@ pub fn get_val(config_name: &str) -> String {
 }
 
 pub fn insert(config_name: &str, config_value: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("insert into config (name, value) values (?1, ?2)")?;
     let affected = stmt.execute([config_name, config_value])?;
     Ok(affected)
 }
 
 pub fn insert_or_ignore(config_name: &str, config_value: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("insert or ignore into config (name, value) values (?1, ?2)")?;
     let affected = stmt.execute([config_name, config_value])?;
     Ok(affected)
 }
 
 pub fn update_by_name(config_name: &str, new_value: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("update config set value = ?1 where name = ?2")?;
     let affected = stmt.execute([new_value, config_name])?;
     Ok(affected)
@@ -70,8 +69,8 @@ pub fn update_by_name(config_name: &str, new_value: &str) -> Result<usize, Repos
 
 /// Get config value as Option<String>
 pub fn get_value(config_name: &str) -> Result<Option<String>, String> {
-    let conn = Connection::open(get_db_path())
-        .map_err(|e| format!("Failed to open db: {}", e))?;
+    let conn =
+        crate::db_init_manager::open_db().map_err(|e| format!("Failed to open db: {}", e))?;
     let mut stmt = conn
         .prepare("select value from config where name = ?1 limit 1")
         .map_err(|e| format!("Failed to prepare stmt: {}", e))?;
@@ -89,7 +88,7 @@ pub fn get_value(config_name: &str) -> Result<Option<String>, String> {
 /// Save or update a config value (upsert)
 /// 保存或更新配置值（upsert）
 pub fn upsert(config_name: &str, config_value: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "INSERT INTO config (name, value) VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET value = ?2"
     )?;

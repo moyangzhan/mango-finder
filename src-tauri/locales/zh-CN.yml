@@ -68,3 +68,87 @@ cli:
     no-indexed-files: 没有已索引的文件，请先使用 'mfd index start' 索引文件
     no-paired-devices: 没有已配对的设备，请在 GUI 中添加设备或接受配对请求
     all-normal: 系统状态正常，可以正常使用所有功能
+  table:
+    error: 错误
+    yes: 是
+    no: 否
+    no_results: 没有匹配结果
+    results_summary: 共 %{total} 条匹配，显示 %{returned} 条（耗时 %{elapsed}ms）
+    query_file: 查询文件
+    indexed_now: 该文件已加入索引，后续查询走快路径
+    notice: 提示
+    matched_files: 同名文件
+    recent_tasks: 最近任务
+    page_info: 第 %{page} 页，每页 %{size} 条
+    score: 匹配度
+    name: 名称
+    category: 分类
+    path: 路径
+    id: ID
+    status: 状态
+    files: 文件数
+    failed: 失败
+    duration: 耗时
+    start_time: 开始时间
+    version: 版本
+    port: 端口
+    file_category:
+      document: 文档
+      image: 图片
+      audio: 音频
+      video: 视频
+      other: 其他
+    task_status:
+      pending: 等待中
+      running: 进行中
+      paused: 已暂停
+      completed: 已完成
+      failed: 失败
+      cancelled: 已取消
+    index_status:
+      waiting: 等待索引
+      indexing: 索引中
+      indexed: 已索引
+      failed: 索引失败
+    section:
+      system: 系统
+      network: 网络
+      storage: 存储
+      cluster: 集群
+      ai_model: AI 模型
+      recommendations: 建议
+    field:
+      id: ID
+      name: 名称
+      category: 分类
+      path: 路径
+      version: 版本
+      locale: 语言
+      message: 消息
+      total_files: 文件总数
+      indexed_files: 已索引文件
+      file_ext: 扩展名
+      file_size: 大小
+      content_ref_path: 内容文件
+      content_index_status: 内容索引状态
+      meta_index_status: 元数据索引状态
+      file_create_time: 文件创建时间
+      file_update_time: 文件修改时间
+      content_preview: 内容预览
+      chunk_count: 分块数
+      client_id: 客户端 ID
+      device_name: 设备名称
+      device_id: 设备 ID
+      local_ip: 本地 IP
+      ip_address: IP 地址
+      ip: IP
+      port: 端口
+      online_status: 在线状态
+      pairing_status: 配对状态
+      interfaces: 网络接口
+      exists: 存在
+      ready: 就绪
+      db_path: 数据库路径
+      total_embeddings: 嵌入总数
+      enabled: 已启用
+      paired_devices: 已配对设备

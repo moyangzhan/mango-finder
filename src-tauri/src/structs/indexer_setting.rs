@@ -82,7 +82,12 @@ fn parse_content_storage(value: &serde_json::Value) -> ContentStorage {
     if first_value.map_or(false, |v| v.is_string()) {
         serde_json::from_value(value.clone()).unwrap_or_default()
     } else if first_value.map_or(false, |v| v.is_boolean()) {
-        let old: OldSaveParsedContent = serde_json::from_value(value.clone()).unwrap_or_else(|_| OldSaveParsedContent { document: true, image: true, audio: true });
+        let old: OldSaveParsedContent =
+            serde_json::from_value(value.clone()).unwrap_or_else(|_| OldSaveParsedContent {
+                document: true,
+                image: true,
+                audio: true,
+            });
         ContentStorage::from(old)
     } else {
         ContentStorage::default()
@@ -91,7 +96,7 @@ fn parse_content_storage(value: &serde_json::Value) -> ContentStorage {
 
 #[derive(Debug, Clone)]
 pub struct IndexerSetting {
-    pub is_private: bool, // Deprecated: kept for backward compatibility
+    pub is_private: bool,    // Deprecated: kept for backward compatibility
     pub parser_mode: String, // "local" | "selfhosted" | "remote" | "mixed" - quick preset
     pub image_parser_mode: FileParserMode,
     pub audio_parser_mode: FileParserMode,
@@ -130,40 +135,53 @@ impl<'de> Deserialize<'de> for IndexerSetting {
         use serde::de::Error;
 
         let value = serde_json::Value::deserialize(deserializer)?;
-        let obj = value.as_object().ok_or_else(|| {
-            D::Error::custom("Expected a JSON object for IndexerSetting")
-        })?;
+        let obj = value
+            .as_object()
+            .ok_or_else(|| D::Error::custom("Expected a JSON object for IndexerSetting"))?;
 
         // Resolve content_storage: accept both new "content_storage" and legacy "save_parsed_content"
         let content_storage = if let Some(cs_value) = obj.get("content_storage") {
             parse_content_storage(cs_value)
         } else if let Some(spc_value) = obj.get("save_parsed_content") {
-            let old: OldSaveParsedContent = serde_json::from_value(spc_value.clone())
-                .map_err(D::Error::custom)?;
+            let old: OldSaveParsedContent =
+                serde_json::from_value(spc_value.clone()).map_err(D::Error::custom)?;
             ContentStorage::from(old)
         } else {
             ContentStorage::default()
         };
 
         Ok(IndexerSetting {
-            is_private: obj.get("is_private").and_then(|v| v.as_bool()).unwrap_or(true),
-            parser_mode: obj.get("parser_mode").and_then(|v| v.as_str()).unwrap_or("local").to_string(),
-            image_parser_mode: obj.get("image_parser_mode")
+            is_private: obj
+                .get("is_private")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            parser_mode: obj
+                .get("parser_mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("local")
+                .to_string(),
+            image_parser_mode: obj
+                .get("image_parser_mode")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
-            audio_parser_mode: obj.get("audio_parser_mode")
+            audio_parser_mode: obj
+                .get("audio_parser_mode")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
-            ignore_dirs: obj.get("ignore_dirs")
+            ignore_dirs: obj
+                .get("ignore_dirs")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
-            ignore_path_prefixes: obj.get("ignore_path_prefixes")
+            ignore_path_prefixes: obj
+                .get("ignore_path_prefixes")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
-            ignore_exts: obj.get("ignore_exts")
+            ignore_exts: obj
+                .get("ignore_exts")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
-            ignore_files: obj.get("ignore_files")
+            ignore_files: obj
+                .get("ignore_files")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
             content_storage,

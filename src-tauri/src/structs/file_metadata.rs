@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 pub enum AudioType {
     #[default]
     Unknown = 0,
-    Speech = 1,  // Podcasts, audiobooks, voice recordings - use transcription text similarity
-    Music = 2,   // Songs, instrumental - need audio fingerprint
-    Mixed = 3,   // Music with vocals
+    Speech = 1, // Podcasts, audiobooks, voice recordings - use transcription text similarity
+    Music = 2,  // Songs, instrumental - need audio fingerprint
+    Mixed = 3,  // Music with vocals
 }
 
 impl From<i32> for AudioType {

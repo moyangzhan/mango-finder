@@ -1,4 +1,4 @@
-use crate::enums::{PairingRequestStatus, OnlineStatus, FileIndexStatus, IndexingTaskStatus};
+use crate::enums::{FileIndexStatus, IndexingTaskStatus, OnlineStatus, PairingRequestStatus};
 use crate::structs::file_metadata::FileMetadata;
 use crate::structs::sparse_vector::SparseVector;
 use crate::utils::datetime_util;
@@ -189,9 +189,9 @@ pub struct FileMetaEmbedding {
     pub embedding: [f32; 256],
     pub sparse_vec: SparseVector,
 
-    pub distance: f32, // for search result
+    pub distance: f32,     // for search result
     pub sparse_score: f32, // for search result
-    pub score: usize,      // for search result, weighted score of distance and sparse_score | distance 和 sparse_score 的加权总分
+    pub score: usize, // for search result, weighted score of distance and sparse_score | distance 和 sparse_score 的加权总分
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -206,7 +206,7 @@ pub struct FileContentEmbedding {
 
     pub distance: f32,     // for search result
     pub sparse_score: f32, // for search result
-    pub score: usize,      // for search result, weighted score of distance and sparse_score | distance 和 sparse_score 的加权总分
+    pub score: usize, // for search result, weighted score of distance and sparse_score | distance 和 sparse_score 的加权总分
 }
 
 impl Default for FileContentEmbedding {

@@ -107,7 +107,9 @@ fn merge_and_filter_results(
     for item in content_result {
         log::debug!(
             "Content Search - file_id: {}, chunk_id: {}, score: {}",
-            item.file_id, item.chunk_index, item.score
+            item.file_id,
+            item.chunk_index,
+            item.score
         );
         let entry = file_map.entry(item.file_id).or_insert(SearchTmp {
             file_id: item.file_id,
@@ -127,7 +129,10 @@ fn merge_and_filter_results(
     for item in meta_result {
         log::debug!(
             "Meta Search - file_id: {}, score: {}, distance: {}, sparse_score: {}",
-            item.file_id, item.score, item.distance, item.sparse_score
+            item.file_id,
+            item.score,
+            item.distance,
+            item.sparse_score
         );
         let boosted_score = (item.score as f32 * 1.1).min(100.0) as usize;
         let entry = file_map.entry(item.file_id).or_insert(SearchTmp {
@@ -159,7 +164,8 @@ fn merge_and_filter_results(
         for match_keyword in item.matched_keywords {
             log::debug!(
                 "FTS Search - file_id: {}, keyword: {}",
-                item.file_info.id, match_keyword
+                item.file_info.id,
+                match_keyword
             );
             entry.match_keywords.insert(match_keyword);
         }

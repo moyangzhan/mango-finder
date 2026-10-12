@@ -46,7 +46,10 @@ impl ImageParser {
         let mut tokens = vec![101_i64]; // BOS/SOS token
         let eos_token_id = 102_i64;
         let max_length = 20;
-        let mut vision_session = self.vision_session.lock().unwrap_or_else(|e| e.into_inner());
+        let mut vision_session = self
+            .vision_session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let image_input: Value<TensorValueType<f32>> = Value::from_array(image_tensor)?;
 
         for _ in 0..max_length {
@@ -177,7 +180,11 @@ pub fn generate_caption(image_path: &Path) -> String {
     let image_tensor = match preprocess(path_str) {
         Ok(t) => t,
         Err(e) => {
-            log::warn!("BLIP preprocessing failed for {}: {}", image_path.display(), e);
+            log::warn!(
+                "BLIP preprocessing failed for {}: {}",
+                image_path.display(),
+                e
+            );
             return String::new();
         }
     };
@@ -199,16 +206,24 @@ pub fn generate_caption(image_path: &Path) -> String {
                 }
             }
         }
-        return guard2.as_ref().unwrap().infer(image_tensor).unwrap_or_else(|e| {
-            log::warn!("BLIP failed for {}: {}", image_path.display(), e);
-            String::new()
-        });
+        return guard2
+            .as_ref()
+            .unwrap()
+            .infer(image_tensor)
+            .unwrap_or_else(|e| {
+                log::warn!("BLIP failed for {}: {}", image_path.display(), e);
+                String::new()
+            });
     }
 
-    guard.as_ref().unwrap().infer(image_tensor).unwrap_or_else(|e| {
-        log::warn!("BLIP failed for {}: {}", image_path.display(), e);
-        String::new()
-    })
+    guard
+        .as_ref()
+        .unwrap()
+        .infer(image_tensor)
+        .unwrap_or_else(|e| {
+            log::warn!("BLIP failed for {}: {}", image_path.display(), e);
+            String::new()
+        })
 }
 
 /// Build the local analysis text for an image: BLIP caption + OCR text.

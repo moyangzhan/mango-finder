@@ -11,7 +11,13 @@ pub trait DocumentLoader {
 
     /// Load with file ID for human-readable image directory names.
     /// Defaults to `load_max` for loaders that don't need the ID.
-    fn load_max_with_id(&self, path: &Path, file_id: i64, file_name: &str, max_load_chars: usize) -> io::Result<String> {
+    fn load_max_with_id(
+        &self,
+        path: &Path,
+        file_id: i64,
+        file_name: &str,
+        max_load_chars: usize,
+    ) -> io::Result<String> {
         let _ = (file_id, file_name);
         self.load_max(path, max_load_chars)
     }

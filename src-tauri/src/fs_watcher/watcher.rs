@@ -1,8 +1,8 @@
 use crate::enums::FsEvent;
 use crate::fs_watcher::fs_event_normalizer::FsEventNormalizer;
 use crate::global::{
-    APP_DATA_PATH, CONFIG_NAME_WATCHER_SETTING, EXIT_APP_SIGNAL, FS_WATCHER_SETTING, INCREMENT_WATCH_PATHS,
-    INDEXING_FROM_WATCHER,
+    APP_DATA_PATH, CONFIG_NAME_WATCHER_SETTING, EXIT_APP_SIGNAL, FS_WATCHER_SETTING,
+    INCREMENT_WATCH_PATHS, INDEXING_FROM_WATCHER,
 };
 use crate::indexer_service;
 use crate::repositories::{config_repo, file_info_repo};

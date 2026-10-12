@@ -5,7 +5,7 @@ use crate::repositories::{file_content_embedding_repo, file_info_repo};
 use crate::structs::file_metadata::AudioType;
 use crate::structs::search_result::SearchResult;
 use crate::traits::similarity_detector::SimilarityDetector;
-use crate::utils::audio_util::{compare_music_fingerprints, MusicFingerprint};
+use crate::utils::audio_util::{MusicFingerprint, compare_music_fingerprints};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 
@@ -13,7 +13,11 @@ pub struct AudioSimilarityDetector;
 
 #[async_trait]
 impl SimilarityDetector for AudioSimilarityDetector {
-    async fn find_similars(&self, file_info: &FileInfo, limit: usize) -> Result<Vec<SearchResult>, AppError> {
+    async fn find_similars(
+        &self,
+        file_info: &FileInfo,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>, AppError> {
         // Use audio_type from database column for efficiency
         let audio_type = AudioType::from(file_info.audio_type);
 
@@ -135,7 +139,8 @@ pub async fn find_similars_by_fingerprint_value(
     limit: usize,
 ) -> Result<Vec<SearchResult>, AppError> {
     // Query Music type files directly using audio_type index (category=3, audio_type=2)
-    let music_file_ids = file_info_repo::list_ids_by_category_and_audio_type(3, AudioType::Music as i32)?;
+    let music_file_ids =
+        file_info_repo::list_ids_by_category_and_audio_type(3, AudioType::Music as i32)?;
     let music_files = file_info_repo::list_by_ids(&music_file_ids)?;
 
     let mut similarities: Vec<(FileInfo, f32)> = Vec::new();

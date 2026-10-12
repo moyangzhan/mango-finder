@@ -1,9 +1,8 @@
 use crate::entities::IndexingTask;
 use crate::repositories::RepositoryError;
-use crate::utils::app_util::get_db_path;
 use crate::utils::datetime_util;
 use chrono::{DateTime, Local};
-use rusqlite::{Connection, Result, Row, named_params};
+use rusqlite::{Result, Row, named_params};
 
 pub fn insert_by_paths(
     paths: &Vec<String>,
@@ -11,7 +10,7 @@ pub fn insert_by_paths(
     status: &str,
     start_time: &DateTime<Local>,
 ) -> Result<IndexingTask, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "insert into indexing_task (paths,embedding_model,status,start_time) values (:paths,:embedding_model,:status,:start_time)",
     )?;
@@ -28,7 +27,7 @@ pub fn insert_by_paths(
 }
 
 pub fn insert(entity: &IndexingTask) -> Result<IndexingTask, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "insert into indexing_task (paths, embedding_model, status, start_time, end_time, duration, total_cnt, content_indexed_success_cnt, content_indexed_failed_cnt, content_indexed_skipped_cnt, remark, config_json) values (:paths,:embedding_model,:status,:start_time,:end_time,:duration,:total_cnt,:content_indexed_success_cnt,:content_indexed_failed_cnt,:content_indexed_skipped_cnt,:remark,:config_json)"
     )?;
@@ -61,7 +60,7 @@ pub fn insert(entity: &IndexingTask) -> Result<IndexingTask, RepositoryError> {
 }
 
 pub fn update(entity: &IndexingTask) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "update indexing_task set paths=:paths,status=:status,start_time=:start_time,end_time=:end_time,duration=:duration,total_cnt=:total_cnt,content_processed_cnt=:content_processed_cnt,content_indexed_success_cnt=:content_indexed_success_cnt,content_indexed_failed_cnt=:content_indexed_failed_cnt,content_indexed_skipped_cnt=:content_indexed_skipped_cnt,status=:status,remark=:remark,config_json=:config_json where id = :id")?;
     let start_time = entity
@@ -93,7 +92,7 @@ pub fn update(entity: &IndexingTask) -> Result<usize, RepositoryError> {
 }
 
 pub fn update_status(id: i64, status: &str, remark: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt =
         conn.prepare("update indexing_task set status = :status,remark=:remark where id = :id")?;
     let affected = stmt.execute(named_params! {
@@ -114,7 +113,7 @@ pub fn update_cnt(
     skipped_cnt: i64,
     duration: i64,
 ) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "update indexing_task set total_cnt =:total_cnt,content_processed_cnt=:content_processed_cnt,content_indexed_success_cnt=:content_indexed_success_cnt,content_indexed_failed_cnt=:content_indexed_failed_cnt,content_indexed_skipped_cnt=:content_indexed_skipped_cnt,duration=:duration where id = :id",
     )?;
@@ -132,7 +131,7 @@ pub fn update_cnt(
 }
 
 pub fn get(id: i64) -> Result<IndexingTask, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select * from indexing_task where id = :id")?;
     let entity = stmt.query_row([id], |row| Ok(build_entity(row)?))?;
     Ok(entity)
@@ -145,9 +144,22 @@ pub fn list(
     sort_order: &str,
 ) -> Result<Vec<IndexingTask>, RepositoryError> {
     // 白名单验证列名和排序方向，防止 SQL 注入
-    let allowed_columns = ["id", "create_time", "update_time", "status", "total_cnt", "duration"];
+    let allowed_columns = [
+        "id",
+        "create_time",
+        "update_time",
+        "status",
+        "total_cnt",
+        "duration",
+        // GUI 任务表还提供这四列排序(views/indexer/columns.ts)
+        // The GUI task table also sorts on these four columns
+        "content_processed_cnt",
+        "content_indexed_success_cnt",
+        "content_indexed_failed_cnt",
+        "content_indexed_skipped_cnt",
+    ];
     let allowed_orders = ["asc", "desc"];
-    
+
     let safe_column = if allowed_columns.contains(&column_key) {
         column_key
     } else {
@@ -158,8 +170,8 @@ pub fn list(
     } else {
         "desc"
     };
-    
-    let conn = Connection::open(get_db_path())?;
+
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         format!(
             "select * from indexing_task order by {} {} limit :limit offset :offset",
@@ -182,14 +194,14 @@ pub fn list(
 }
 
 pub fn count() -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select count(*) from indexing_task")?;
     let count = stmt.query_row([], |row| row.get(0))?;
     Ok(count)
 }
 
 pub fn delete_by_id(id: i64) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("delete from indexing_task where id = :id")?;
     let affected = stmt.execute(named_params! {
         ":id": &id,

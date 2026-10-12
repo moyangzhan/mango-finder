@@ -15,7 +15,7 @@ pub mod utils;
 
 // Private modules
 mod audio_parser;
-mod cluster;
+pub mod cluster;
 mod commands;
 mod db_init_manager;
 mod db_migrations;
@@ -35,22 +35,24 @@ mod traits;
 mod types;
 
 use crate::commands::{
-    add_device_manually, add_watch_path, check_devices, check_devices_status, check_model_platform, check_path_type, check_self_hosted_platform, clear_active_task, clear_index,
-    clear_pairing_requests, count_files, count_indexed_files, count_indexing_tasks, count_pending_pairing_requests,
-    delete_index_item, delete_index_items, delete_indexing_task, delete_pairing_request,
-    delete_pairing_requests, download_multilingual_model, fetch_remote_file,
-    find_similars_by_file_id, get_active_task, get_client_id, get_data_path, get_local_ip, get_test_mode, indexing_watch_paths,
+    add_device_manually, add_watch_path, change_content_storage, check_devices,
+    check_devices_status, check_model_platform, check_path_type, check_self_hosted_platform,
+    clear_active_task, clear_index, clear_pairing_requests, count_files, count_indexed_files,
+    count_indexing_tasks, count_pending_pairing_requests, delete_index_item, delete_index_items,
+    delete_indexing_task, delete_pairing_request, delete_pairing_requests,
+    download_multilingual_model, fetch_remote_file, find_similars_by_file_id, get_active_task,
+    get_client_id, get_data_path, get_local_ip, get_test_mode, indexing_watch_paths,
     is_embedding_model_changed, list_online_devices, load_active_locale, load_active_platform,
     load_active_self_hosted_platform, load_chunks, load_cluster_setting, load_config_value,
     load_devices, load_file_detail, load_files, load_indexer_setting, load_indexing_tasks,
     load_model_by_type, load_model_platforms, load_pairing_requests, load_pending_pairing_requests,
-    load_proxy_info, load_self_hosted_platforms, local_device_search, change_content_storage, open_directory,
+    load_proxy_info, load_self_hosted_platforms, local_device_search, open_directory,
     read_file_data, reject_device, remote_device_search, remove_watch_path, reset_data_path,
-    reset_pairing_status, respond_pairing_request, retry_data_copy, revert_data_path, send_pairing_request, set_active_locale,
-    set_active_platform, set_active_self_hosted_platform, set_data_path, start_indexing,
-    stop_indexing, toggle_cluster, toggle_test_mode, ui_mounted, unreject_device, update_ai_model,
-    update_cluster_setting, update_config, update_indexer_setting, update_model_platform,
-    update_proxy_info, update_self_hosted_platform,
+    reset_pairing_status, respond_pairing_request, retry_data_copy, revert_data_path,
+    send_pairing_request, set_active_locale, set_active_platform, set_active_self_hosted_platform,
+    set_data_path, start_indexing, stop_indexing, toggle_cluster, toggle_test_mode, ui_mounted,
+    unreject_device, update_ai_model, update_cluster_setting, update_config,
+    update_indexer_setting, update_model_platform, update_proxy_info, update_self_hosted_platform,
 };
 use crate::global::{APP_HANDLE, UI_MOUNTED};
 use crate::repositories::file_content_embedding_repo;
@@ -247,7 +249,7 @@ pub fn run() {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 app_util::init_paths(app_handle).await;
-                initializer::process().await;
+                initializer::process(false).await;
             });
             let menu = app_util::create_tray_menu(app_handle)?;
             let tray_builder = TrayIconBuilder::with_id(TRAY_ID);

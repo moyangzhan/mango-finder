@@ -10,8 +10,7 @@ use rust_i18n::t;
 use tauri::Emitter;
 
 use crate::cluster::api_types::{
-    CommonResponse, SearchData, ChunksData, FindSimilarsData, FileContentData,
-    CODE_SUCCESS,
+    CODE_SUCCESS, ChunksData, CommonResponse, FileContentData, FindSimilarsData, SearchData,
 };
 use crate::entities::PairingRequest;
 use crate::enums::{PairingRequestStatus, PairingResponseStatus, PairingStatus};
@@ -49,7 +48,7 @@ pub async fn search(
     ip: &str,
     port: i32,
 ) -> Result<SearchData, String> {
-    let url = format!("http://{}:{}/search", ip, port);
+    let url = format!("http://{}:{}/cluster/search", ip, port);
 
     let request = RemoteSearchRequest {
         query: query.to_string(),
@@ -76,7 +75,10 @@ pub async fn search(
         .map_err(|e| format!("Parse error: {}", e))?;
 
     if search_response.code != CODE_SUCCESS {
-        return Err(format!("API error: code {} - {}", search_response.code, search_response.msg));
+        return Err(format!(
+            "API error: code {} - {}",
+            search_response.code, search_response.msg
+        ));
     }
 
     search_response
@@ -133,12 +135,12 @@ impl From<&AudioFingerprint> for crate::utils::audio_util::MusicFingerprint {
 #[derive(Debug, Clone)]
 pub struct SimilarFeatures {
     pub category: i64,
-    pub image_hash: Option<String>,  // base64 encoded
+    pub image_hash: Option<String>, // base64 encoded
     pub embedding: Option<Vec<f32>>,
     pub sparse_indices: Option<Vec<u32>>,
     pub sparse_values: Option<Vec<f32>>,
     pub audio_type: crate::structs::file_metadata::AudioType,
-    pub audio_fingerprint: Option<AudioFingerprint>,  // For music similarity
+    pub audio_fingerprint: Option<AudioFingerprint>, // For music similarity
 }
 
 /// Find similar files on a remote device by file ID (with exclude list for loop prevention)
@@ -157,7 +159,7 @@ pub async fn find_similars(
     ip: &str,
     port: i32,
 ) -> Result<FindSimilarsData, String> {
-    let url = format!("http://{}:{}/file/{}/cluster_similars", ip, port, file_id);
+    let url = format!("http://{}:{}/cluster/file/{}/similars", ip, port, file_id);
 
     // Generate request_id if not provided
     let request_id = match request_id {
@@ -173,7 +175,10 @@ pub async fn find_similars(
 
     log::info!(
         "find_similars: url={}, request_id={}, exclude={:?}, limit={}",
-        url, request_id, exclude_device_ids, limit
+        url,
+        request_id,
+        exclude_device_ids,
+        limit
     );
 
     let client_id = crate::read_lock!(CLIENT_ID).clone();
@@ -195,7 +200,10 @@ pub async fn find_similars(
         .map_err(|e| format!("Parse error: {}", e))?;
 
     if similar_response.code != CODE_SUCCESS {
-        return Err(format!("API error: code {} - {}", similar_response.code, similar_response.msg));
+        return Err(format!(
+            "API error: code {} - {}",
+            similar_response.code, similar_response.msg
+        ));
     }
 
     similar_response
@@ -210,7 +218,7 @@ pub async fn find_similars(
 /// Fetch file data from a remote device
 /// 从远程设备获取文件数据
 pub async fn fetch_file(file_id: i64, ip: &str, port: i32) -> Result<Vec<u8>, String> {
-    let url = format!("http://{}:{}/file/{}", ip, port, file_id);
+    let url = format!("http://{}:{}/cluster/file/{}", ip, port, file_id);
 
     let client_id = crate::read_lock!(CLIENT_ID).clone();
     let response = HTTP_CLIENT
@@ -239,7 +247,7 @@ pub async fn fetch_file(file_id: i64, ip: &str, port: i32) -> Result<Vec<u8>, St
 /// Fetch chunks from a remote device by IDs
 /// 从远程设备获取文本片段
 pub async fn fetch_chunks(ids: &[u32], ip: &str, port: i32) -> Result<Vec<String>, String> {
-    let url = format!("http://{}:{}/chunks", ip, port);
+    let url = format!("http://{}:{}/cluster/chunks", ip, port);
 
     let client_id = crate::read_lock!(CLIENT_ID).clone();
     let response = HTTP_CLIENT
@@ -260,7 +268,10 @@ pub async fn fetch_chunks(ids: &[u32], ip: &str, port: i32) -> Result<Vec<String
         .map_err(|e| format!("Parse error: {}", e))?;
 
     if chunks_response.code != CODE_SUCCESS {
-        return Err(format!("API error: code {} - {}", chunks_response.code, chunks_response.msg));
+        return Err(format!(
+            "API error: code {} - {}",
+            chunks_response.code, chunks_response.msg
+        ));
     }
 
     chunks_response
@@ -275,8 +286,12 @@ pub async fn fetch_chunks(ids: &[u32], ip: &str, port: i32) -> Result<Vec<String
 
 /// Fetch file content from a remote device by file ID
 /// 从远程设备获取文件内容
-pub async fn fetch_file_content(file_id: i64, ip: &str, port: i32) -> Result<FileContentData, String> {
-    let url = format!("http://{}:{}/file/{}/content", ip, port, file_id);
+pub async fn fetch_file_content(
+    file_id: i64,
+    ip: &str,
+    port: i32,
+) -> Result<FileContentData, String> {
+    let url = format!("http://{}:{}/cluster/file/{}/content", ip, port, file_id);
 
     let client_id = crate::read_lock!(CLIENT_ID).clone();
     let response = HTTP_CLIENT
@@ -296,7 +311,10 @@ pub async fn fetch_file_content(file_id: i64, ip: &str, port: i32) -> Result<Fil
         .map_err(|e| format!("Parse error: {}", e))?;
 
     if content_response.code != CODE_SUCCESS {
-        return Err(format!("API error: code {} - {}", content_response.code, content_response.msg));
+        return Err(format!(
+            "API error: code {} - {}",
+            content_response.code, content_response.msg
+        ));
     }
 
     content_response
@@ -364,10 +382,7 @@ pub async fn ping_device(ip: &str, port: i32) -> Result<DeviceInfoResponse, Stri
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
-        index_count: data
-            .get("indexCount")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0),
+        index_count: data.get("indexCount").and_then(|v| v.as_i64()).unwrap_or(0),
         last_index_time: data
             .get("lastIndexTime")
             .and_then(|v| v.as_str())
@@ -431,7 +446,7 @@ pub async fn send_pairing_request(
         port: my_port,
     };
 
-    let url = format!("http://{}:{}/pairing/request", ip, port);
+    let url = format!("http://{}:{}/cluster/pairing/request", ip, port);
 
     let response = HTTP_CLIENT
         .post(&url)
@@ -441,10 +456,7 @@ pub async fn send_pairing_request(
         .map_err(|e| format!("Failed to send pairing request: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Pairing request failed: {}",
-            response.status()
-        ));
+        return Err(format!("Pairing request failed: {}", response.status()));
     }
 
     // Parse response to check if auto-approved
@@ -463,12 +475,14 @@ pub async fn send_pairing_request(
 
     // Log the outgoing request with appropriate remark
     let (request_status, request_remark) = match response_status {
-        PairingResponseStatus::Approved | PairingResponseStatus::AlreadyPaired => {
-            (PairingRequestStatus::Accepted, t!("pairing.remark.remote-accepted").to_string())
-        }
-        PairingResponseStatus::Rejected => {
-            (PairingRequestStatus::Rejected, t!("pairing.remark.remote-rejected").to_string())
-        }
+        PairingResponseStatus::Approved | PairingResponseStatus::AlreadyPaired => (
+            PairingRequestStatus::Accepted,
+            t!("pairing.remark.remote-accepted").to_string(),
+        ),
+        PairingResponseStatus::Rejected => (
+            PairingRequestStatus::Rejected,
+            t!("pairing.remark.remote-rejected").to_string(),
+        ),
         _ => (
             PairingRequestStatus::Pending,
             t!("pairing.remark.request-sent").to_string(),
@@ -551,7 +565,7 @@ pub async fn send_pairing_response(
     };
 
     let url = format!(
-        "http://{}:{}/pairing/respond",
+        "http://{}:{}/cluster/pairing/respond",
         requester_ip, requester_port
     );
 
@@ -593,7 +607,7 @@ pub async fn send_reset_notify(
     };
 
     let url = format!(
-        "http://{}:{}/pairing/reset_notify",
+        "http://{}:{}/cluster/pairing/reset_notify",
         remote_ip, remote_port
     );
 

@@ -1,8 +1,8 @@
-use crate::image_parser;
+use super::{get_images_dir, image_filename};
 use crate::global::{MAX_DOCUMENT_LOAD_CHARS, PDF_EXTS};
+use crate::image_parser;
 use crate::ocr_service;
 use crate::traits::document_loader::DocumentLoader;
-use super::{get_images_dir, image_filename};
 use lopdf::Document as LopdfDocument;
 use lopdf::Object;
 use std::fs;
@@ -40,7 +40,13 @@ impl DocumentLoader for PdfPlumberLoader {
         self.load_pdf(path, &images_dir, 0, max_load_chars)
     }
 
-    fn load_max_with_id(&self, path: &Path, file_id: i64, _file_name: &str, max_load_chars: usize) -> io::Result<String> {
+    fn load_max_with_id(
+        &self,
+        path: &Path,
+        file_id: i64,
+        _file_name: &str,
+        max_load_chars: usize,
+    ) -> io::Result<String> {
         let images_dir = get_images_dir(file_id);
         self.load_pdf(path, &images_dir, file_id, max_load_chars)
     }
@@ -54,7 +60,13 @@ impl DocumentLoader for PdfPlumberLoader {
 }
 
 impl PdfPlumberLoader {
-    fn load_pdf(&self, path: &Path, images_dir: &Path, file_id: i64, max_load_chars: usize) -> io::Result<String> {
+    fn load_pdf(
+        &self,
+        path: &Path,
+        images_dir: &Path,
+        file_id: i64,
+        max_load_chars: usize,
+    ) -> io::Result<String> {
         let pdf = pdfplumber::Pdf::open_file(path, None).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -122,7 +134,8 @@ impl PdfPlumberLoader {
                         };
                         let img_path = images_dir.join(&img_name);
                         if fs::write(&img_path, &img_content.data).is_ok() {
-                            let img_ref = format!("![{}]({}{})", img.name, img_rel_prefix, img_name);
+                            let img_ref =
+                                format!("![{}]({}{})", img.name, img_rel_prefix, img_name);
                             let mut parts = vec![img_ref];
 
                             let blip_caption = image_parser::generate_caption(&img_path);
@@ -145,7 +158,14 @@ impl PdfPlumberLoader {
             if let Ok(lopdf_doc) = LopdfDocument::load(path) {
                 let _ = fs::create_dir_all(images_dir);
                 for page_idx in &failed_pages {
-                    extract_images_from_page(&lopdf_doc, *page_idx, images_dir, file_id, &img_rel_prefix, &mut image_texts);
+                    extract_images_from_page(
+                        &lopdf_doc,
+                        *page_idx,
+                        images_dir,
+                        file_id,
+                        &img_rel_prefix,
+                        &mut image_texts,
+                    );
                 }
             }
         }
@@ -189,7 +209,11 @@ fn extract_images_from_page(
     let (resources_dict, resource_ids) = match doc.get_page_resources(page_id) {
         Ok(r) => r,
         Err(e) => {
-            log::warn!("Fallback: get_page_resources failed for page {}: {}", page_idx, e);
+            log::warn!(
+                "Fallback: get_page_resources failed for page {}: {}",
+                page_idx,
+                e
+            );
             return;
         }
     };
@@ -217,7 +241,11 @@ fn extract_images_from_page(
         }
     };
 
-    log::debug!("Fallback: page {} has {} XObjects", page_idx, xobjects.len());
+    log::debug!(
+        "Fallback: page {} has {} XObjects",
+        page_idx,
+        xobjects.len()
+    );
 
     let mut img_count = 0usize;
     for (name, obj_ref) in xobjects.iter() {
@@ -236,7 +264,11 @@ fn extract_images_from_page(
             Err(_) => continue,
         };
 
-        let subtype = stream.dict.get(b"Subtype").ok().and_then(|s| s.as_name_str().ok());
+        let subtype = stream
+            .dict
+            .get(b"Subtype")
+            .ok()
+            .and_then(|s| s.as_name_str().ok());
         if subtype.as_deref() != Some("Image") {
             continue;
         }
@@ -255,7 +287,10 @@ fn extract_images_from_page(
             Err(e) => {
                 log::debug!(
                     "Fallback: decompression failed for '{}' on page {}: {}, trying manual zlib decode ({} bytes)",
-                    String::from_utf8_lossy(name), page_idx, e, stream.content.len()
+                    String::from_utf8_lossy(name),
+                    page_idx,
+                    e,
+                    stream.content.len()
                 );
                 // lopdf's decompressed_content() can fail on some PDFs.
                 // Manually decompress using flate2 as a fallback.
@@ -264,7 +299,8 @@ fn extract_images_from_page(
                     None => {
                         log::debug!(
                             "Fallback: manual zlib decode also failed for '{}' on page {}, using raw content",
-                            String::from_utf8_lossy(name), page_idx
+                            String::from_utf8_lossy(name),
+                            page_idx
                         );
                         (stream.content.clone(), false)
                     }
@@ -278,7 +314,10 @@ fn extract_images_from_page(
 
         log::debug!(
             "Fallback: image '{}' page {} — {} bytes, decompressed: {}, filters: {:?}, first bytes: {:02X?}",
-            String::from_utf8_lossy(name), page_idx, data.len(), decompressed,
+            String::from_utf8_lossy(name),
+            page_idx,
+            data.len(),
+            decompressed,
             stream.filters().unwrap_or_default(),
             &data[..data.len().min(8)]
         );
@@ -315,7 +354,11 @@ fn extract_images_from_page(
                         String::from_utf8_lossy(name),
                         page_idx,
                         final_data.len(),
-                        stream.dict.get(b"ColorSpace").ok().and_then(|v| v.as_name_str().ok())
+                        stream
+                            .dict
+                            .get(b"ColorSpace")
+                            .ok()
+                            .and_then(|v| v.as_name_str().ok())
                     );
                     continue;
                 }
@@ -378,14 +421,20 @@ fn convert_stream_to_png(
                     b"DeviceGray" => Some(1u32),
                     b"DeviceCMYK" => Some(4u32),
                     _ => {
-                        log::debug!("convert_stream_to_png: unsupported ColorSpace name: {}", String::from_utf8_lossy(name));
+                        log::debug!(
+                            "convert_stream_to_png: unsupported ColorSpace name: {}",
+                            String::from_utf8_lossy(name)
+                        );
                         None
                     }
                 },
                 Object::Array(arr) => {
                     // Try to get the first element as the color space family name
                     let family = arr.first().and_then(|o| o.as_name_str().ok());
-                    log::debug!("convert_stream_to_png: array ColorSpace, family: {:?}", family);
+                    log::debug!(
+                        "convert_stream_to_png: array ColorSpace, family: {:?}",
+                        family
+                    );
                     match family.as_deref() {
                         Some("DeviceRGB") | Some("CalRGB") | Some("ICCBased") => Some(3u32),
                         Some("DeviceGray") | Some("CalGray") => Some(1u32),
@@ -394,7 +443,10 @@ fn convert_stream_to_png(
                     }
                 }
                 _ => {
-                    log::debug!("convert_stream_to_png: unexpected ColorSpace type: {:?}", cs);
+                    log::debug!(
+                        "convert_stream_to_png: unexpected ColorSpace type: {:?}",
+                        cs
+                    );
                     None
                 }
             }
@@ -409,7 +461,10 @@ fn convert_stream_to_png(
         .unwrap_or(8);
 
     if bits_per_component != 8 {
-        log::debug!("convert_stream_to_png: unsupported bits_per_component: {}", bits_per_component);
+        log::debug!(
+            "convert_stream_to_png: unsupported bits_per_component: {}",
+            bits_per_component
+        );
         return None;
     }
 
@@ -417,7 +472,11 @@ fn convert_stream_to_png(
     if data.len() < expected_len {
         log::debug!(
             "convert_stream_to_png: data too short: {} < {} ({}x{}x{})",
-            data.len(), expected_len, width, height, color_components
+            data.len(),
+            expected_len,
+            width,
+            height,
+            color_components
         );
         return None;
     }
@@ -463,7 +522,10 @@ fn cmyk_to_rgb(data: &[u8]) -> Vec<u8> {
 
 /// Find the XObject dictionary from a Resources dictionary.
 /// Handles both indirect references and inline dictionaries.
-fn find_xobject_dict<'a>(doc: &'a LopdfDocument, resources: &'a lopdf::Dictionary) -> Result<&'a lopdf::Dictionary, ()> {
+fn find_xobject_dict<'a>(
+    doc: &'a LopdfDocument,
+    resources: &'a lopdf::Dictionary,
+) -> Result<&'a lopdf::Dictionary, ()> {
     let xobj_val = resources.get(b"XObject").map_err(|_| ())?;
     // Case 1: indirect reference
     if let Ok(ref_id) = xobj_val.as_reference() {

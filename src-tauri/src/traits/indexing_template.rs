@@ -1,9 +1,9 @@
+use crate::document_loaders::cleanup_extracted_images;
 use crate::embedding_service_manager::get_manager;
 use crate::entities::{FileContentEmbedding, FileInfo, FileMetaEmbedding, IndexingTask};
 use crate::enums::{FileCategory, FileIndexStatus, IndexingEvent};
 use crate::errors::{AppError, IndexingError};
 use crate::global::{INDEXER_SETTING, STOP_INDEX_SIGNAL, STORAGE_PATH};
-use crate::document_loaders::cleanup_extracted_images;
 use crate::indexer_service;
 use crate::repositories::{
     file_content_embedding_repo, file_content_fts_repo, file_info_repo,
@@ -70,7 +70,11 @@ pub trait IndexingTemplate {
                 break;
             }
             loop_count += 1;
-            log::debug!("Found {} files to index in batch {}", file_infos.len(), loop_count);
+            log::debug!(
+                "Found {} files to index in batch {}",
+                file_infos.len(),
+                loop_count
+            );
             min_id = file_infos
                 .iter()
                 .map(|info| info.id)
@@ -115,7 +119,11 @@ pub trait IndexingTemplate {
         Ok(())
     }
 
-    async fn embedding_one_file(&self, file_info: &FileInfo, storage_mode: &str) -> Result<(), IndexingError> {
+    async fn embedding_one_file(
+        &self,
+        file_info: &FileInfo,
+        storage_mode: &str,
+    ) -> Result<(), IndexingError> {
         let filtered_content = {
             let content = self.load_content(&file_info).await;
             text_util::collapse_newlines(&content)
@@ -129,7 +137,9 @@ pub trait IndexingTemplate {
         // 根据转录内容检测音频类型
         if self.category() == &FileCategory::Audio {
             use crate::structs::file_metadata::AudioType;
-            use crate::utils::audio_util::{detect_audio_type, extract_music_fingerprint_from_file};
+            use crate::utils::audio_util::{
+                detect_audio_type, extract_music_fingerprint_from_file,
+            };
             let audio_type = detect_audio_type(&filtered_content, &file_info.path);
             file_meta.audio_type = Some(audio_type.into());
             let _ = file_info_repo::update_audio_type(file_id, audio_type.into());
@@ -138,7 +148,8 @@ pub trait IndexingTemplate {
             // 为音乐文件提取并存储音频指纹（用于音乐相似性搜索）
             if matches!(audio_type, AudioType::Music | AudioType::Mixed) {
                 if let Some(fingerprint) = extract_music_fingerprint_from_file(&file_info.path) {
-                    let _ = file_info_repo::update_audio_fingerprint(file_id, &fingerprint.to_bytes());
+                    let _ =
+                        file_info_repo::update_audio_fingerprint(file_id, &fingerprint.to_bytes());
                 }
             }
         }
@@ -155,7 +166,8 @@ pub trait IndexingTemplate {
             "file" => {
                 // Save as .md file, store relative path in content_ref_path column
                 if let Some(storage) = STORAGE_PATH.get() {
-                    let relative_path = crate::document_loaders::md_relative_path(file_info.id, &file_info.name);
+                    let relative_path =
+                        crate::document_loaders::md_relative_path(file_info.id, &file_info.name);
                     let md_path = Path::new(storage).join(&relative_path);
                     if let Some(parent) = md_path.parent() {
                         let _ = std::fs::create_dir_all(parent);
@@ -232,7 +244,11 @@ pub async fn embedding_content(file_id: i64, content: &str) -> Result<(), Indexi
             .map_err(|op| AppError::DocumentSplitterError(op.to_string()))?
     };
     for (chunk_index, chunk_text) in chunks.into_iter().enumerate() {
-        log::debug!("Processing chunk {} with {} chars", chunk_index, chunk_text.len());
+        log::debug!(
+            "Processing chunk {} with {} chars",
+            chunk_index,
+            chunk_text.len()
+        );
         let mut keep_run = true;
         let chunk_embed_result = {
             let mut manager = get_manager().write().await;

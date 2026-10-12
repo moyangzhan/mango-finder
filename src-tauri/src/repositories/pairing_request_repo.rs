@@ -1,16 +1,15 @@
 use crate::entities::PairingRequest;
 use crate::enums::PairingRequestStatus;
 use crate::repositories::RepositoryError;
-use crate::utils::app_util::get_db_path;
 use crate::utils::datetime_util;
-use rusqlite::{Connection, Row, named_params};
+use rusqlite::{Row, named_params};
 use rust_i18n::t;
 
 const ALL_COLUMNS: &str = "id, device_id, device_name, ip_address, port, direction, status, remark, response_time, create_time, update_time";
 
 /// Insert a new pairing request log
 pub fn insert(request: &PairingRequest) -> Result<PairingRequest, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "INSERT INTO pairing_request (device_id, device_name, ip_address, port, direction, status, remark)
          VALUES (:device_id, :device_name, :ip_address, :port, :direction, :status, :remark)"
@@ -30,16 +29,22 @@ pub fn insert(request: &PairingRequest) -> Result<PairingRequest, RepositoryErro
 
 /// Get pairing request by ID
 pub fn get_by_id(id: i64) -> Result<PairingRequest, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let mut stmt = conn.prepare(&format!("SELECT {} FROM pairing_request WHERE id = ?1", ALL_COLUMNS))?;
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM pairing_request WHERE id = ?1",
+        ALL_COLUMNS
+    ))?;
     let request = stmt.query_row([id], |row| Ok(build_pairing_request(row)?))?;
     Ok(request)
 }
 
 /// List all pairing requests
 pub fn list() -> Result<Vec<PairingRequest>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let mut stmt = conn.prepare(&format!("SELECT {} FROM pairing_request ORDER BY create_time DESC", ALL_COLUMNS))?;
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM pairing_request ORDER BY create_time DESC",
+        ALL_COLUMNS
+    ))?;
     let rows = stmt.query_map([], |row| Ok(build_pairing_request(row)?))?;
     let mut result = Vec::new();
     for item in rows {
@@ -50,7 +55,7 @@ pub fn list() -> Result<Vec<PairingRequest>, RepositoryError> {
 
 /// List pairing requests by direction
 pub fn list_by_direction(direction: &str) -> Result<Vec<PairingRequest>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(&format!(
         "SELECT {} FROM pairing_request WHERE direction = ?1 ORDER BY create_time DESC",
         ALL_COLUMNS
@@ -65,7 +70,7 @@ pub fn list_by_direction(direction: &str) -> Result<Vec<PairingRequest>, Reposit
 
 /// List pending pairing requests
 pub fn list_pending() -> Result<Vec<PairingRequest>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(&format!(
         "SELECT {} FROM pairing_request WHERE status = 'pending' ORDER BY create_time DESC",
         ALL_COLUMNS
@@ -79,13 +84,18 @@ pub fn list_pending() -> Result<Vec<PairingRequest>, RepositoryError> {
 }
 
 /// Get pending request by device ID and direction
-pub fn get_pending_by_device_id(device_id: &str, direction: &str) -> Result<Option<PairingRequest>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+pub fn get_pending_by_device_id(
+    device_id: &str,
+    direction: &str,
+) -> Result<Option<PairingRequest>, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(&format!(
         "SELECT {} FROM pairing_request WHERE device_id = ?1 AND direction = ?2 AND status = 'pending' ORDER BY create_time DESC LIMIT 1",
         ALL_COLUMNS
     ))?;
-    let result = stmt.query_row([device_id, direction], |row| Ok(build_pairing_request(row)?));
+    let result = stmt.query_row([device_id, direction], |row| {
+        Ok(build_pairing_request(row)?)
+    });
     match result {
         Ok(request) => Ok(Some(request)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -99,13 +109,18 @@ pub fn get_pending_by_device_id(device_id: &str, direction: &str) -> Result<Opti
 /// This returns the most recent request for a device in the specified direction,
 /// regardless of its status. Useful when you want to update the latest request
 /// even if older requests exist.
-pub fn get_latest_by_device_id(device_id: &str, direction: &str) -> Result<Option<PairingRequest>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+pub fn get_latest_by_device_id(
+    device_id: &str,
+    direction: &str,
+) -> Result<Option<PairingRequest>, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(&format!(
         "SELECT {} FROM pairing_request WHERE device_id = ?1 AND direction = ?2 ORDER BY create_time DESC LIMIT 1",
         ALL_COLUMNS
     ))?;
-    let result = stmt.query_row([device_id, direction], |row| Ok(build_pairing_request(row)?));
+    let result = stmt.query_row([device_id, direction], |row| {
+        Ok(build_pairing_request(row)?)
+    });
     match result {
         Ok(request) => Ok(Some(request)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -115,8 +130,10 @@ pub fn get_latest_by_device_id(device_id: &str, direction: &str) -> Result<Optio
 
 /// Get latest request by device ID (any direction, any status)
 /// 获取该设备的最新请求（不限方向、不限状态）
-pub fn get_latest_by_device_id_any(device_id: &str) -> Result<Option<PairingRequest>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+pub fn get_latest_by_device_id_any(
+    device_id: &str,
+) -> Result<Option<PairingRequest>, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(&format!(
         "SELECT {} FROM pairing_request WHERE device_id = ?1 ORDER BY create_time DESC LIMIT 1",
         ALL_COLUMNS
@@ -131,7 +148,7 @@ pub fn get_latest_by_device_id_any(device_id: &str) -> Result<Option<PairingRequ
 
 /// Update pairing request status
 pub fn update_status(id: i64, status: PairingRequestStatus) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let status_str = <PairingRequestStatus as Into<&'static str>>::into(status);
     let affected = conn.execute(
         "UPDATE pairing_request SET status = ?1, response_time = datetime('now', 'localtime') WHERE id = ?2",
@@ -142,8 +159,12 @@ pub fn update_status(id: i64, status: PairingRequestStatus) -> Result<usize, Rep
 
 /// Update pairing request status with remark
 /// 更新配对请求状态并附带说明
-pub fn update_status_with_remark(id: i64, status: PairingRequestStatus, remark: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+pub fn update_status_with_remark(
+    id: i64,
+    status: PairingRequestStatus,
+    remark: &str,
+) -> Result<usize, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
     let status_str = <PairingRequestStatus as Into<&'static str>>::into(status);
     let affected = conn.execute(
         "UPDATE pairing_request SET status = ?1, remark = ?2, response_time = datetime('now', 'localtime') WHERE id = ?3",
@@ -170,21 +191,24 @@ pub fn reject_with_remark(id: i64, remark: &str) -> Result<usize, RepositoryErro
 
 /// Delete pairing request by ID
 pub fn delete_by_id(id: i64) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let affected = conn.execute("DELETE FROM pairing_request WHERE id = ?1", [id])?;
     Ok(affected)
 }
 
 /// Delete all requests for a specific device
 pub fn delete_by_device_id(device_id: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let affected = conn.execute("DELETE FROM pairing_request WHERE device_id = ?1", [device_id])?;
+    let conn = crate::db_init_manager::open_db()?;
+    let affected = conn.execute(
+        "DELETE FROM pairing_request WHERE device_id = ?1",
+        [device_id],
+    )?;
     Ok(affected)
 }
 
 /// Delete all pairing requests
 pub fn delete_all() -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let affected = conn.execute("DELETE FROM pairing_request", [])?;
     Ok(affected)
 }
@@ -199,7 +223,7 @@ pub fn delete_all() -> Result<usize, RepositoryError> {
 /// - For incoming requests: device pairing_status is reset from pending_in to none
 /// - 对于接收请求的设备：将 pairing_status 从 pending_in 重置为 none
 pub fn expire_old_requests() -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
 
     // First, get device_ids for requests that will be expired, grouped by direction
     // 首先获取将要过期的请求的 device_id，按方向分组
@@ -256,29 +280,33 @@ pub fn expire_old_requests() -> Result<usize, RepositoryError> {
 
 /// Count pending requests
 pub fn count_pending() -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM pairing_request WHERE status = 'pending'", [], |row| row.get(0))?;
+    let conn = crate::db_init_manager::open_db()?;
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pairing_request WHERE status = 'pending'",
+        [],
+        |row| row.get(0),
+    )?;
     Ok(count)
 }
 
 /// Count pending incoming requests
 pub fn count_pending_in() -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM pairing_request WHERE status = 'pending' AND direction = 'in'",
         [],
-        |row| row.get(0)
+        |row| row.get(0),
     )?;
     Ok(count)
 }
 
 /// Count pending outgoing requests
 pub fn count_pending_out() -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM pairing_request WHERE status = 'pending' AND direction = 'out'",
         [],
-        |row| row.get(0)
+        |row| row.get(0),
     )?;
     Ok(count)
 }

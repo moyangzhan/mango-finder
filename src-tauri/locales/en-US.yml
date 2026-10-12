@@ -68,3 +68,87 @@ cli:
     no-indexed-files: No indexed files found, please use 'mfd index start' to index files first
     no-paired-devices: No paired devices found, please add devices or accept pairing requests in GUI
     all-normal: System status is normal, all features are available
+  table:
+    error: Error
+    yes: "Yes"
+    no: "No"
+    no_results: No results found
+    results_summary: "%{total} match(es), showing %{returned} (%{elapsed}ms)"
+    query_file: Query file
+    indexed_now: The file has been added to the index; future queries use the fast path
+    notice: Notice
+    matched_files: Files with the same name
+    recent_tasks: Recent tasks
+    page_info: "Page %{page}, %{size} per page"
+    score: Score
+    name: Name
+    category: Category
+    path: Path
+    id: ID
+    status: Status
+    files: Files
+    failed: Failed
+    duration: Duration
+    start_time: Start time
+    version: Version
+    port: Port
+    file_category:
+      document: Document
+      image: Image
+      audio: Audio
+      video: Video
+      other: Other
+    task_status:
+      pending: Pending
+      running: Running
+      paused: Paused
+      completed: Completed
+      failed: Failed
+      cancelled: Cancelled
+    index_status:
+      waiting: Waiting
+      indexing: Indexing
+      indexed: Indexed
+      failed: Failed
+    section:
+      system: System
+      network: Network
+      storage: Storage
+      cluster: Cluster
+      ai_model: AI Models
+      recommendations: Recommendations
+    field:
+      id: ID
+      name: Name
+      category: Category
+      path: Path
+      version: Version
+      locale: Locale
+      message: Message
+      total_files: Total files
+      indexed_files: Indexed files
+      file_ext: Extension
+      file_size: Size
+      content_ref_path: Content file
+      content_index_status: Content index status
+      meta_index_status: Metadata index status
+      file_create_time: File created
+      file_update_time: File modified
+      content_preview: Content preview
+      chunk_count: Chunks
+      client_id: Client ID
+      device_name: Device name
+      device_id: Device ID
+      local_ip: Local IP
+      ip_address: IP address
+      ip: IP
+      port: Port
+      online_status: Online status
+      pairing_status: Pairing status
+      interfaces: Network interfaces
+      exists: Exists
+      ready: Ready
+      db_path: Database path
+      total_embeddings: Total embeddings
+      enabled: Enabled
+      paired_devices: Paired devices

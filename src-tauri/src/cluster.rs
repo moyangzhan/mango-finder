@@ -1,8 +1,9 @@
 pub mod api_types;
 pub mod cluster_search;
-pub mod http_client;
 pub mod device_checker;
+pub mod http_client;
 pub mod http_server;
+pub mod local_probe;
 pub mod mdns_service;
 pub mod mock;
 
@@ -65,20 +66,23 @@ pub async fn save_cluster_setting(setting: &ClusterSetting) -> Result<(), String
 
             // Notify frontend about port binding failure (user-friendly message)
             if let Some(app_handle) = crate::global::APP_HANDLE.get() {
-                let _ = app_handle.emit("cluster-port-error", &serde_json::json!({
-                    "port": setting.port
-                }));
+                let _ = app_handle.emit(
+                    "cluster-port-error",
+                    &serde_json::json!({
+                        "port": setting.port
+                    }),
+                );
             }
 
             return Err(error_msg);
         }
     }
 
-    config_repo::upsert("cluster_setting", &setting.to_json_string())
-        .map_err(|e| e.to_string())?;
+    config_repo::upsert("cluster_setting", &setting.to_json_string()).map_err(|e| e.to_string())?;
 
     // Update global setting
-    let mut global_setting = CLUSTER_SETTING.get()
+    let mut global_setting = CLUSTER_SETTING
+        .get()
         .ok_or("Cluster setting not initialized")?
         .write()
         .await;
@@ -88,9 +92,12 @@ pub async fn save_cluster_setting(setting: &ClusterSetting) -> Result<(), String
     // Notify frontend that setting saved successfully (clear any previous port error)
     // 通知前端设置保存成功（清空之前的端口错误）
     if let Some(app_handle) = crate::global::APP_HANDLE.get() {
-        let _ = app_handle.emit("cluster-setting-saved", &serde_json::json!({
-            "port": setting.port
-        }));
+        let _ = app_handle.emit(
+            "cluster-setting-saved",
+            &serde_json::json!({
+                "port": setting.port
+            }),
+        );
     }
 
     // Dynamic adjustment based on changes
@@ -111,7 +118,11 @@ pub async fn save_cluster_setting(setting: &ClusterSetting) -> Result<(), String
     if is_cluster_enabled() {
         // Handle port change - restart HTTP server and mDNS
         if port_changed {
-            log::info!("Port changed from {} to {}, restarting services...", old_port, setting.port);
+            log::info!(
+                "Port changed from {} to {}, restarting services...",
+                old_port,
+                setting.port
+            );
 
             // Stop mDNS broadcast first
             mdns_service::stop_mdns_broadcast().await;
@@ -119,8 +130,14 @@ pub async fn save_cluster_setting(setting: &ClusterSetting) -> Result<(), String
             // Stop HTTP server
             http_server::stop_http_server().await;
 
-            // Wait for port to be released
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            // Wait until the server has actually stopped (graceful drain of
+            // in-flight requests completes) instead of a fixed 500ms sleep:
+            // the drain can outlive the sleep, after which start_http_server
+            // would short-circuit as "already running" and never rebind.
+            // 等待服务真正停止(在途请求排水完成),而非固定 500ms sleep:
+            // 排水超过 sleep 时 start_http_server 会因"已运行"短路而不再
+            // 重绑,导致新旧端口都没有监听。
+            http_server::wait_server_stopped().await;
 
             // Start HTTP server with new port
             if let Err(e) = http_server::start_http_server().await {
@@ -164,7 +181,8 @@ pub async fn save_cluster_setting(setting: &ClusterSetting) -> Result<(), String
 
                 if port > 0 {
                     tokio::spawn(async move {
-                        if let Err(e) = mdns_service::start_mdns_broadcast(device_name, port).await {
+                        if let Err(e) = mdns_service::start_mdns_broadcast(device_name, port).await
+                        {
                             log::error!("Failed to start mDNS broadcast: {}", e);
                         }
                     });
@@ -202,8 +220,7 @@ pub async fn update_cluster_port(new_port: i32) -> Result<(), String> {
     setting.port = new_port;
 
     // Save to database
-    config_repo::upsert("cluster_setting", &setting.to_json_string())
-        .map_err(|e| e.to_string())?;
+    config_repo::upsert("cluster_setting", &setting.to_json_string()).map_err(|e| e.to_string())?;
 
     // Update global setting
     if let Some(global_setting) = CLUSTER_SETTING.get() {
@@ -229,7 +246,6 @@ pub fn is_cluster_enabled() -> bool {
 
 /// Start cluster services (HTTP + mDNS)
 pub async fn start_cluster_service() -> Result<(), String> {
-
     let setting = get_cluster_setting().await;
     if !setting.enabled {
         log::info!("Cluster feature is disabled, skip start");

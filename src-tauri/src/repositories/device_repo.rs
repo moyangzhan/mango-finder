@@ -1,15 +1,14 @@
 use crate::entities::Device;
 use crate::enums::{OnlineStatus, PairingStatus};
 use crate::repositories::RepositoryError;
-use crate::utils::app_util::get_db_path;
 use crate::utils::datetime_util;
-use rusqlite::{Connection, Row, named_params};
+use rusqlite::{Row, named_params};
 
 const ALL_COLUMNS: &str = "id, device_id, name, ip_address, port, version, online_status, pairing_status, pairing_remark, last_seen, first_discovered, index_count, capabilities, discovery_method, create_time, update_time";
 
 /// Insert a new device
 pub fn insert(device: &Device) -> Result<Device, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "INSERT INTO device (device_id, name, ip_address, port, version, online_status, pairing_status, last_seen, first_discovered, index_count, capabilities, discovery_method)
          VALUES (:device_id, :name, :ip_address, :port, :version, :online_status, :pairing_status, :last_seen, :first_discovered, :index_count, :capabilities, :discovery_method)"
@@ -34,7 +33,7 @@ pub fn insert(device: &Device) -> Result<Device, RepositoryError> {
 
 /// Get device by ID
 pub fn get_by_id(id: i64) -> Result<Device, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(&format!("SELECT {} FROM device WHERE id = ?1", ALL_COLUMNS))?;
     let device = stmt.query_row([id], |row| Ok(build_device(row)?))?;
     Ok(device)
@@ -42,8 +41,11 @@ pub fn get_by_id(id: i64) -> Result<Device, RepositoryError> {
 
 /// Get device by device_id (UUID)
 pub fn get_by_device_id(device_id: &str) -> Result<Option<Device>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let mut stmt = conn.prepare(&format!("SELECT {} FROM device WHERE device_id = ?1", ALL_COLUMNS))?;
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM device WHERE device_id = ?1",
+        ALL_COLUMNS
+    ))?;
     let result = stmt.query_row([device_id], |row| Ok(build_device(row)?));
     match result {
         Ok(device) => Ok(Some(device)),
@@ -54,9 +56,14 @@ pub fn get_by_device_id(device_id: &str) -> Result<Option<Device>, RepositoryErr
 
 /// Get device by IP address and port
 pub fn get_by_ip_and_port(ip_address: &str, port: i32) -> Result<Option<Device>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let mut stmt = conn.prepare(&format!("SELECT {} FROM device WHERE ip_address = ?1 AND port = ?2", ALL_COLUMNS))?;
-    let result = stmt.query_row(rusqlite::params![ip_address, port], |row| Ok(build_device(row)?));
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM device WHERE ip_address = ?1 AND port = ?2",
+        ALL_COLUMNS
+    ))?;
+    let result = stmt.query_row(rusqlite::params![ip_address, port], |row| {
+        Ok(build_device(row)?)
+    });
     match result {
         Ok(device) => Ok(Some(device)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -66,8 +73,11 @@ pub fn get_by_ip_and_port(ip_address: &str, port: i32) -> Result<Option<Device>,
 
 /// List all devices
 pub fn list() -> Result<Vec<Device>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let mut stmt = conn.prepare(&format!("SELECT {} FROM device ORDER BY update_time DESC", ALL_COLUMNS))?;
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM device ORDER BY update_time DESC",
+        ALL_COLUMNS
+    ))?;
     let rows = stmt.query_map([], |row| Ok(build_device(row)?))?;
     let mut result = Vec::new();
     for item in rows {
@@ -77,10 +87,15 @@ pub fn list() -> Result<Vec<Device>, RepositoryError> {
 }
 
 /// List devices by pairing status
-pub fn list_by_pairing_status(pairing_status: PairingStatus) -> Result<Vec<Device>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+pub fn list_by_pairing_status(
+    pairing_status: PairingStatus,
+) -> Result<Vec<Device>, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
     let status_str = <PairingStatus as Into<&'static str>>::into(pairing_status);
-    let mut stmt = conn.prepare(&format!("SELECT {} FROM device WHERE pairing_status = ?1 ORDER BY update_time DESC", ALL_COLUMNS))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM device WHERE pairing_status = ?1 ORDER BY update_time DESC",
+        ALL_COLUMNS
+    ))?;
     let rows = stmt.query_map([status_str], |row| Ok(build_device(row)?))?;
     let mut result = Vec::new();
     for item in rows {
@@ -91,7 +106,7 @@ pub fn list_by_pairing_status(pairing_status: PairingStatus) -> Result<Vec<Devic
 
 /// List paired and online devices (for remote search)
 pub fn list_paired_online() -> Result<Vec<Device>, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(&format!(
         "SELECT {} FROM device WHERE pairing_status = 'paired' AND online_status = 'online' ORDER BY name",
         ALL_COLUMNS
@@ -106,7 +121,7 @@ pub fn list_paired_online() -> Result<Vec<Device>, RepositoryError> {
 
 /// Update device
 pub fn update(device: &Device) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
         "UPDATE device SET
             name = :name,
@@ -118,7 +133,7 @@ pub fn update(device: &Device) -> Result<usize, RepositoryError> {
             last_seen = :last_seen,
             index_count = :index_count,
             capabilities = :capabilities
-         WHERE id = :id"
+         WHERE id = :id",
     )?;
     let affected = stmt.execute(named_params! {
         ":id": device.id,
@@ -136,8 +151,11 @@ pub fn update(device: &Device) -> Result<usize, RepositoryError> {
 }
 
 /// Update device online status
-pub fn update_online_status(id: i64, online_status: OnlineStatus) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+pub fn update_online_status(
+    id: i64,
+    online_status: OnlineStatus,
+) -> Result<usize, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
     let status_str = <OnlineStatus as Into<&'static str>>::into(online_status);
     let affected = conn.execute(
         "UPDATE device SET online_status = ?1, last_seen = datetime('now', 'localtime') WHERE id = ?2",
@@ -157,7 +175,11 @@ pub fn update_online_status(id: i64, online_status: OnlineStatus) -> Result<usiz
 /// - None → PendingIn/PendingOut → Paired → Rejected
 /// - 左侧可以转换到右侧
 /// - 右侧不能覆盖左侧（手动重置除外）
-pub fn update_pairing_status(id: i64, new_status: PairingStatus, is_manual: bool) -> Result<usize, RepositoryError> {
+pub fn update_pairing_status(
+    id: i64,
+    new_status: PairingStatus,
+    is_manual: bool,
+) -> Result<usize, RepositoryError> {
     update_pairing_status_with_remark(id, new_status, "", is_manual)
 }
 
@@ -166,9 +188,15 @@ pub fn update_pairing_status(id: i64, new_status: PairingStatus, is_manual: bool
 ///
 /// See `update_pairing_status` for transition rules.
 /// 状态转换规则参见 `update_pairing_status`。
-pub fn update_pairing_status_with_remark(id: i64, new_status: PairingStatus, remark: &str, is_manual: bool) -> Result<usize, RepositoryError> {
+pub fn update_pairing_status_with_remark(
+    id: i64,
+    new_status: PairingStatus,
+    remark: &str,
+    is_manual: bool,
+) -> Result<usize, RepositoryError> {
     // Get current device status
-    let device = get_by_id(id).map_err(|e| RepositoryError::NotFound(format!("Device {} not found: {}", id, e)))?;
+    let device = get_by_id(id)
+        .map_err(|e| RepositoryError::NotFound(format!("Device {} not found: {}", id, e)))?;
     let current_status = device.pairing_status;
 
     // Validate status transition
@@ -185,7 +213,7 @@ pub fn update_pairing_status_with_remark(id: i64, new_status: PairingStatus, rem
         )));
     }
 
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let status_str = <PairingStatus as Into<&'static str>>::into(new_status);
     let affected = conn.execute(
         "UPDATE device SET pairing_status = ?1, pairing_remark = ?2 WHERE id = ?3",
@@ -199,8 +227,13 @@ pub fn update_pairing_status_with_remark(id: i64, new_status: PairingStatus, rem
 /// online_status should only be updated by device_checker.
 /// 注意：此函数不更新 online_status。
 /// online_status 只能由 device_checker 更新.
-pub fn update_device_info(device_id: &str, name: &str, index_count: i64, capabilities: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+pub fn update_device_info(
+    device_id: &str,
+    name: &str,
+    index_count: i64,
+    capabilities: &str,
+) -> Result<usize, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
     let affected = conn.execute(
         "UPDATE device SET name = ?1, index_count = ?2, capabilities = ?3, last_seen = datetime('now', 'localtime') WHERE device_id = ?4",
         [name, &index_count.to_string(), capabilities, device_id],
@@ -210,14 +243,14 @@ pub fn update_device_info(device_id: &str, name: &str, index_count: i64, capabil
 
 /// Delete device by ID
 pub fn delete_by_id(id: i64) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let affected = conn.execute("DELETE FROM device WHERE id = ?1", [id])?;
     Ok(affected)
 }
 
 /// Delete device by device_id
 pub fn delete_by_device_id(device_id: &str) -> Result<usize, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let affected = conn.execute("DELETE FROM device WHERE device_id = ?1", [device_id])?;
     Ok(affected)
 }
@@ -260,22 +293,30 @@ pub fn upsert(device: &Device) -> Result<Device, RepositoryError> {
 
 /// Count all devices
 pub fn count() -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
+    let conn = crate::db_init_manager::open_db()?;
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM device", [], |row| row.get(0))?;
     Ok(count)
 }
 
 /// Count paired devices
 pub fn count_paired() -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM device WHERE pairing_status = 'paired'", [], |row| row.get(0))?;
+    let conn = crate::db_init_manager::open_db()?;
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM device WHERE pairing_status = 'paired'",
+        [],
+        |row| row.get(0),
+    )?;
     Ok(count)
 }
 
 /// Count devices with pending_in pairing status (waiting for local user to accept)
 pub fn count_pending_in() -> Result<i64, RepositoryError> {
-    let conn = Connection::open(get_db_path())?;
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM device WHERE pairing_status = 'pending_in'", [], |row| row.get(0))?;
+    let conn = crate::db_init_manager::open_db()?;
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM device WHERE pairing_status = 'pending_in'",
+        [],
+        |row| row.get(0),
+    )?;
     Ok(count)
 }
 

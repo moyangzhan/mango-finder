@@ -1,7 +1,7 @@
+use log::{info, warn};
+use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use rusqlite::Connection;
-use log::{info, warn};
 use tauri::Emitter;
 
 static DB_INIT_MANAGER: OnceLock<DbInitManager> = OnceLock::new();
@@ -27,12 +27,16 @@ impl DbInitManager {
     pub fn init(&self, db_path: &PathBuf) -> Result<(), String> {
         // Check if already initialized with the same path
         {
-            let current = self.current_path.lock()
+            let current = self
+                .current_path
+                .lock()
                 .map_err(|e| format!("Failed to acquire lock: {}", e))?;
             if let Some(ref path) = *current {
                 if path == db_path {
                     // Same path, check if connection is valid
-                    let conn_guard = self.conn.lock()
+                    let conn_guard = self
+                        .conn
+                        .lock()
                         .map_err(|e| format!("Failed to acquire lock: {}", e))?;
                     if let Some(ref conn) = *conn_guard {
                         if check_health(conn) {
@@ -55,11 +59,15 @@ impl DbInitManager {
         // Try to open new connection
         match try_open_connection(db_path) {
             Ok(conn) => {
-                let mut conn_guard = self.conn.lock()
+                let mut conn_guard = self
+                    .conn
+                    .lock()
                     .map_err(|e| format!("Failed to acquire lock: {}", e))?;
                 *conn_guard = Some(conn);
 
-                let mut path_guard = self.current_path.lock()
+                let mut path_guard = self
+                    .current_path
+                    .lock()
                     .map_err(|e| format!("Failed to acquire lock: {}", e))?;
                 *path_guard = Some(db_path.clone());
 
@@ -84,7 +92,9 @@ impl DbInitManager {
 
     /// Close connection
     fn close_connection(&self) -> Result<(), String> {
-        let mut conn_guard = self.conn.lock()
+        let mut conn_guard = self
+            .conn
+            .lock()
             .map_err(|e| format!("Failed to acquire lock: {}", e))?;
         if let Some(conn) = conn_guard.take() {
             drop(conn); // Explicitly close
@@ -121,8 +131,7 @@ impl DbInitManager {
     fn reconnect(&self) -> Result<(), DbError> {
         // Get current path
         let path = {
-            let path_guard = self.current_path.lock()
-                .map_err(|_| DbError::LockFailed)?;
+            let path_guard = self.current_path.lock().map_err(|_| DbError::LockFailed)?;
             path_guard.clone().ok_or(DbError::NotInitialized)?
         };
 
@@ -148,7 +157,8 @@ impl DbInitManager {
 
     /// Check if database is available
     pub fn is_available(&self) -> bool {
-        self.conn.lock()
+        self.conn
+            .lock()
             .map(|guard| guard.is_some())
             .unwrap_or(false)
     }
@@ -179,12 +189,31 @@ impl<'a> std::ops::Deref for ConnectionGuard<'a> {
 
 // ==================== Helper Functions ====================
 
-fn try_open_connection(db_path: &PathBuf) -> Result<Connection, String> {
-    let conn = Connection::open(db_path)
-        .map_err(|e| format!("Failed to open database: {}", e))?;
+/// Open a new DB connection with the per-connection busy_timeout applied.
+/// All repositories open their connections through this helper so that
+/// concurrent writers (CLI vs GUI/daemon under WAL) wait and retry instead
+/// of failing immediately with "database is locked".
+/// 打开新的 DB 连接并应用逐连接的 busy_timeout。所有 repo 统一经此打开
+/// 连接,使并发写入方(CLI 与 GUI/daemon,WAL 模式)等待重试而非立即
+/// 报 "database is locked"。
+pub fn open_db() -> Result<Connection, rusqlite::Error> {
+    let conn = Connection::open(crate::utils::app_util::get_db_path())?;
+    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    Ok(conn)
+}
 
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
-        .map_err(|e| format!("Failed to set PRAGMA: {}", e))?;
+fn try_open_connection(db_path: &PathBuf) -> Result<Connection, String> {
+    let conn = Connection::open(db_path).map_err(|e| format!("Failed to open database: {}", e))?;
+
+    // busy_timeout: CLI 与 GUI/daemon 是同库的两个写入方,
+    // WAL 下写冲突时应等待重试而非立即报 "database is locked"
+    // busy_timeout: the CLI and the GUI/daemon are two writers of the same DB;
+    // under WAL a write conflict should wait and retry instead of failing
+    // immediately with "database is locked".
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;",
+    )
+    .map_err(|e| format!("Failed to set PRAGMA: {}", e))?;
 
     Ok(conn)
 }
@@ -237,7 +266,9 @@ pub fn init_db_manager(db_path: &PathBuf) -> Result<(), String> {
 
 /// Switch database path
 pub fn switch_db_path(new_path: &PathBuf) -> Result<(), String> {
-    let manager = DB_INIT_MANAGER.get().ok_or("Database manager not initialized")?;
+    let manager = DB_INIT_MANAGER
+        .get()
+        .ok_or("Database manager not initialized")?;
     manager.switch_path(new_path)
 }
 
@@ -249,7 +280,10 @@ pub fn get_connection() -> Result<ConnectionGuard<'static>, DbError> {
 
 /// Check if database is available
 pub fn is_db_available() -> bool {
-    DB_INIT_MANAGER.get().map(|m| m.is_available()).unwrap_or(false)
+    DB_INIT_MANAGER
+        .get()
+        .map(|m| m.is_available())
+        .unwrap_or(false)
 }
 
 // ==================== Error Types ====================

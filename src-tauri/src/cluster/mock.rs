@@ -20,9 +20,19 @@ pub const MOCK_DEVICE_NAME: &str = "模拟远程设备";
 
 /// Mock document files for similarity testing
 pub const MOCK_DOCUMENTS: &[(&str, &str, &str, usize)] = &[
-    ("项目计划书.docx", "docx", "/remote/Documents/项目计划书.docx", 92),
+    (
+        "项目计划书.docx",
+        "docx",
+        "/remote/Documents/项目计划书.docx",
+        92,
+    ),
     ("技术方案.pdf", "pdf", "/remote/Documents/技术方案.pdf", 85),
-    ("需求分析报告.docx", "docx", "/remote/Documents/需求分析报告.docx", 78),
+    (
+        "需求分析报告.docx",
+        "docx",
+        "/remote/Documents/需求分析报告.docx",
+        78,
+    ),
     ("会议记录.md", "md", "/remote/Documents/会议记录.md", 72),
     ("产品说明.txt", "txt", "/remote/Documents/产品说明.txt", 65),
 ];
@@ -30,7 +40,12 @@ pub const MOCK_DOCUMENTS: &[(&str, &str, &str, usize)] = &[
 /// Mock image files for similarity testing
 pub const MOCK_IMAGES: &[(&str, &str, &str, usize)] = &[
     ("设计稿_v2.png", "png", "/remote/Pictures/设计稿_v2.png", 95),
-    ("产品截图_新.jpg", "jpg", "/remote/Pictures/产品截图_新.jpg", 88),
+    (
+        "产品截图_新.jpg",
+        "jpg",
+        "/remote/Pictures/产品截图_新.jpg",
+        88,
+    ),
     ("UI原型图.png", "png", "/remote/Pictures/UI原型图.png", 82),
     ("界面设计.jpg", "jpg", "/remote/Pictures/界面设计.jpg", 75),
     ("图标素材.png", "png", "/remote/Pictures/图标素材.png", 68),
@@ -38,7 +53,12 @@ pub const MOCK_IMAGES: &[(&str, &str, &str, usize)] = &[
 
 /// Mock audio files for similarity testing
 pub const MOCK_AUDIOS: &[(&str, &str, &str, usize)] = &[
-    ("会议录音_new.mp3", "mp3", "/remote/Audio/会议录音_new.mp3", 90),
+    (
+        "会议录音_new.mp3",
+        "mp3",
+        "/remote/Audio/会议录音_new.mp3",
+        90,
+    ),
     ("产品介绍.m4a", "m4a", "/remote/Audio/产品介绍.m4a", 83),
     ("培训音频.mp3", "mp3", "/remote/Audio/培训音频.mp3", 76),
     ("语音笔记.m4a", "m4a", "/remote/Audio/语音笔记.m4a", 70),

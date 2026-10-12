@@ -3,11 +3,11 @@ use crate::global::{
     APP_DATA_PATH, AUDIO_DECODER_NAME, AUDIO_DECODER_PATH, AUDIO_ENCODER_NAME, AUDIO_ENCODER_PATH,
     AUDIO_TOKENIZER_NAME, AUDIO_TOKENIZER_PATH, CONTENT_STORAGE_CHANGING, DB_PATH, DOWNLOADING,
     EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_PATH, EMBEDDING_TOKENIZER_NAME, EMBEDDING_TOKENIZER_PATH,
-    EXIT_APP_SIGNAL, EXTRACTED_IMAGES_PATH, HOME_PATH, INDEXING, OCR_DET_MODEL_NAME,
-    OCR_DET_MODEL_PATH, OCR_CLS_MODEL_NAME, OCR_CLS_MODEL_PATH, OCR_REC_MODEL_NAME, OCR_REC_MODEL_PATH,
-    OCR_DICT_NAME, OCR_DICT_PATH, SCANNING,
-    STOP_INDEX_SIGNAL, STORAGE_PATH, TMP_PATH, TRAY_ID, VISION_MODEL_PATH, VISION_NAME,
-    VISION_TOKENIZER_NAME, VISION_TOKENIZER_PATH, WHISPER_MODEL_NAME, WHISPER_MODEL_PATH,
+    EXIT_APP_SIGNAL, EXTRACTED_IMAGES_PATH, HOME_PATH, INDEXING, OCR_CLS_MODEL_NAME,
+    OCR_CLS_MODEL_PATH, OCR_DET_MODEL_NAME, OCR_DET_MODEL_PATH, OCR_DICT_NAME, OCR_DICT_PATH,
+    OCR_REC_MODEL_NAME, OCR_REC_MODEL_PATH, SCANNING, STOP_INDEX_SIGNAL, STORAGE_PATH, TMP_PATH,
+    TRAY_ID, VISION_MODEL_PATH, VISION_NAME, VISION_TOKENIZER_NAME, VISION_TOKENIZER_PATH,
+    WHISPER_MODEL_NAME, WHISPER_MODEL_PATH,
 };
 use crate::utils::file_util;
 use crate::utils::task_util;
@@ -122,7 +122,10 @@ pub async fn set_data_path(
 
     // Guard: reject if indexing or content storage change is in progress
     if INDEXING.load(Ordering::SeqCst) || CONTENT_STORAGE_CHANGING.load(Ordering::SeqCst) {
-        return Err("Cannot change data path while indexing or content storage change is in progress".to_string());
+        return Err(
+            "Cannot change data path while indexing or content storage change is in progress"
+                .to_string(),
+        );
     }
 
     // DB persistent lock
@@ -145,7 +148,8 @@ pub async fn set_data_path(
             let _ = task_util::unlock_active_task();
             return Err(format!(
                 "Cannot write to directory '{}': {}. The directory may require administrator privileges.",
-                ndp.display(), e
+                ndp.display(),
+                e
             ));
         }
         // Probe write permission by creating and removing a temp file
@@ -154,7 +158,8 @@ pub async fn set_data_path(
             let _ = task_util::unlock_active_task();
             return Err(format!(
                 "Cannot write to directory '{}': {}. The directory may require administrator privileges.",
-                ndp.display(), e
+                ndp.display(),
+                e
             ));
         }
         let _ = std::fs::remove_file(&probe);
@@ -254,7 +259,10 @@ pub async fn init_paths(app: &AppHandle) {
                             data_path = custom_path;
                             info!("read data_dir from config file: {}", data_path.display());
                         } else {
-                            warn!("Config path '{}' is not a valid directory, using default", first_line);
+                            warn!(
+                                "Config path '{}' is not a valid directory, using default",
+                                first_line
+                            );
                         }
                     } else {
                         warn!("Empty line in data path record, using default directory");
@@ -456,44 +464,34 @@ fn init_embedding_model_path(app_handle: &AppHandle) {
         .join(OCR_DET_MODEL_NAME)
         .to_string_lossy()
         .into_owned();
-    OCR_DET_MODEL_PATH
-        .set(ocr_det_path)
-        .unwrap_or_else(|e| {
-            error!("Failed to set OCR_DET_MODEL_PATH: {}", e);
-        });
+    OCR_DET_MODEL_PATH.set(ocr_det_path).unwrap_or_else(|e| {
+        error!("Failed to set OCR_DET_MODEL_PATH: {}", e);
+    });
     let ocr_cls_path = build_in_model_path
         .join(OCR_CLS_MODEL_NAME)
         .to_string_lossy()
         .into_owned();
-    OCR_CLS_MODEL_PATH
-        .set(ocr_cls_path)
-        .unwrap_or_else(|e| {
-            error!("Failed to set OCR_CLS_MODEL_PATH: {}", e);
-        });
+    OCR_CLS_MODEL_PATH.set(ocr_cls_path).unwrap_or_else(|e| {
+        error!("Failed to set OCR_CLS_MODEL_PATH: {}", e);
+    });
     let ocr_rec_path = build_in_model_path
         .join(OCR_REC_MODEL_NAME)
         .to_string_lossy()
         .into_owned();
-    OCR_REC_MODEL_PATH
-        .set(ocr_rec_path)
-        .unwrap_or_else(|e| {
-            error!("Failed to set OCR_REC_MODEL_PATH: {}", e);
-        });
+    OCR_REC_MODEL_PATH.set(ocr_rec_path).unwrap_or_else(|e| {
+        error!("Failed to set OCR_REC_MODEL_PATH: {}", e);
+    });
     let ocr_dict_path = build_in_model_path
         .join(OCR_DICT_NAME)
         .to_string_lossy()
         .into_owned();
-    OCR_DICT_PATH
-        .set(ocr_dict_path)
-        .unwrap_or_else(|e| {
-            error!("Failed to set OCR_DICT_PATH: {}", e);
-        });
+    OCR_DICT_PATH.set(ocr_dict_path).unwrap_or_else(|e| {
+        error!("Failed to set OCR_DICT_PATH: {}", e);
+    });
 
     // Extracted images directory
-    let extracted_images_path = Path::new(
-        STORAGE_PATH.get().unwrap_or(&String::new()),
-    )
-    .join("extracted_images");
+    let extracted_images_path =
+        Path::new(STORAGE_PATH.get().unwrap_or(&String::new())).join("extracted_images");
     if !extracted_images_path.exists() {
         create_dir(&extracted_images_path).unwrap_or_else(|error| {
             error!("Failed to create extracted_images directory: {}", error);
@@ -592,10 +590,7 @@ pub fn get_ocr_rec_model_path() -> String {
 }
 
 pub fn get_ocr_dict_path() -> String {
-    OCR_DICT_PATH
-        .get()
-        .unwrap_or(&String::new())
-        .to_string()
+    OCR_DICT_PATH.get().unwrap_or(&String::new()).to_string()
 }
 
 pub fn get_extracted_images_path() -> String {
@@ -618,13 +613,15 @@ pub fn get_default_file_content_language() -> FileContentLanguage {
 /// CLI 模式路径初始化（不依赖 Tauri）
 pub fn init_paths_standalone() -> Result<(), String> {
     // 1. HOME_PATH：可执行文件所在目录
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("Failed to get executable path: {}", e))?;
-    let home_path = exe_path.parent()
+    let exe_path =
+        std::env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
+    let home_path = exe_path
+        .parent()
         .ok_or("Failed to get executable directory")?
         .to_string_lossy()
         .into_owned();
-    HOME_PATH.set(home_path.clone())
+    HOME_PATH
+        .set(home_path.clone())
         .map_err(|_| "HOME_PATH already set".to_string())?;
     info!("Home directory: {}", home_path);
 
@@ -632,7 +629,7 @@ pub fn init_paths_standalone() -> Result<(), String> {
     let mut data_path = dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(env!("CARGO_PKG_NAME"));
-    
+
     // 读取 .config 文件获取自定义数据路径（与 Tauri 版本保持一致）
     let config_path = data_path.join(".config");
     if config_path.exists() {
@@ -647,7 +644,10 @@ pub fn init_paths_standalone() -> Result<(), String> {
                             data_path = custom_path;
                             info!("read data_dir from config file: {}", data_path.display());
                         } else {
-                            warn!("Config path '{}' is not a valid directory, using default", first_line);
+                            warn!(
+                                "Config path '{}' is not a valid directory, using default",
+                                first_line
+                            );
                         }
                     }
                 }
@@ -657,7 +657,7 @@ pub fn init_paths_standalone() -> Result<(), String> {
             }
         }
     }
-    
+
     let data_path_str = data_path.to_string_lossy().into_owned();
     *APP_DATA_PATH.write().unwrap() = data_path_str.clone();
     info!("Data directory: {}", data_path_str);
@@ -672,25 +672,44 @@ pub fn init_paths_standalone() -> Result<(), String> {
     let storage_path = data_path.join("storage");
     std::fs::create_dir_all(&storage_path)
         .map_err(|e| format!("Failed to create storage dir: {}", e))?;
-    STORAGE_PATH.set(storage_path.to_string_lossy().into_owned())
+    STORAGE_PATH
+        .set(storage_path.to_string_lossy().into_owned())
         .map_err(|_| "STORAGE_PATH already set".to_string())?;
     info!("Storage directory: {}", storage_path.display());
 
     // 4. DB_PATH
     let db_path = storage_path.join("mango-finder.db");
-    DB_PATH.set(db_path.to_string_lossy().into_owned())
+    DB_PATH
+        .set(db_path.to_string_lossy().into_owned())
         .map_err(|_| "DB_PATH already set".to_string())?;
     info!("Database path: {}", db_path.display());
 
-    // 5. 模型路径（从可执行文件目录查找）
-    let model_path = PathBuf::from(&home_path).join("assets").join("model");
+    // 5. 模型路径:优先可执行文件目录,不存在时回退当前目录
+    // (与 GUI debug 模式的解析一致,覆盖从源码目录直接运行 mfd 的开发流)
+    // 5. Model path: prefer the executable directory; fall back to the
+    // current directory when absent (mirrors the GUI debug-mode resolution,
+    // covering the dev flow of running mfd straight from the source tree).
+    let exe_model = PathBuf::from(&home_path).join("assets").join("model");
+    let model_path = if exe_model.exists() {
+        exe_model
+    } else {
+        let cwd_model = std::env::current_dir()
+            .unwrap_or_default()
+            .join("assets")
+            .join("model");
+        if cwd_model.exists() {
+            cwd_model
+        } else {
+            exe_model
+        }
+    };
     init_model_paths(&model_path);
 
     // 6. TMP_PATH
     let tmp_path = data_path.join("tmp");
-    std::fs::create_dir_all(&tmp_path)
-        .map_err(|e| format!("Failed to create tmp dir: {}", e))?;
-    TMP_PATH.set(tmp_path.to_string_lossy().into_owned())
+    std::fs::create_dir_all(&tmp_path).map_err(|e| format!("Failed to create tmp dir: {}", e))?;
+    TMP_PATH
+        .set(tmp_path.to_string_lossy().into_owned())
         .map_err(|_| "TMP_PATH already set".to_string())?;
     info!("Temp directory: {}", tmp_path.display());
 
@@ -698,7 +717,8 @@ pub fn init_paths_standalone() -> Result<(), String> {
     let extracted_images_path = storage_path.join("extracted_images");
     std::fs::create_dir_all(&extracted_images_path)
         .map_err(|e| format!("Failed to create extracted_images dir: {}", e))?;
-    EXTRACTED_IMAGES_PATH.set(extracted_images_path.to_string_lossy().into_owned())
+    EXTRACTED_IMAGES_PATH
+        .set(extracted_images_path.to_string_lossy().into_owned())
         .map_err(|_| "EXTRACTED_IMAGES_PATH already set".to_string())?;
 
     Ok(())
@@ -708,7 +728,8 @@ pub fn init_paths_standalone() -> Result<(), String> {
 fn init_model_paths(model_path: &Path) {
     let set_path = |once: &OnceLock<String>, name: &str| {
         let p = model_path.join(name).to_string_lossy().into_owned();
-        once.set(p).unwrap_or_else(|_| log::warn!("{} already set", name));
+        once.set(p)
+            .unwrap_or_else(|_| log::warn!("{} already set", name));
     };
 
     set_path(&EMBEDDING_MODEL_PATH, EMBEDDING_MODEL_NAME);
