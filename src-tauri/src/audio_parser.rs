@@ -46,10 +46,14 @@ impl AudioParser {
     /// # 返回值
     /// 转录后的文本内容
     pub async fn parse(&self, audio_file: &str) -> Result<String> {
-        let mut full_transcript = String::new();
+        let samples = audio_util::load_audio_to_f32(audio_file)?;
+        self.parse_from_samples(&samples).await
+    }
 
-        // Load and resample audio to 16kHz | 加载音频并重采样到 16kHz
-        let audio_samples = audio_util::load_audio_to_f32(audio_file)?;
+    /// Transcribe from pre-loaded audio samples (avoids re-decoding the file)
+    /// 从已加载的音频采样点转录(避免重复解码文件)
+    pub async fn parse_from_samples(&self, audio_samples: &[f32]) -> Result<String> {
+        let mut full_transcript = String::new();
 
         let ctx = self.ctx.lock().await;
         let mut state = ctx.create_state().map_err(|e| {
@@ -61,13 +65,17 @@ impl AudioParser {
         params.set_print_progress(false);
         params.set_print_timestamps(false);
 
-        state.full(params, &audio_samples).map_err(|e| {
-            error!("Whisper transcription failed: {:?}", e);
-            anyhow::anyhow!("Whisper transcription failed: {:?}", e)
+        // Whisper 推理是重 CPU 计算,放 block_in_place 避免 tokio worker 被独占
+        // Whisper inference is heavy CPU; block_in_place avoids starving the worker
+        let (state, num_segments) = tokio::task::block_in_place(|| {
+            state.full(params, audio_samples).map_err(|e| {
+                error!("Whisper transcription failed: {:?}", e);
+                anyhow::anyhow!("Whisper transcription failed: {:?}", e)
+            })?;
+            let n = state.full_n_segments();
+            Ok::<_, anyhow::Error>((state, n))
         })?;
 
-        // Collect all segments into full transcript | 收集所有片段为完整转录文本
-        let num_segments = state.full_n_segments();
         for i in 0..num_segments {
             let segment = state.get_segment(i).ok_or_else(|| {
                 error!("Failed to get segment {}", i);

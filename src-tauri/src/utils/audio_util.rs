@@ -577,27 +577,21 @@ pub fn detect_audio_type(transcription: &str, file_path: &str) -> AudioType {
         return feature_based_type;
     }
 
-    // Fallback: use transcription content analysis
-    // 回退：使用转录内容分析
-    let transcription = transcription.trim();
+    detect_audio_type_from_transcription(transcription)
+}
 
-    // If transcription is empty or very short, likely music
-    // 如果转录为空或非常短，可能是音乐
+/// Classify audio type from transcription text only (no file re-decode).
+/// Use when audio features already returned Unknown and samples are not available.
+/// 仅从转录文本分类音频类型(不重新解码文件)。
+/// 用于音频特征已返回 Unknown 且采样点不再可用的场景。
+pub fn detect_audio_type_from_transcription(transcription: &str) -> AudioType {
+    let transcription = transcription.trim();
     if transcription.is_empty() || transcription.len() < 20 {
         return AudioType::Music;
     }
-
-    // Count words in transcription
-    // 统计转录文本中的词数
     let word_count = transcription.split_whitespace().count();
-
-    // If transcription has substantial content (more than 50 words), likely speech
-    // 如果转录有实质性内容（超过50个词），可能是语音
     if word_count > 50 {
         return AudioType::Speech;
     }
-
-    // Default to unknown
-    // 默认为未知类型
     AudioType::Unknown
 }

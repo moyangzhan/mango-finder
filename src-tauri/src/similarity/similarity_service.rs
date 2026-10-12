@@ -308,7 +308,7 @@ async fn find_similars_for_external_image(
             )
             .map_err(|e| e.to_string())?
         }
-        None => visual_scan_candidates()?,
+        None => visual_scan_candidates(&source_hash_bytes, limit)?,
     };
 
     let results = image_similarity::score_image_candidates(&source_hash, &candidates, None, limit)
@@ -322,38 +322,28 @@ async fn find_similars_for_external_image(
     })
 }
 
-/// 音频：分类与索引期同构（特征优先、转写内容兜底）；音乐/混合走指纹比对，语音/未知走转写嵌入检索
+/// 音频:解码一次、采样点复用给所有消费者,全部放 spawn_blocking;
+/// 分类与索引期同构(特征优先、转写内容兜底);音乐/混合走指纹,语音/未知走转写嵌入
 async fn find_similars_for_external_audio(
     path: &str,
     limit: usize,
 ) -> Result<ExternalSimilarOutcome, String> {
-    let feature_type = audio_util::detect_audio_type_from_file(path);
+    let decode_path = path.to_string();
 
-    // 特征明确为音乐时无需转写；其余（语音或特征不明）转写后按索引期同一规则定类型
-    let transcription = if matches!(feature_type, AudioType::Music | AudioType::Mixed) {
-        None
-    } else {
-        let parser =
-            AudioParser::new().map_err(|e| format!("Failed to load Whisper model: {}", e))?;
-        Some(
-            parser
-                .parse(path)
-                .await
-                .map_err(|e| format!("Failed to transcribe audio: {}", e))?,
-        )
-    };
-    let audio_type = match feature_type {
-        AudioType::Music | AudioType::Mixed => feature_type,
-        _ => audio_util::detect_audio_type(
-            &text_util::collapse_newlines(transcription.as_deref().unwrap_or("")),
-            path,
-        ),
-    };
+    // 解码一次 + 特征分类 + 音乐指纹提取,全部在 spawn_blocking 里
+    let (audio_type, fingerprint, samples) = tokio::task::spawn_blocking(move || {
+        let samples = audio_util::load_audio_to_f32(&decode_path)
+            .map_err(|e| format!("Failed to decode audio: {}", e))?;
+        let feature_type = audio_util::detect_audio_type_by_features(&samples);
+        let fingerprint =
+            audio_util::extract_music_fingerprint(&samples);
+        Ok::<_, String>((feature_type, fingerprint, samples))
+    })
+    .await
+    .map_err(|e| format!("Audio decode task failed: {}", e))??;
 
     match audio_type {
         AudioType::Music | AudioType::Mixed => {
-            let fingerprint = audio_util::extract_music_fingerprint_from_file(path)
-                .ok_or_else(|| format!("Failed to extract audio fingerprint: {}", path))?;
             let results =
                 audio_similarity::find_similars_by_fingerprint_value(&fingerprint, None, limit)
                     .await
@@ -366,7 +356,34 @@ async fn find_similars_for_external_audio(
             })
         }
         AudioType::Speech | AudioType::Unknown => {
-            let transcription = transcription.unwrap_or_default();
+            // 转写:用已解码的采样点(不再读文件)
+            let parser =
+                AudioParser::new().map_err(|e| format!("Failed to load Whisper model: {}", e))?;
+            let transcription = parser
+                .parse_from_samples(&samples)
+                .await
+                .map_err(|e| format!("Failed to transcribe audio: {}", e))?;
+
+            // 特征 Unknown 时用转写文本重分类(与索引期同一兜底规则);
+            // 重分类为 Music/Mixed 时改走指纹路径(与旧版行为一致)
+            let audio_type = if audio_type == AudioType::Unknown {
+                audio_util::detect_audio_type_from_transcription(&transcription)
+            } else {
+                audio_type
+            };
+
+            if matches!(audio_type, AudioType::Music | AudioType::Mixed) {
+                let results =
+                    audio_similarity::find_similars_by_fingerprint_value(&fingerprint, None, limit)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                return Ok(ExternalSimilarOutcome {
+                    results,
+                    chunk_count: 0,
+                    audio_type: Some(audio_type),
+                    category: FileCategory::Audio,
+                });
+            }
 
             if transcription.trim().is_empty() {
                 return Ok(ExternalSimilarOutcome {
@@ -400,9 +417,18 @@ async fn find_similars_for_external_audio(
     }
 }
 
-/// 全量加载图片哈希作为纯视觉比对候选
-fn visual_scan_candidates() -> Result<Vec<ImageSimilarityCandidate>, String> {
-    let rows = file_info_repo::list_image_hashes().map_err(|e| e.to_string())?;
+/// 视觉回退:经 SQLite UDF 在库内按汉明距离过滤,只取匹配行
+/// Visual fallback: SQLite UDF filters by hamming distance in-DB
+fn visual_scan_candidates(
+    source_hash: &[u8],
+    limit: usize,
+) -> Result<Vec<ImageSimilarityCandidate>, String> {
+    // score >= 30 要求 distance <= 7(公式: score = (10 - d) * 10);
+    // SQL LIMIT 取用户 limit 与 ANN_CANDIDATE_LIMIT 的较大值,不截断
+    let sql_limit = (limit.max(image_similarity::ANN_CANDIDATE_LIMIT)) as i64;
+    let rows =
+        file_info_repo::find_visual_candidates_by_hash(source_hash, 7, sql_limit)
+            .map_err(|e| e.to_string())?;
     Ok(rows
         .into_iter()
         .map(|(file_id, image_hash)| ImageSimilarityCandidate {
