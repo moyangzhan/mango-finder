@@ -108,9 +108,10 @@ pub async fn fetch_remote_file(device_id: String, file_id: i64) -> Result<Vec<u8
     }
 
     // Build URL with file_id
-    let url = format!(
-        "http://{}:{}/cluster/file/{}",
-        device.ip_address, device.port, file_id
+    let url = crate::cluster::http_client::cluster_url(
+        &device.ip_address,
+        device.port,
+        &format!("/file/{}", file_id),
     );
 
     log::info!(

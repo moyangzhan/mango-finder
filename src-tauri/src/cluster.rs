@@ -12,6 +12,10 @@ use std::sync::OnceLock;
 use tauri::Emitter;
 use tokio::sync::RwLock as AsyncRwLock;
 
+/// URL prefix of the inter-device endpoints, shared by server routing
+/// (Router::nest) and client URL building
+pub const CLUSTER_PREFIX: &str = "/cluster";
+
 /// Global cluster setting
 pub static CLUSTER_SETTING: OnceLock<AsyncRwLock<ClusterSetting>> = OnceLock::new();
 

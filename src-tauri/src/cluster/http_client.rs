@@ -36,6 +36,11 @@ static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
         .unwrap_or_else(|_| Client::new())
 });
 
+/// Build a /cluster endpoint URL for a remote device; `path` begins with `/`
+pub fn cluster_url(ip: &str, port: i32, path: &str) -> String {
+    format!("http://{}:{}{}{}", ip, port, super::CLUSTER_PREFIX, path)
+}
+
 // ============================================
 // Internal helpers - 内部助手
 // ============================================
@@ -94,7 +99,7 @@ pub async fn search(
     ip: &str,
     port: i32,
 ) -> Result<SearchData, String> {
-    let url = format!("http://{}:{}/cluster/search", ip, port);
+    let url = cluster_url(ip, port, "/search");
     let request = RemoteSearchRequest {
         query: query.to_string(),
         search_type: search_type.to_string(),
@@ -110,7 +115,7 @@ pub async fn search(
 /// Find similar files on a remote device by file ID (with exclude list for loop prevention)
 /// 通过文件ID在远程设备上查找相似文件（带排除列表防止循环）
 ///
-/// This calls the /file/:file_id/cluster_similars endpoint which handles cross-device search
+/// This calls the /cluster/file/:file_id/similars endpoint which handles cross-device search
 /// on the remote device side, including forwarding to other devices.
 ///
 /// # Arguments
@@ -123,7 +128,7 @@ pub async fn find_similars(
     ip: &str,
     port: i32,
 ) -> Result<FindSimilarsData, String> {
-    let url = format!("http://{}:{}/cluster/file/{}/similars", ip, port, file_id);
+    let url = cluster_url(ip, port, &format!("/file/{}/similars", file_id));
 
     // Generate request_id if not provided
     let request_id = match request_id {
@@ -155,7 +160,7 @@ pub async fn find_similars(
 /// Fetch file data from a remote device
 /// 从远程设备获取文件数据
 pub async fn fetch_file(file_id: i64, ip: &str, port: i32) -> Result<Vec<u8>, String> {
-    let url = format!("http://{}:{}/cluster/file/{}", ip, port, file_id);
+    let url = cluster_url(ip, port, &format!("/file/{}", file_id));
     let response =
         send_with_device_id(reqwest::Method::GET, &url, None::<&serde_json::Value>).await?;
     let data = response
@@ -172,7 +177,7 @@ pub async fn fetch_file(file_id: i64, ip: &str, port: i32) -> Result<Vec<u8>, St
 /// Fetch chunks from a remote device by IDs
 /// 从远程设备获取文本片段
 pub async fn fetch_chunks(ids: &[u32], ip: &str, port: i32) -> Result<Vec<String>, String> {
-    let url = format!("http://{}:{}/cluster/chunks", ip, port);
+    let url = cluster_url(ip, port, "/chunks");
     call_and_get_data::<ChunksData>(
         reqwest::Method::POST,
         &url,
@@ -193,7 +198,7 @@ pub async fn fetch_file_content(
     ip: &str,
     port: i32,
 ) -> Result<FileContentData, String> {
-    let url = format!("http://{}:{}/cluster/file/{}/content", ip, port, file_id);
+    let url = cluster_url(ip, port, &format!("/file/{}/content", file_id));
     call_and_get_data(reqwest::Method::GET, &url, None::<&serde_json::Value>).await
 }
 
@@ -321,7 +326,7 @@ pub async fn send_pairing_request(
         port: my_port,
     };
 
-    let url = format!("http://{}:{}/cluster/pairing/request", ip, port);
+    let url = cluster_url(ip, port, "/pairing/request");
 
     let response = HTTP_CLIENT
         .post(&url)
@@ -439,10 +444,7 @@ pub async fn send_pairing_response(
         approved,
     };
 
-    let url = format!(
-        "http://{}:{}/cluster/pairing/respond",
-        requester_ip, requester_port
-    );
+    let url = cluster_url(requester_ip, requester_port, "/pairing/respond");
 
     let response = HTTP_CLIENT
         .post(&url)
@@ -481,10 +483,7 @@ pub async fn send_reset_notify(
         previous_status: previous_status.to_string(),
     };
 
-    let url = format!(
-        "http://{}:{}/cluster/pairing/reset_notify",
-        remote_ip, remote_port
-    );
+    let url = cluster_url(remote_ip, remote_port, "/pairing/reset_notify");
 
     let response = HTTP_CLIENT
         .post(&url)

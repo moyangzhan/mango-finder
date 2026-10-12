@@ -585,24 +585,24 @@ async fn serve_on(
         .route("/cli/shutdown", post(cli_shutdown))
         .layer(middleware::from_fn(verify_loopback));
 
+    // Inter-device protocol gets a /cluster prefix, separated from the
+    // /cli (local) namespace. No legacy-path compatibility: devices are
+    // expected to upgrade together.
+    // 设备间协议加 /cluster 前缀,与 /cli(本机)命名空间区分;
+    // 不保留旧路径兼容:多设备约定一起升级
+    let cluster_routes = Router::new()
+        .route("/search", post(handle_search))
+        .route("/chunks", post(handle_chunks))
+        .route("/file/:file_id/similars", post(handle_find_similars))
+        .route("/file/:file_id", get(handle_file_download))
+        .route("/file/:file_id/content", get(handle_file_content))
+        .route("/pairing/request", post(handle_pairing_request))
+        .route("/pairing/respond", post(handle_pairing_respond))
+        .route("/pairing/reset_notify", post(handle_reset_notify));
+
     let app = Router::new()
         .route("/ping", get(handle_ping))
-        // Inter-device protocol gets a /cluster prefix, separated from the
-        // /cli (local) namespace. No legacy-path compatibility: devices are
-        // expected to upgrade together.
-        // 设备间协议加 /cluster 前缀,与 /cli(本机)命名空间区分;
-        // 不保留旧路径兼容:多设备约定一起升级
-        .route("/cluster/search", post(handle_search))
-        .route("/cluster/chunks", post(handle_chunks))
-        .route(
-            "/cluster/file/:file_id/similars",
-            post(handle_find_similars),
-        )
-        .route("/cluster/file/:file_id", get(handle_file_download))
-        .route("/cluster/file/:file_id/content", get(handle_file_content))
-        .route("/cluster/pairing/request", post(handle_pairing_request))
-        .route("/cluster/pairing/respond", post(handle_pairing_respond))
-        .route("/cluster/pairing/reset_notify", post(handle_reset_notify))
+        .nest(super::CLUSTER_PREFIX, cluster_routes)
         .merge(cli_routes)
         .with_state(state);
 
