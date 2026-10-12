@@ -7,7 +7,7 @@ use crate::structs::search_result::SearchResult;
 use crate::traits::similarity_detector::SimilarityDetector;
 use crate::utils::audio_util::{MusicFingerprint, compare_music_fingerprints};
 use async_trait::async_trait;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 pub struct AudioSimilarityDetector;
 
@@ -59,73 +59,35 @@ impl AudioSimilarityDetector {
         find_similars_by_fingerprint_value(&source_fingerprint, Some(file_info.id), limit).await
     }
 
-    /// Find similar audio files based on transcription text embeddings
-    /// 基于转录文本嵌入查找相似音频文件
+    /// Find similar audio files based on transcription text embeddings.
+    /// Uses all chunk embeddings with max-aggregation via the shared
+    /// `find_similars_from_chunks` helper (consistent with the external path).
+    /// 基于转录文本嵌入查找相似音频文件。
+    /// 经共享的 `find_similars_from_chunks` 使用全部分块、最大分聚合
+    /// (与外部现场路径一致)。
     async fn find_similars_by_transcription(
         &self,
         file_info: &FileInfo,
         limit: usize,
     ) -> Result<Vec<SearchResult>, AppError> {
         let embeddings = file_content_embedding_repo::list_by_file_id(file_info.id)?;
-
         if embeddings.is_empty() {
             return Ok(Vec::new());
         }
 
-        let source_embedding = &embeddings[0];
-        let sparse_indices: Vec<u32> = source_embedding.sparse_vec.indices.clone();
-        let sparse_values: Vec<f32> = source_embedding.sparse_vec.values.clone();
-
-        // Hybrid search: combine dense vector similarity with sparse vector (BM25) scoring
-        let similar_embeddings = file_content_embedding_repo::hybrid_search(
-            &source_embedding.embedding,
-            &sparse_indices,
-            &sparse_values,
-            10, // min_score threshold
-        )?;
-
-        // Filter to only Audio category files (category = 3)
-        let audio_file_ids: HashSet<i64> = file_info_repo::list_ids_by_category(3)?
+        let chunks: Vec<(Vec<f32>, crate::structs::sparse_vector::SparseVector)> = embeddings
             .into_iter()
+            .map(|e| (e.embedding.to_vec(), e.sparse_vec))
             .collect();
 
-        // Aggregate scores by file_id, keeping the maximum score per file
-        let mut file_scores: HashMap<i64, usize> = HashMap::new();
-        for emb in &similar_embeddings {
-            if emb.file_id == file_info.id {
-                continue;
-            }
-            if !audio_file_ids.contains(&emb.file_id) {
-                continue;
-            }
-            let max_score = file_scores.entry(emb.file_id).or_insert(0);
-            *max_score = (*max_score).max(emb.score);
-        }
-
-        let mut sorted_files: Vec<(i64, usize)> = file_scores.into_iter().collect();
-        sorted_files.sort_by(|a, b| b.1.cmp(&a.1));
-        sorted_files.truncate(limit);
-
-        let file_ids: Vec<i64> = sorted_files.iter().map(|(id, _)| *id).collect();
-        let files = file_info_repo::list_meta_by_ids(&file_ids)?;
-
-        let file_map: HashMap<i64, FileInfo> = files.into_iter().map(|f| (f.id, f)).collect();
-        let results: Vec<SearchResult> = sorted_files
-            .into_iter()
-            .filter_map(|(file_id, score)| {
-                file_map.get(&file_id).map(|info| SearchResult {
-                    score,
-                    hit_types: vec![],
-                    file_info: info.clone(),
-                    matched_keywords: HashSet::new(),
-                    matched_chunk_ids: HashSet::new(),
-                    similarity_type: Some(SimilarityType::AudioTranscription),
-                    source_device: None,
-                })
-            })
-            .collect();
-
-        Ok(results)
+        crate::similarity::document_similarity::find_similars_from_chunks(
+            &chunks,
+            3, // Audio category
+            Some(file_info.id),
+            limit,
+            SimilarityType::AudioTranscription,
+        )
+        .await
     }
 }
 
