@@ -6,7 +6,7 @@ pub mod open_doc;
 pub mod pdfplumber_loader;
 
 use crate::global::EXTRACTED_IMAGES_PATH;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(crate) const BUCKET_SIZE: i64 = 1000;
 
@@ -95,21 +95,113 @@ pub(crate) fn truncate_to_char_limit(content: &mut String, limit: usize) {
     }
 }
 
-/// Remove extracted images left over by external (un-indexed) document queries.
-/// 清理外部文档查询遗留的抽取图片。
-///
-/// External queries parse with file_id = 0, so their images land in bucket 0000
-/// with a `0_` prefix and are never referenced by any index row. Real indexed
-/// files use ids >= 1 in the same bucket and are not affected.
-pub fn cleanup_external_query_images() {
-    let dir = get_images_dir(0);
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(entries) => entries,
-        Err(_) => return,
+/// Unique temp dir per external (file_id = 0) parse: images isolated per
+/// query (no cross-query name collisions), deleted afterwards.
+/// 外部解析(file_id=0)每次查询独立临时目录:图片按查询隔离(无重名冲突),事后删除。
+pub(crate) fn temp_images_dir() -> PathBuf {
+    let base = EXTRACTED_IMAGES_PATH.get().cloned().unwrap_or_default();
+    PathBuf::from(base).join(format!("tmp_{}", uuid::Uuid::new_v4().simple()))
+}
+
+/// RAII guard: removes the whole dir on drop, covering every exit path
+/// (early error returns and panics included).
+/// RAII 守卫:drop 时整目录删除,覆盖所有退出路径(含错误提前返回与 panic)。
+pub(crate) struct TempDirGuard(PathBuf);
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        // NotFound is the expected race with the stale-dir sweep; other
+        // failures leave a dir the sweep will catch later
+        if let Err(e) = std::fs::remove_dir_all(&self.0) {
+            log::debug!("remove temp images dir {:?} failed: {}", self.0.display(), e);
+        }
+    }
+}
+
+/// Resolve the images dir for one parse: indexed parses (id > 0) use their
+/// persistent bucket; external parses get a temp dir guarded for auto-removal.
+/// 解析所用图片目录:索引解析(id>0)用持久桶;外部解析返回临时目录并附守卫。
+pub(crate) fn images_dir_for(file_id: i64) -> (PathBuf, Option<TempDirGuard>) {
+    if file_id > 0 {
+        (get_images_dir(file_id), None)
+    } else {
+        let dir = temp_images_dir();
+        let guard = TempDirGuard(dir.clone());
+        (dir, Some(guard))
+    }
+}
+
+/// A temp dir idle this long is a crash leftover (a live parse runs minutes).
+/// 临时目录闲置该时长即视为崩溃残留(进行中的解析最多数分钟)。
+const STALE_TEMP_DIR_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// Sweep orphaned temp dirs left by crashed processes.
+/// 清扫崩溃进程遗留的孤儿临时目录。
+pub fn cleanup_stale_temp_images_dirs() {
+    let base = EXTRACTED_IMAGES_PATH.get().cloned().unwrap_or_default();
+    if base.is_empty() {
+        return;
+    }
+    sweep_stale_temp_dirs_in(std::path::Path::new(&base), STALE_TEMP_DIR_AGE);
+}
+
+/// Core sweep: remove `tmp_*` dirs whose mtime is older than `max_age`;
+/// bucket dirs (`0000`-`9999`) are never touched. The age gate makes it safe
+/// next to a live query (its dir was just written).
+/// 清扫核心:删除 mtime 早于 max_age 的 tmp_* 目录;桶目录(`0000`-`9999`)
+/// 不受影响。时间阈值保证不会误删进行中查询的目录(其目录刚被写入)。
+fn sweep_stale_temp_dirs_in(base: &Path, max_age: std::time::Duration) {
+    let cutoff = std::time::SystemTime::now() - max_age;
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return;
     };
     for entry in entries.flatten() {
-        if entry.file_name().to_string_lossy().starts_with("0_") {
-            let _ = std::fs::remove_file(entry.path());
+        if !entry.file_name().to_string_lossy().starts_with("tmp_") {
+            continue;
         }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| t < cutoff)
+            .unwrap_or(false);
+        if stale {
+            if let Err(e) = std::fs::remove_dir_all(entry.path()) {
+                log::warn!(
+                    "remove stale temp dir {:?} failed: {}",
+                    entry.path().display(),
+                    e
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sweep_removes_only_stale_tmp_dirs() {
+        let base = std::env::temp_dir().join(format!(
+            "mango_tmp_sweep_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(base.join("tmp_old")).unwrap();
+        std::fs::create_dir_all(base.join("tmp_fresh")).unwrap();
+        std::fs::create_dir_all(base.join("0001")).unwrap();
+
+        // Zero age = everything counts as stale; only tmp_* dirs are removed
+        // 零阈值 = 全部视为过期;只删 tmp_* 目录
+        sweep_stale_temp_dirs_in(&base, std::time::Duration::ZERO);
+        assert!(!base.join("tmp_old").exists());
+        assert!(!base.join("tmp_fresh").exists());
+        assert!(base.join("0001").exists());
+
+        // Large age = nothing stale, bucket dirs kept
+        // 大阈值 = 无过期,桶目录保留
+        sweep_stale_temp_dirs_in(&base, std::time::Duration::from_secs(365 * 24 * 3600));
+        assert!(base.join("0001").exists());
+
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

@@ -216,8 +216,6 @@ async fn find_similars_for_external_document(
     })
     .await
     .map_err(|e| format!("Failed to parse file: {}", e))?;
-    // 外部查询以 file_id=0 解析，抽取图片（`0_` 前缀）无索引记录引用，解析完即清理
-    crate::document_loaders::cleanup_external_query_images();
     let content = parse_result.map_err(|e| format!("Failed to parse file: {}", e))?;
 
     if content.trim().is_empty() {

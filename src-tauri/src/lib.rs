@@ -27,6 +27,7 @@ mod fs_watcher;
 mod image_parser;
 mod indexers;
 mod model_platform_services;
+mod one_time_job;
 mod ocr_service;
 mod scanner;
 mod self_hosted_services;

@@ -1,4 +1,4 @@
-use super::{get_images_dir, image_filename};
+use super::{image_filename, images_dir_for};
 use crate::global::{MAX_DOCUMENT_LOAD_CHARS, PDF_EXTS};
 use crate::image_parser;
 use crate::ocr_service;
@@ -36,7 +36,7 @@ impl DocumentLoader for PdfPlumberLoader {
     }
 
     fn load_max(&self, path: &Path, max_load_chars: usize) -> io::Result<String> {
-        let images_dir = get_images_dir(0);
+        let (images_dir, _guard) = images_dir_for(0);
         self.load_pdf(path, &images_dir, 0, max_load_chars)
     }
 
@@ -47,7 +47,7 @@ impl DocumentLoader for PdfPlumberLoader {
         _file_name: &str,
         max_load_chars: usize,
     ) -> io::Result<String> {
-        let images_dir = get_images_dir(file_id);
+        let (images_dir, _guard) = images_dir_for(file_id);
         self.load_pdf(path, &images_dir, file_id, max_load_chars)
     }
 
@@ -78,11 +78,14 @@ impl PdfPlumberLoader {
         let mut image_texts = Vec::new();
         let mut failed_pages = Vec::new();
 
-        let bucket = if file_id > 0 {
-            format!("{:04}", (file_id - 1) / super::BUCKET_SIZE)
-        } else {
-            "0000".to_string()
-        };
+        // Dir folder name doubles as the markdown rel-path segment (bucket for
+        // indexed parses, per-query temp dir for external ones)
+        // 目录名兼作 markdown 相对路径段(索引解析为桶名,外部解析为查询级临时目录)
+        let bucket = images_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("0000")
+            .to_string();
         let img_rel_prefix = format!("../../extracted_images/{}/", bucket);
 
         for page_idx in 0..pdf.page_count() {

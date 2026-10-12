@@ -10,7 +10,6 @@ use crate::repositories::{config_repo, model_platform_repo, self_hosted_platform
 use crate::structs::fs_watcher_setting::FsWatcherSetting;
 use crate::structs::indexer_setting::IndexerSetting;
 use crate::structs::proxy_setting::ProxyInfo;
-use crate::utils::task_util;
 use anyhow::Context;
 use log::{error, info};
 use ort::execution_providers::{
@@ -26,17 +25,9 @@ pub async fn process(standalone: bool) {
         .context("Failed to initialize database")
         .unwrap_or_else(|e| error!("db init error: {e:?}"));
 
-    // Clean up orphaned task locks from a previous crash. Skipped for
-    // standalone (CLI/daemon) processes: the age heuristic cannot tell a
-    // long-running GUI task from a crashed one, and a one-shot CLI clearing
-    // the live GUI's task lock would break cross-process task mutual
-    // exclusion.
-    // 清理上次崩溃遗留的任务锁。standalone(CLI/daemon)进程跳过:该清理按
-    // 时长启发式判断,无法区分"GUI 仍在跑的长任务"与"崩溃残留";一次性
-    // CLI 误清活任务的锁会破坏跨进程的任务互斥。
-    if !standalone {
-        task_util::cleanup_orphan_task();
-    }
+    // One-shot crash-leftover cleanup (orphan task locks, temp image dirs)
+    // 一次性清理崩溃遗留(孤儿任务锁、临时图片目录)
+    crate::one_time_job::run_startup(standalone);
 
     // Initialize the client_id
     init_sync_string_setting(CONFIG_NAME_CLIENT_ID, &CLIENT_ID);
