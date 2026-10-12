@@ -80,6 +80,7 @@ pub trait IndexingTemplate {
                 .map(|info| info.id)
                 .max()
                 .unwrap_or(min_id + 1000);
+            let mut removed_any = false;
             for file_info in file_infos {
                 if STOP_INDEX_SIGNAL.load(Ordering::SeqCst) {
                     log::info!("Indexing process interrupted by stop signal");
@@ -101,6 +102,7 @@ pub trait IndexingTemplate {
                     file_content_fts_repo::delete_by_file_id(file_info.id)?;
                     file_content_embedding_repo::delete_by_file_id(file_info.id)?;
                     file_metadata_embedding_repo::delete_by_file_id(file_info.id)?;
+                    removed_any = true;
                     continue;
                 }
                 frontend_util::send_event(
@@ -114,6 +116,11 @@ pub trait IndexingTemplate {
                     log::warn!("Embedding failed: {}", error);
                     indexing_task_util::failed_incr(self.category(), 1).await;
                 }
+            }
+            // 本批次有删除时通知一次(而非每文件递增)
+            // Notify once per batch if any rows were removed
+            if removed_any {
+                crate::searcher::path_search_engine::notify_paths_removed();
             }
         }
         Ok(())

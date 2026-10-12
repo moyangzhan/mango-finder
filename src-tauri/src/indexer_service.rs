@@ -14,6 +14,7 @@ use crate::repositories::{
     file_metadata_embedding_repo, indexing_task_repo,
 };
 use crate::scanner;
+use crate::searcher;
 use crate::structs::indexer_setting::IndexerSetting;
 use crate::traits::indexing_template::IndexingTemplate;
 use crate::utils::{frontend_util, indexing_task_util, task_util};
@@ -682,6 +683,9 @@ pub async fn sync_offline_changes() -> Result<(), String> {
         }
     }
 
+    if deleted_count > 0 {
+        searcher::path_search_engine::notify_paths_removed();
+    }
     log::info!(
         "Offline sync: removed {} deleted file records",
         deleted_count
@@ -879,6 +883,8 @@ pub fn remove_file_index(path: &str) -> Result<(), String> {
         file_content_fts_repo::delete_by_file_id(file_info.id)?;
         file_content_embedding_repo::delete_by_file_id(file_info.id)?;
         file_metadata_embedding_repo::delete_by_file_id(file_info.id)?;
+        // 通知其他常驻进程的路径缓存重建
+        // Notify path caches in other resident processes to rebuild
     }
     Ok(())
 }

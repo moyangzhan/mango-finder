@@ -107,7 +107,7 @@ impl AudioSimilarityDetector {
         sorted_files.truncate(limit);
 
         let file_ids: Vec<i64> = sorted_files.iter().map(|(id, _)| *id).collect();
-        let files = file_info_repo::list_by_ids(&file_ids)?;
+        let files = file_info_repo::list_meta_by_ids(&file_ids)?;
 
         let file_map: HashMap<i64, FileInfo> = files.into_iter().map(|f| (f.id, f)).collect();
         let results: Vec<SearchResult> = sorted_files
@@ -149,7 +149,7 @@ pub async fn find_similars_by_fingerprint_value(
         3,
         AudioType::Mixed as i32,
     )?);
-    let music_files = file_info_repo::list_by_ids(&music_file_ids)?;
+    let music_files = file_info_repo::list_meta_by_ids(&music_file_ids)?;
 
     let mut similarities: Vec<(FileInfo, f32)> = Vec::new();
 

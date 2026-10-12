@@ -21,7 +21,7 @@ pub async fn search(query: &str) -> Vec<SearchResult> {
     fts_results.iter().for_each(|fts_result| {
         file_ids.push(fts_result.file_id);
     });
-    let file_infos = file_info_repo::list_by_ids(&file_ids).unwrap_or_default();
+    let file_infos = file_info_repo::list_meta_by_ids(&file_ids).unwrap_or_default();
     file_infos.iter().for_each(|file_info| {
         let match_fts_item = fts_results
             .iter()

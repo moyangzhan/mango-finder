@@ -2,7 +2,7 @@ use crate::entities::FileInfo;
 use crate::enums::{FileCategory, HitType};
 use crate::global::DEFAULT_PAGE_SIZE;
 use crate::global::{PATHS_CACHE, PATHS_CACHE_BUILD_TIME};
-use crate::repositories::file_info_repo;
+use crate::repositories::{config_repo, file_info_repo};
 use crate::structs::search_result::SearchResult;
 use crate::utils::file_util;
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
@@ -12,7 +12,41 @@ use rayon::prelude::*;
 use smallvec::SmallVec;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicI64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
+
+/// 缓存版本号(DB config 键):任何进程删除索引行时递增;
+/// 持有缓存的宿主在计时器里发现版本不一致即全量重建,
+/// 使跨进程删除(如 CLI index clear)在 ≤10s 内对常驻缓存生效
+/// Cache generation (DB config key): any process deleting index rows bumps it;
+/// resident hosts rebuild on mismatch at the next 10s tick.
+const PATHS_CACHE_GEN_KEY: &str = "paths_cache_gen";
+static CACHE_GEN: AtomicI64 = AtomicI64::new(i64::MIN);
+/// 全量重建互斥:timer 与 init 可能并发触发 build_index,不保护会互相
+/// clear/push 交错产生重复条目
+/// Full-rebuild mutex: timer and init may trigger build_index concurrently
+static BUILDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn read_db_gen() -> Option<i64> {
+    config_repo::get_val(PATHS_CACHE_GEN_KEY)
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// 通知其他进程:索引行有删除,持有缓存的宿主应重建(本进程本地版本同步跳过)
+/// Notify other processes that index rows were removed (resident hosts rebuild)
+pub fn notify_paths_removed() {
+    // 只递增 DB 版本,不存 local gen:让 timer 统一检测并触发重建。
+    // 若在这里存 local gen,会抑制本进程的重建(remove_file_index 等不剪
+    // 本地缓存的调用方就会留下幽灵路径)
+    // Only bump the DB generation; do NOT store the local gen so the timer
+    // always detects the mismatch and rebuilds (storing it here would
+    // suppress the rebuild for callers that don't prune the local cache)
+    if let Err(e) = config_repo::increment(PATHS_CACHE_GEN_KEY) {
+        log::warn!("Failed to bump paths cache generation: {}", e);
+    }
+}
 
 /// Keyword-based exact match search for file paths
 pub async fn search(query: &str) -> Vec<SearchResult> {
@@ -96,14 +130,36 @@ pub async fn init() {
     tokio::spawn(paths_index_timer());
 }
 async fn build_index() {
+    // 并发保护:已在重建中则跳过(下一 tick 会再检测到版本差异重试)
+    if BUILDING.swap(true, AtomicOrdering::SeqCst) {
+        return;
+    }
+    // 记录构建前的版本号:若构建期间有进程递增了版本,下一 tick 会再次
+    // 不匹配并重建(自愈),不会把半新半旧的状态当成最新
+    // Record the pre-build generation: a bump during the build makes the next
+    // tick mismatch and rebuild again (self-healing) instead of adopting a
+    // half-built state as current.
+    let gen_before = read_db_gen().unwrap_or(0);
+    let mut build_complete = true;
     let size = 1000;
+    // 先查 count 再清缓存:count 失败(如 SQLITE_BUSY → 0)时不清,
+    // 避免把好缓存清成空后提前退出
+    let total = match file_info_repo::count() {
+        Ok(n) => n,
+        Err(e) => {
+            log::error!("build_index: count failed: {}", e);
+            BUILDING.store(false, AtomicOrdering::SeqCst);
+            return; // 不清缓存、不推进版本,下一 tick 重试
+        }
+    };
     {
         let mut cache = PATHS_CACHE.write().await;
         cache.clear();
     }
-    let total = file_info_repo::count().unwrap_or_default();
     if total == 0 {
         log::debug!("file_info total == 0");
+        CACHE_GEN.store(gen_before, AtomicOrdering::SeqCst);
+        BUILDING.store(false, AtomicOrdering::SeqCst);
         return;
     }
     let pages = (total + size - 1) / size;
@@ -113,12 +169,13 @@ async fn build_index() {
             Ok(f) => f,
             Err(e) => {
                 log::error!("Error reading page {}: {}", page, e);
+                build_complete = false;
                 break;
             }
         };
         if paths.is_empty() {
             log::debug!("no new paths");
-            break;
+            break; // 正常:没有更多页
         }
         let mut cache = PATHS_CACHE.write().await;
         for (id, path) in paths {
@@ -128,6 +185,13 @@ async fn build_index() {
             (*cache).push((id, path));
         }
     }
+    // 页读取中途出错时不清 gen/build_time,让下一 tick 检测到版本差异重试
+    if !build_complete {
+        BUILDING.store(false, AtomicOrdering::SeqCst);
+        return;
+    }
+    CACHE_GEN.store(gen_before, AtomicOrdering::SeqCst);
+    BUILDING.store(false, AtomicOrdering::SeqCst);
     let mut guard = PATHS_CACHE_BUILD_TIME.write().await;
     *guard = Local::now()
 }
@@ -145,6 +209,16 @@ async fn paths_index_timer() {
     let mut interval = tokio::time::interval(Duration::from_secs(10));
     loop {
         interval.tick().await;
+        // 版本不一致说明其他进程删除过索引行,增量推送无法感知删除,全量重建
+        // A generation mismatch means another process removed index rows,
+        // which the append-only push cannot see — rebuild in full.
+        if let Some(db_gen) = read_db_gen() {
+            if db_gen != CACHE_GEN.load(AtomicOrdering::SeqCst) {
+                log::info!("paths cache generation changed, rebuilding");
+                build_index().await;
+                continue;
+            }
+        }
         push_to_index().await;
     }
 }
@@ -155,11 +229,9 @@ pub async fn push_to_index() {
     if total == 0 {
         return;
     }
-    // Gather all changed rows first (no lock held), then reconcile in ONE
-    // pass under a single write guard: a path→slot map makes each row O(1)
-    // instead of a linear scan of the whole cache per row.
-    // 先无锁取回全部变更行,再在单次写锁内一次性对账:path→槽位 map 让每行
-    // O(1) 命中,而不是每行对全缓存线性扫描。
+    // 无锁取回变更行,再在单次写锁内经 path→槽位 map 对账(每行 O(1))
+    // Gather changed rows without the lock, then reconcile in one write-guard
+    // pass via a path-to-slot map (O(1) per row)
     let page_size = 1000;
     let pages = (total as f64 / page_size as f64).ceil() as u32;
     let mut incoming: Vec<(i64, String)> = Vec::new();
@@ -176,23 +248,12 @@ pub async fn push_to_index() {
 
     if !incoming.is_empty() {
         let mut paths_guard = PATHS_CACHE.write().await;
-        // Plan under an immutable borrow (path → slot map), then apply after
-        // the map is dropped — mutating .0 while holding &str keys into the
-        // same guard would not borrow-check. New entries get a "future" slot
-        // (>= current len) assigned in encounter order; since apply pushes in
-        // op order, slot == len holds at every push, and a duplicate path in
-        // the same batch resolves to its scheduled slot (last write wins).
-        // 规划阶段持不可变借用(path → 槽位 map),落地前丢弃 map —— 持有指向
-        // 同一 guard 的 &str 键同时改 .0 无法通过借用检查。新条目按出现顺序
-        // 领取"未来"槽位(>= 当前长度);落地按 op 顺序入栈,每次 push 时
-        // slot == len 恰好成立,同批次重复路径则落到已排定的槽位(后写胜)。
+        // 先经 path→槽位 map 定位(已缓存条目刷新 id,新条目按序领槽),再落地
+        // Locate via a path-to-slot map (cached entries refresh the id, new
+        // entries take sequential slots), then apply
         let ops: Vec<(usize, i64, String)> = {
-            // Existing entries keyed by guard-borrowed &str; batch-scheduled
-            // new entries in a separate owned map (borrowing local Strings
-            // into the guard-lifetime map would not borrow-check).
-            // 既有条目以 guard 借用的 &str 为键;本批新排定的条目放在独立的
-            // owned map(把局部 String 的引用插进 guard 生命周期的 map 无法
-            // 通过借用检查)。
+            // 既有条目借用 guard 的 &str;本批新条目用 owned map
+            // Existing entries borrow &str from the guard; batch-new use owned keys
             let slot_of: HashMap<&str, usize> = paths_guard
                 .iter()
                 .enumerate()
@@ -219,11 +280,8 @@ pub async fn push_to_index() {
         };
         for (slot, id, path) in ops {
             if slot < paths_guard.len() {
-                // Path already cached (or pushed earlier in this batch):
-                // refresh its id in case the row was deleted and re-created
-                // with a new id.
-                // 路径已在缓存(或本批次早前已入栈):刷新其 id,防的是同路径
-                // 行被删除后以新 id 重建。
+                // 已缓存:刷新 id(同路径行可能以新 id 重建)
+                // Cached: refresh the id (row may have been re-created)
                 paths_guard[slot].0 = id;
             } else {
                 paths_guard.push((id, path));
@@ -236,16 +294,24 @@ pub async fn push_to_index() {
 
 // Handle delete path
 pub async fn remove_from_index(path: &str, is_file: bool) {
-    let mut paths = PATHS_CACHE.write().await;
-    if is_file {
-        (*paths).retain(|(_, item)| item != path);
-    } else {
-        let directory = format!("{}{}", path, std::path::MAIN_SEPARATOR);
-        (*paths).retain(|(_, item)| !item.starts_with(directory.as_str()));
+    {
+        let mut paths = PATHS_CACHE.write().await;
+        if is_file {
+            (*paths).retain(|(_, item)| item != path);
+        } else {
+            let directory = format!("{}{}", path, std::path::MAIN_SEPARATOR);
+            (*paths).retain(|(_, item)| !item.starts_with(directory.as_str()));
+        }
     }
+    // 本进程缓存已就地更新;递增版本通知其他常驻宿主
+    // Local cache pruned; bump generation for other resident hosts
+    notify_paths_removed();
 }
 
 pub async fn clear() {
-    let mut paths = PATHS_CACHE.write().await;
-    paths.clear();
+    {
+        let mut paths = PATHS_CACHE.write().await;
+        paths.clear();
+    }
+    notify_paths_removed();
 }

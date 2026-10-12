@@ -113,7 +113,7 @@ pub fn score_image_candidates(
 
     // Fetch file info for results
     let file_ids: Vec<i64> = file_results.iter().map(|(id, _, _)| *id).collect();
-    let file_list = file_info_repo::list_by_ids(&file_ids)?;
+    let file_list = file_info_repo::list_meta_by_ids(&file_ids)?;
     let file_map: HashMap<i64, FileInfo> = file_list.into_iter().map(|f| (f.id, f)).collect();
 
     let results: Vec<SearchResult> = file_results

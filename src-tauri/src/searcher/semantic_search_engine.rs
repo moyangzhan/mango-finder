@@ -196,7 +196,7 @@ fn merge_and_filter_results(
     });
 
     let file_ids: Vec<i64> = tmps.iter().map(|t| t.file_id).collect();
-    let file_infos = file_info_repo::list_by_ids(&file_ids).unwrap_or_default();
+    let file_infos = file_info_repo::list_meta_by_ids(&file_ids).unwrap_or_default();
     if file_infos.is_empty() {
         log::debug!("file_infos is empty");
         return Vec::new();

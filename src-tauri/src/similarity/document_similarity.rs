@@ -90,7 +90,7 @@ pub async fn find_similars_from_chunks(
 
     // Get file info for all similar files
     let file_ids: Vec<i64> = sorted_files.iter().map(|(id, _)| *id).collect();
-    let files = file_info_repo::list_by_ids(&file_ids)?;
+    let files = file_info_repo::list_meta_by_ids(&file_ids)?;
 
     // Build search results
     let file_map: HashMap<i64, FileInfo> = files.into_iter().map(|f| (f.id, f)).collect();

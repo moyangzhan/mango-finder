@@ -5,6 +5,15 @@ use chrono::{DateTime, Local};
 use rusqlite::{Result, Row, named_params};
 
 const ALL_COLUMNS: &str = "id, name, category, path, file_ext, file_size, content, content_ref_path, content_index_status, content_index_status_msg, meta_index_status, meta_index_status_msg, is_invalid, invalid_reason, md5, metadata, audio_type, image_hash, audio_fingerprint, file_create_time, file_update_time, create_time, update_time";
+/// ALL_COLUMNS minus `content`, derived so new columns are included automatically
+/// 从 ALL_COLUMNS 去掉 `content` 列,新增列自动纳入
+fn meta_columns() -> String {
+    ALL_COLUMNS
+        .split(", ")
+        .filter(|c| *c != "content")
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 pub fn insert(file_info: &FileInfo) -> Result<Option<FileInfo>, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;
@@ -288,6 +297,16 @@ pub fn count_unindexed_files(category: i64) -> Result<i64, RepositoryError> {
 }
 
 pub fn list_by_ids(ids: &Vec<i64>) -> Result<Vec<FileInfo>, RepositoryError> {
+    list_by_ids_with_columns(ids, ALL_COLUMNS)
+}
+
+/// 结果列表回表时不取 `content` 列(正文按需另取)
+/// Omit the `content` column (fetched on demand) when hydrating result lists
+pub fn list_meta_by_ids(ids: &Vec<i64>) -> Result<Vec<FileInfo>, RepositoryError> {
+    list_by_ids_with_columns(ids, &meta_columns())
+}
+
+fn list_by_ids_with_columns(ids: &Vec<i64>, columns: &str) -> Result<Vec<FileInfo>, RepositoryError> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -306,7 +325,7 @@ pub fn list_by_ids(ids: &Vec<i64>) -> Result<Vec<FileInfo>, RepositoryError> {
             .collect();
         let sql = format!(
             "select {} from file_info where id in ({})",
-            ALL_COLUMNS,
+            columns,
             placeholders.join(",")
         );
         let mut stmt = conn.prepare(&sql)?;
