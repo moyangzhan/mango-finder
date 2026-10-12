@@ -10,6 +10,7 @@ pub mod image_util;
 pub mod indexing_task_util;
 pub mod jieba_util;
 pub mod llm_client_util;
+pub mod locale_util;
 pub mod lock_util;
 pub mod path_util;
 pub mod search_util;

@@ -113,7 +113,7 @@ fn is_pid_alive(pid: u32) -> bool {
 #[cfg(windows)]
 fn pid_is_alive_impl(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_ACCESS_DENIED, STILL_ACTIVE,
+        CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE,
     };
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -126,8 +126,8 @@ fn pid_is_alive_impl(pid: u32) -> bool {
             return GetLastError() == ERROR_ACCESS_DENIED;
         }
         let mut exit_code: u32 = 0;
-        let alive = GetExitCodeProcess(handle, &mut exit_code) != 0
-            && exit_code == STILL_ACTIVE as u32;
+        let alive =
+            GetExitCodeProcess(handle, &mut exit_code) != 0 && exit_code == STILL_ACTIVE as u32;
         CloseHandle(handle);
         alive
     }

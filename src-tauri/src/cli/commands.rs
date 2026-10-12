@@ -8,17 +8,18 @@ use std::time::Instant;
 use mango_finder_lib::entities::FileInfo;
 use mango_finder_lib::enums::FileCategory;
 use mango_finder_lib::global::{
-    ACTIVE_LOCALE, CLIENT_ID, DB_PATH, EMBEDDING_MODEL_PATH, EMBEDDING_TOKENIZER_PATH,
-    FS_WATCHER_SETTING, STORAGE_PATH,
+    CLIENT_ID, DB_PATH, EMBEDDING_MODEL_PATH, EMBEDDING_TOKENIZER_PATH, FS_WATCHER_SETTING,
+    STORAGE_PATH,
 };
 use mango_finder_lib::indexer_service;
 use mango_finder_lib::repositories::{
-    config_repo, device_repo, file_content_embedding_repo, file_content_fts_repo, file_info_repo,
-    file_metadata_embedding_repo, indexing_task_repo,
+    device_repo, file_content_embedding_repo, file_info_repo, indexing_task_repo,
 };
 use mango_finder_lib::searcher;
 use mango_finder_lib::similarity::similarity_service;
 use mango_finder_lib::structs::file_metadata::AudioType;
+use mango_finder_lib::utils::locale_util;
+use mango_finder_lib::utils::locale_util::current_locale;
 
 use crate::local_api;
 use crate::output::{self, OutputKind};
@@ -837,44 +838,17 @@ pub async fn handle_index(action: IndexAction) {
                 }
             }
         }
-        IndexAction::Clear => {
-            // 与 GUI 的 clear_index 对齐:除四张表外,还要清路径缓存与磁盘上的
-            // parsed_documents / extracted_images,否则 CLI-only 工作流会无限堆积
-            // 磁盘残留
-            // Mirror the GUI's clear_index: besides the four tables, also
-            // clear the path cache and the on-disk parsed_documents /
-            // extracted_images, otherwise CLI-only workflows accumulate disk
-            // leftovers forever.
-            let clear_result = (|| -> Result<(), String> {
-                file_content_fts_repo::clear().map_err(|e| e.to_string())?;
-                file_content_embedding_repo::clear().map_err(|e| e.to_string())?;
-                file_metadata_embedding_repo::clear().map_err(|e| e.to_string())?;
-                file_info_repo::clear().map_err(|e| e.to_string())?;
-                Ok(())
-            })();
-            if clear_result.is_ok() {
-                searcher::path_search_engine::clear().await;
-                if let Some(storage) = STORAGE_PATH.get() {
-                    for dir in ["parsed_documents", "extracted_images"] {
-                        let dir_path = std::path::Path::new(storage).join(dir);
-                        if dir_path.exists() {
-                            let _ = std::fs::remove_dir_all(&dir_path);
-                        }
-                    }
-                }
+        IndexAction::Clear => match indexer_service::clear_index().await {
+            Ok(()) => {
+                let data = serde_json::json!({
+                    "message": "Index cleared"
+                });
+                output::print_success(OutputKind::IndexClear, &data);
             }
-            match clear_result {
-                Ok(()) => {
-                    let data = serde_json::json!({
-                        "message": "Index cleared"
-                    });
-                    output::print_success(OutputKind::IndexClear, &data);
-                }
-                Err(e) => {
-                    output::print_error(&format!("Failed to clear index: {}", e));
-                }
+            Err(e) => {
+                output::print_error(&format!("Failed to clear index: {}", e));
             }
-        }
+        },
     }
 }
 
@@ -972,39 +946,33 @@ pub fn handle_version() {
 pub fn handle_locale(value: Option<String>) {
     match value {
         Some(locale) => {
-            // 设置新的 locale:合法值取自 enums::Locale,与 GUI 校验同源
-            // Set a new locale: valid values come from enums::Locale, the
-            // same source the GUI validates against.
-            let valid = locale == mango_finder_lib::enums::Locale::ZhCn.text()
-                || locale == mango_finder_lib::enums::Locale::EnUs.text();
-            if !valid {
-                output::print_error(&format!(
-                    "Invalid locale '{}'. Valid values: {}, {}",
-                    locale,
-                    mango_finder_lib::enums::Locale::ZhCn.text(),
-                    mango_finder_lib::enums::Locale::EnUs.text()
-                ));
-                return;
+            // The core's empty→Ok(0) soft no-op exists for the GUI frontend;
+            // an explicit empty argument from the CLI is invalid input.
+            // core 的空串→Ok(0) 软契约是给 GUI 前端的;CLI 显式传空串按非法输入
+            let result = if locale.is_empty() {
+                Err(String::new())
+            } else {
+                locale_util::set_locale_core(&locale)
+            };
+            match result {
+                Ok(_) => {
+                    let data = serde_json::json!({
+                        "locale": locale,
+                        "message": "Locale updated successfully"
+                    });
+                    output::print_success(OutputKind::LocaleSet, &data);
+                }
+                // core 的 Err 仅出现在非法输入(持久化是尽力而为)
+                // Err from the core = invalid input only (persist is best-effort)
+                Err(_) => {
+                    output::print_error(&format!(
+                        "Invalid locale '{}'. Valid values: {}, {}",
+                        locale,
+                        mango_finder_lib::enums::Locale::ZhCn.text(),
+                        mango_finder_lib::enums::Locale::EnUs.text()
+                    ));
+                }
             }
-
-            // 更新全局变量(锁毒化时跳过全局写入,不 panic)
-            // Update the global (skip on a poisoned lock instead of panicking)
-            if let Ok(mut guard) = ACTIVE_LOCALE.write() {
-                *guard = locale.clone();
-            }
-            rust_i18n::set_locale(locale.as_str());
-
-            // 更新数据库
-            if let Err(e) = config_repo::update_by_name("active_locale", &locale) {
-                output::print_error(&format!("Failed to save locale: {}", e));
-                return;
-            }
-
-            let data = serde_json::json!({
-                "locale": locale,
-                "message": "Locale updated successfully"
-            });
-            output::print_success(OutputKind::LocaleSet, &data);
         }
         None => {
             // 显示当前 locale
@@ -1246,16 +1214,6 @@ pub fn lightweight_locale() -> String {
     } else {
         val
     }
-}
-
-/// Current locale from the ACTIVE_LOCALE global with an en-US fallback
-/// (single read helper for status/locale/help).
-/// 读取 ACTIVE_LOCALE(回落 en-US)的统一入口(status/locale/help 共用)。
-fn current_locale() -> String {
-    ACTIVE_LOCALE
-        .read()
-        .map(|l| l.clone())
-        .unwrap_or_else(|_| "en-US".to_string())
 }
 
 pub fn handle_help(command: Option<&str>) {

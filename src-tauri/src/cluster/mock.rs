@@ -124,51 +124,6 @@ pub fn generate_mock_similar_results(file_info: &FileInfo, limit: usize) -> Vec<
         .collect()
 }
 
-/// Generate mock similar file results based on features (for cross-device search)
-/// 根据特征生成模拟相似文件结果（用于跨设备搜索）
-pub fn generate_mock_similar_results_by_features(
-    features: &crate::cluster::http_client::SimilarFeatures,
-    limit: usize,
-) -> Vec<SearchResult> {
-    let category = FileCategory::from(features.category);
-
-    let mock_files: &[(&str, &str, &str, usize)] = match category {
-        FileCategory::Document => MOCK_DOCUMENTS,
-        FileCategory::Image => MOCK_IMAGES,
-        FileCategory::Audio => MOCK_AUDIOS,
-        _ => MOCK_OTHERS,
-    };
-
-    mock_files
-        .iter()
-        .take(limit)
-        .map(|(name, ext, path, score)| {
-            let file_info_mock = FileInfo {
-                id: rand_id(),
-                name: name.to_string(),
-                path: path.to_string(),
-                category: features.category,
-                file_ext: ext.to_string(),
-                file_size: 1024 * 100,
-                ..Default::default()
-            };
-
-            SearchResult {
-                score: *score,
-                hit_types: vec![HitType::MetaSemantic],
-                file_info: file_info_mock,
-                matched_keywords: HashSet::new(),
-                matched_chunk_ids: HashSet::new(),
-                similarity_type: Some(get_similarity_type(category)),
-                source_device: Some(SourceDevice {
-                    device_id: MOCK_DEVICE_ID.to_string(),
-                    device_name: MOCK_DEVICE_NAME.to_string(),
-                }),
-            }
-        })
-        .collect()
-}
-
 /// Generate mock remote search results for testing
 pub fn generate_mock_search_results(query: &str, limit: usize) -> Vec<SearchResult> {
     MOCK_SEARCH_RESULTS

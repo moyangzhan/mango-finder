@@ -918,3 +918,22 @@ pub fn get_event_from(from: &str) -> &'static str {
     }
     return crate::global::EVENT_WATCHER_INDEXING;
 }
+
+/// 清空全部索引:四张表 → 路径缓存 → 磁盘 parsed_documents/extracted_images
+/// Clear the whole index: four tables → path cache → on-disk parse leftovers
+pub async fn clear_index() -> Result<(), String> {
+    file_content_fts_repo::clear()?;
+    file_content_embedding_repo::clear()?;
+    file_metadata_embedding_repo::clear()?;
+    file_info_repo::clear()?;
+    searcher::path_search_engine::clear().await;
+    if let Some(storage) = STORAGE_PATH.get() {
+        for dir in ["parsed_documents", "extracted_images"] {
+            let dir_path = Path::new(storage).join(dir);
+            if dir_path.exists() {
+                let _ = std::fs::remove_dir_all(&dir_path);
+            }
+        }
+    }
+    Ok(())
+}

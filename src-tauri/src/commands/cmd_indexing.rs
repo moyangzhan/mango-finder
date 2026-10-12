@@ -226,23 +226,7 @@ pub async fn delete_index_items(file_ids: Vec<i64>) -> Result<(), String> {
 
 #[command]
 pub async fn clear_index() -> Result<(), String> {
-    file_content_fts_repo::clear()?;
-    file_content_embedding_repo::clear()?;
-    file_metadata_embedding_repo::clear()?;
-    file_info_repo::clear()?;
-    searcher::path_search_engine::clear().await;
-    // Clean up all parsed_documents and extracted_images on disk
-    if let Some(storage) = STORAGE_PATH.get() {
-        let md_dir = std::path::Path::new(storage).join("parsed_documents");
-        if md_dir.exists() {
-            let _ = std::fs::remove_dir_all(&md_dir);
-        }
-        let img_dir = std::path::Path::new(storage).join("extracted_images");
-        if img_dir.exists() {
-            let _ = std::fs::remove_dir_all(&img_dir);
-        }
-    }
-    Ok(())
+    indexer_service::clear_index().await
 }
 
 #[command]

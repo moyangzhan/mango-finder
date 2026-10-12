@@ -9,6 +9,7 @@ use clap::Parser;
 use mango_finder_lib::global::ACTIVE_LOCALE;
 use mango_finder_lib::initializer;
 use mango_finder_lib::utils::app_util;
+use mango_finder_lib::utils::locale_util;
 
 #[macro_use]
 extern crate rust_i18n;
@@ -87,14 +88,10 @@ fn main() {
         initializer::process().await;
     });
 
-    // The GUI sets the rust-i18n locale via the frontend calling
-    // set_active_locale; the CLI must set it itself from the persisted
-    // active_locale, otherwise t! always falls back to en-US.
-    // GUI 由前端调用 set_active_locale 设置 rust-i18n locale；
-    // CLI 需根据持久化的 active_locale 自行设置，否则 t! 一律回落 en-US
-    if let Ok(locale) = ACTIVE_LOCALE.read() {
-        rust_i18n::set_locale(locale.as_str());
-    }
+    // The GUI applies the locale via a frontend set_active_locale call; the
+    // CLI must apply it itself, otherwise t! falls back to en-US.
+    // GUI 由前端调用 set_active_locale 应用 locale;CLI 需自行应用,否则 t! 回落 en-US
+    locale_util::apply_persisted_locale();
 
     // 执行命令
     let command = cli.command.unwrap();

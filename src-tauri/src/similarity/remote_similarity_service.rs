@@ -1,7 +1,7 @@
 //! Remote device similarity search service
 //!
 //! This module provides functionality for finding similar files across remote devices.
-//! It handles feature extraction, network communication, and result aggregation.
+//! It handles device discovery, network communication, and result aggregation.
 
 use tokio::task::JoinSet;
 
@@ -9,11 +9,7 @@ use crate::cluster::http_client;
 use crate::entities::{Device, FileInfo};
 use crate::enums::{OnlineStatus, PairingStatus};
 use crate::repositories::device_repo;
-use crate::structs::file_metadata::AudioType;
 use crate::structs::search_result::{SearchResult, SourceDevice};
-
-// Re-export SimilarFeatures for backward compatibility
-pub use crate::cluster::http_client::SimilarFeatures;
 
 /// Find similar files across remote devices
 /// 在远程设备上查找相似文件
@@ -146,26 +142,4 @@ async fn get_searchable_devices_excluding(exclude_device_ids: &[String]) -> Vec<
             true
         })
         .collect()
-}
-
-/// Generate mock file features for testing
-/// 为测试生成模拟文件特征
-fn generate_mock_features(_file_id: i64) -> SimilarFeatures {
-    // Generate mock features for an image file (category 2)
-    // For images, we use a mock image hash
-    use base64::Engine;
-
-    // Create a mock 8-byte hash (for 8x8 gradient hash)
-    let mock_hash_bytes: [u8; 8] = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
-    let mock_hash_base64 = base64::engine::general_purpose::STANDARD.encode(mock_hash_bytes);
-
-    SimilarFeatures {
-        category: 2, // Image
-        image_hash: Some(mock_hash_base64),
-        embedding: None,
-        sparse_indices: None,
-        sparse_values: None,
-        audio_type: AudioType::Unknown,
-        audio_fingerprint: None,
-    }
 }

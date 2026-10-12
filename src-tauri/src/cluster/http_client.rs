@@ -37,6 +37,52 @@ static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
 });
 
 // ============================================
+// Internal helpers - 内部助手
+// ============================================
+
+/// 统一请求前置:带设备头发送 + 状态码校验,错误串全局一致
+/// Shared request prologue: send with the device header, check the status
+async fn send_with_device_id(
+    method: reqwest::Method,
+    url: &str,
+    body: Option<&impl serde::Serialize>,
+) -> Result<reqwest::Response, String> {
+    let client_id = crate::read_lock!(CLIENT_ID).clone();
+    let mut request = HTTP_CLIENT
+        .request(method, url)
+        .header("X-Device-ID", client_id);
+    if let Some(body) = body {
+        request = request.json(body);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()));
+    }
+    Ok(response)
+}
+
+/// 发起调用并取回 CommonResponse.data:解析 → code 校验 → 解包
+/// Make the call and return CommonResponse.data: parse → check code → extract
+async fn call_and_get_data<T: serde::de::DeserializeOwned>(
+    method: reqwest::Method,
+    url: &str,
+    body: Option<&impl serde::Serialize>,
+) -> Result<T, String> {
+    let response = send_with_device_id(method, url, body).await?;
+    let common: CommonResponse<T> = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    if common.code != CODE_SUCCESS {
+        return Err(format!("API error: code {} - {}", common.code, common.msg));
+    }
+    common.data.ok_or_else(|| "No data in response".to_string())
+}
+
+// ============================================
 // Search API
 // ============================================
 
@@ -49,99 +95,17 @@ pub async fn search(
     port: i32,
 ) -> Result<SearchData, String> {
     let url = format!("http://{}:{}/cluster/search", ip, port);
-
     let request = RemoteSearchRequest {
         query: query.to_string(),
         search_type: search_type.to_string(),
         limit: MAX_RESULTS_PER_DEVICE,
     };
-
-    let client_id = crate::read_lock!(CLIENT_ID).clone();
-    let response = HTTP_CLIENT
-        .post(&url)
-        .header("X-Device-ID", client_id)
-        .json(&request)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!("HTTP error: {}", response.status()));
-    }
-
-    let search_response: CommonResponse<SearchData> = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
-
-    if search_response.code != CODE_SUCCESS {
-        return Err(format!(
-            "API error: code {} - {}",
-            search_response.code, search_response.msg
-        ));
-    }
-
-    search_response
-        .data
-        .ok_or_else(|| "No data in response".to_string())
+    call_and_get_data(reqwest::Method::POST, &url, Some(&request)).await
 }
 
 // ============================================
 // Similarity Search API
 // ============================================
-
-/// Audio fingerprint for music similarity
-/// 音乐相似性的音频指纹
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AudioFingerprint {
-    pub spectral_histogram: Vec<f32>,
-    pub energy_bands: Vec<f32>,
-    pub avg_zcr: f32,
-    pub tempo_estimate: f32,
-}
-
-impl From<&crate::utils::audio_util::MusicFingerprint> for AudioFingerprint {
-    fn from(fp: &crate::utils::audio_util::MusicFingerprint) -> Self {
-        AudioFingerprint {
-            spectral_histogram: fp.spectral_histogram.to_vec(),
-            energy_bands: fp.energy_bands.to_vec(),
-            avg_zcr: fp.avg_zcr,
-            tempo_estimate: fp.tempo_estimate,
-        }
-    }
-}
-
-impl From<&AudioFingerprint> for crate::utils::audio_util::MusicFingerprint {
-    fn from(fp: &AudioFingerprint) -> Self {
-        let mut spectral_histogram = [0.0f32; 10];
-        let mut energy_bands = [0.0f32; 8];
-        for (i, &v) in fp.spectral_histogram.iter().enumerate().take(10) {
-            spectral_histogram[i] = v;
-        }
-        for (i, &v) in fp.energy_bands.iter().enumerate().take(8) {
-            energy_bands[i] = v;
-        }
-        crate::utils::audio_util::MusicFingerprint {
-            spectral_histogram,
-            energy_bands,
-            avg_zcr: fp.avg_zcr,
-            tempo_estimate: fp.tempo_estimate,
-        }
-    }
-}
-
-/// Features for similarity search
-/// 相似搜索特征
-#[derive(Debug, Clone)]
-pub struct SimilarFeatures {
-    pub category: i64,
-    pub image_hash: Option<String>, // base64 encoded
-    pub embedding: Option<Vec<f32>>,
-    pub sparse_indices: Option<Vec<u32>>,
-    pub sparse_values: Option<Vec<f32>>,
-    pub audio_type: crate::structs::file_metadata::AudioType,
-    pub audio_fingerprint: Option<AudioFingerprint>, // For music similarity
-}
 
 /// Find similar files on a remote device by file ID (with exclude list for loop prevention)
 /// 通过文件ID在远程设备上查找相似文件（带排除列表防止循环）
@@ -181,34 +145,7 @@ pub async fn find_similars(
         limit
     );
 
-    let client_id = crate::read_lock!(CLIENT_ID).clone();
-    let response = HTTP_CLIENT
-        .post(&url)
-        .header("X-Device-ID", client_id)
-        .json(&request)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!("HTTP error: {}", response.status()));
-    }
-
-    let similar_response: CommonResponse<FindSimilarsData> = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
-
-    if similar_response.code != CODE_SUCCESS {
-        return Err(format!(
-            "API error: code {} - {}",
-            similar_response.code, similar_response.msg
-        ));
-    }
-
-    similar_response
-        .data
-        .ok_or_else(|| "No data in response".to_string())
+    call_and_get_data(reqwest::Method::POST, &url, Some(&request)).await
 }
 
 // ============================================
@@ -219,24 +156,12 @@ pub async fn find_similars(
 /// 从远程设备获取文件数据
 pub async fn fetch_file(file_id: i64, ip: &str, port: i32) -> Result<Vec<u8>, String> {
     let url = format!("http://{}:{}/cluster/file/{}", ip, port, file_id);
-
-    let client_id = crate::read_lock!(CLIENT_ID).clone();
-    let response = HTTP_CLIENT
-        .get(&url)
-        .header("X-Device-ID", client_id)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!("HTTP error: {}", response.status()));
-    }
-
+    let response =
+        send_with_device_id(reqwest::Method::GET, &url, None::<&serde_json::Value>).await?;
     let data = response
         .bytes()
         .await
         .map_err(|e| format!("Failed to read response: {}", e))?;
-
     Ok(data.to_vec())
 }
 
@@ -248,36 +173,13 @@ pub async fn fetch_file(file_id: i64, ip: &str, port: i32) -> Result<Vec<u8>, St
 /// 从远程设备获取文本片段
 pub async fn fetch_chunks(ids: &[u32], ip: &str, port: i32) -> Result<Vec<String>, String> {
     let url = format!("http://{}:{}/cluster/chunks", ip, port);
-
-    let client_id = crate::read_lock!(CLIENT_ID).clone();
-    let response = HTTP_CLIENT
-        .post(&url)
-        .header("X-Device-ID", client_id)
-        .json(&serde_json::json!({ "ids": ids }))
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!("HTTP error: {}", response.status()));
-    }
-
-    let chunks_response: CommonResponse<ChunksData> = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
-
-    if chunks_response.code != CODE_SUCCESS {
-        return Err(format!(
-            "API error: code {} - {}",
-            chunks_response.code, chunks_response.msg
-        ));
-    }
-
-    chunks_response
-        .data
-        .map(|d| d.chunks)
-        .ok_or_else(|| "No data in response".to_string())
+    call_and_get_data::<ChunksData>(
+        reqwest::Method::POST,
+        &url,
+        Some(&serde_json::json!({ "ids": ids })),
+    )
+    .await
+    .map(|d| d.chunks)
 }
 
 // ============================================
@@ -292,34 +194,7 @@ pub async fn fetch_file_content(
     port: i32,
 ) -> Result<FileContentData, String> {
     let url = format!("http://{}:{}/cluster/file/{}/content", ip, port, file_id);
-
-    let client_id = crate::read_lock!(CLIENT_ID).clone();
-    let response = HTTP_CLIENT
-        .get(&url)
-        .header("X-Device-ID", client_id)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!("HTTP error: {}", response.status()));
-    }
-
-    let content_response: CommonResponse<FileContentData> = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
-
-    if content_response.code != CODE_SUCCESS {
-        return Err(format!(
-            "API error: code {} - {}",
-            content_response.code, content_response.msg
-        ));
-    }
-
-    content_response
-        .data
-        .ok_or_else(|| "No data in response".to_string())
+    call_and_get_data(reqwest::Method::GET, &url, None::<&serde_json::Value>).await
 }
 
 // ============================================

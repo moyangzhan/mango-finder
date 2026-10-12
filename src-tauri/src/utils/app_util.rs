@@ -16,7 +16,6 @@ use rust_i18n::t;
 use std::env;
 use std::fs::create_dir;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::Ordering;
 use sys_locale::get_locale;
 use tauri::menu::{Menu, MenuItem};
@@ -227,7 +226,7 @@ pub async fn reset_data_path(force: bool, app: &AppHandle) -> Result<String, Str
 
 /// If the {user data directory}/.config file exists, read the path from it. Otherwise, use {user data directory} as default.
 pub async fn init_paths(app: &AppHandle) {
-    let mut data_path = app
+    let data_base = app
         .path()
         .data_dir()
         .unwrap_or_else(|error| {
@@ -235,7 +234,49 @@ pub async fn init_paths(app: &AppHandle) {
             PathBuf::from("./")
         })
         .join(env!("CARGO_PKG_NAME"));
-    info!("system data path: {}", data_path.display());
+    info!("system data path: {}", data_base.display());
+    init_paths_core(data_base);
+    let resource_dir = app.path().resource_dir().unwrap_or_else(|e| {
+        error!("Failed to get resource directory: {}", e);
+        PathBuf::from(app_home_dir()).join("assets")
+    });
+    info!("Resource directory: {}", resource_dir.display());
+    init_model_assets(&resource_dir);
+}
+
+/// App home directory: cwd in debug builds, the executable directory in
+/// releases. Single source for HOME_PATH and the resource-dir fallback.
+/// 应用主目录:debug 为工作目录,release 为可执行文件目录;HOME_PATH 与
+/// resource 目录回落的唯一来源。
+fn app_home_dir() -> String {
+    #[cfg(debug_assertions)]
+    {
+        env::current_dir()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|e| {
+                error!("Failed to get current directory: {}", e);
+                "./".to_string()
+            })
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| {
+                error!("Failed to get executable directory");
+                "./".to_string()
+            })
+    }
+}
+
+/// Core data-path init shared by the GUI and the CLI: .config override →
+/// APP_DATA_PATH → storage/db/tmp globals. Failures log and continue (GUI
+/// contract); callers that need fail-fast check the globals afterwards.
+/// GUI/CLI 共用数据路径 core:.config 覆盖 → APP_DATA_PATH → storage/db/tmp
+/// 全局。失败记日志继续(GUI 契约);需 fail-fast 的调用方事后检查全局。
+pub fn init_paths_core(mut data_path: PathBuf) {
     let config_path = data_path.join(".config");
     info!("MangoFinder config file: {}", config_path.display());
     // Default to use user data directory. Otherwise, use the path from .config file.
@@ -319,43 +360,20 @@ pub async fn init_paths(app: &AppHandle) {
         "Temp path: {}",
         TMP_PATH.get().unwrap_or(&String::new()).to_string()
     );
-
-    init_embedding_model_path(app);
 }
 
-fn init_embedding_model_path(app_handle: &AppHandle) {
-    let app_dir = {
-        #[cfg(debug_assertions)]
-        {
-            env::current_dir()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|e| {
-                    error!("Failed to get current directory: {}", e);
-                    "./".to_string()
-                })
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|| {
-                    error!("Failed to get executable directory");
-                    "./".to_string()
-                })
-        }
-    };
+/// Core model-asset init shared by the GUI and the CLI: HOME_PATH → 12 model
+/// paths under {resource_base}/assets/model → extracted_images. Failures log
+/// and continue (GUI contract).
+/// GUI/CLI 共用模型资产 core:HOME_PATH → {resource_base}/assets/model 下
+/// 12 个模型路径 → extracted_images。失败记日志继续(GUI 契约)。
+pub fn init_model_assets(resource_base: &Path) {
+    let app_dir = app_home_dir();
     if HOME_PATH.set(app_dir.clone()).is_err() {
         error!("Warning: HOME_PATH was already set");
     }
     info!("Home directory: {}", app_dir);
-    let resource_dir = app_handle.path().resource_dir().unwrap_or_else(|e| {
-        error!("Failed to get resource directory: {}", e);
-        PathBuf::from(app_dir).join("assets")
-    });
-    info!("Resource directory: {}", resource_dir.display());
-    let build_in_model_path = resource_dir.join("assets").join("model");
+    let build_in_model_path = resource_base.join("assets").join("model");
     if !build_in_model_path.exists() {
         create_dir(&build_in_model_path).unwrap_or_else(|error| {
             error!("Failed to create assets directory: {}", error);
@@ -606,138 +624,42 @@ pub fn get_default_file_content_language() -> FileContentLanguage {
     }
 }
 
-/// CLI 模式路径初始化（不依赖 Tauri）
+/// CLI 模式路径初始化(不依赖 Tauri):与 GUI 共用 core,仅替换数据目录与
+/// 模型目录的解析来源;core 失败只记日志(GUI 契约),由末尾全局检查兜底
+/// CLI path init (Tauri-free): shares the GUI cores; only the data-dir and
+/// model-dir resolution differ. Core failures just log (GUI contract) — the
+/// trailing global check is the safety net.
 pub fn init_paths_standalone() -> Result<(), String> {
-    // 1. HOME_PATH：可执行文件所在目录
-    let exe_path =
-        std::env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
-    let home_path = exe_path
-        .parent()
-        .ok_or("Failed to get executable directory")?
-        .to_string_lossy()
-        .into_owned();
-    HOME_PATH
-        .set(home_path.clone())
-        .map_err(|_| "HOME_PATH already set".to_string())?;
-    info!("Home directory: {}", home_path);
-
-    // 2. APP_DATA_PATH：系统 AppData 目录（支持自定义路径）
-    let mut data_path = dirs::data_dir()
+    // 1. 数据目录:dirs::data_dir() 与 Tauri path().data_dir() 三平台同源
+    // Data dir: dirs::data_dir() matches Tauri's data_dir on all platforms
+    let data_base = dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(env!("CARGO_PKG_NAME"));
+    init_paths_core(data_base);
 
-    // 读取 .config 文件获取自定义数据路径（与 Tauri 版本保持一致）
-    let config_path = data_path.join(".config");
-    if config_path.exists() {
-        match std::fs::File::open(&config_path) {
-            Ok(file) => {
-                use std::io::{BufRead, BufReader};
-                let reader = BufReader::new(file);
-                if let Some(Ok(first_line)) = reader.lines().next() {
-                    if !first_line.is_empty() {
-                        let custom_path = PathBuf::from(&first_line);
-                        if custom_path.is_dir() {
-                            data_path = custom_path;
-                            info!("read data_dir from config file: {}", data_path.display());
-                        } else {
-                            warn!(
-                                "Config path '{}' is not a valid directory, using default",
-                                first_line
-                            );
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Failed to read data path record: {}", e);
-            }
-        }
-    }
-
-    let data_path_str = data_path.to_string_lossy().into_owned();
-    *APP_DATA_PATH.write().unwrap() = data_path_str.clone();
-    info!("Data directory: {}", data_path_str);
-
-    // 创建数据目录
-    if !data_path.exists() {
-        std::fs::create_dir_all(&data_path)
-            .map_err(|e| format!("Failed to create data dir: {}", e))?;
-    }
-
-    // 3. STORAGE_PATH
-    let storage_path = data_path.join("storage");
-    std::fs::create_dir_all(&storage_path)
-        .map_err(|e| format!("Failed to create storage dir: {}", e))?;
-    STORAGE_PATH
-        .set(storage_path.to_string_lossy().into_owned())
-        .map_err(|_| "STORAGE_PATH already set".to_string())?;
-    info!("Storage directory: {}", storage_path.display());
-
-    // 4. DB_PATH
-    let db_path = storage_path.join("mango-finder.db");
-    DB_PATH
-        .set(db_path.to_string_lossy().into_owned())
-        .map_err(|_| "DB_PATH already set".to_string())?;
-    info!("Database path: {}", db_path.display());
-
-    // 5. 模型路径:优先可执行文件目录,不存在时回退当前目录
-    // (与 GUI debug 模式的解析一致,覆盖从源码目录直接运行 mfd 的开发流)
-    // 5. Model path: prefer the executable directory; fall back to the
-    // current directory when absent (mirrors the GUI debug-mode resolution,
-    // covering the dev flow of running mfd straight from the source tree).
-    let exe_model = PathBuf::from(&home_path).join("assets").join("model");
-    let model_path = if exe_model.exists() {
-        exe_model
+    // 2. 模型目录:优先可执行文件目录,回退当前目录(覆盖从源码目录直接
+    // 运行 mfd 的开发流),承担 GUI resource_dir 的角色
+    // Model dir: prefer the executable directory, fall back to the current
+    // directory (dev flow running mfd from the source tree); plays the role
+    // of the GUI's resource_dir.
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let resource_base = if exe_dir.join("assets").join("model").exists() {
+        exe_dir
+    } else if cwd.join("assets").join("model").exists() {
+        cwd
     } else {
-        let cwd_model = std::env::current_dir()
-            .unwrap_or_default()
-            .join("assets")
-            .join("model");
-        if cwd_model.exists() {
-            cwd_model
-        } else {
-            exe_model
-        }
+        exe_dir
     };
-    init_model_paths(&model_path);
+    init_model_assets(&resource_base);
 
-    // 6. TMP_PATH
-    let tmp_path = data_path.join("tmp");
-    std::fs::create_dir_all(&tmp_path).map_err(|e| format!("Failed to create tmp dir: {}", e))?;
-    TMP_PATH
-        .set(tmp_path.to_string_lossy().into_owned())
-        .map_err(|_| "TMP_PATH already set".to_string())?;
-    info!("Temp directory: {}", tmp_path.display());
-
-    // 7. EXTRACTED_IMAGES_PATH
-    let extracted_images_path = storage_path.join("extracted_images");
-    std::fs::create_dir_all(&extracted_images_path)
-        .map_err(|e| format!("Failed to create extracted_images dir: {}", e))?;
-    EXTRACTED_IMAGES_PATH
-        .set(extracted_images_path.to_string_lossy().into_owned())
-        .map_err(|_| "EXTRACTED_IMAGES_PATH already set".to_string())?;
-
+    // 3. fail-fast:核心未就绪即报错(细节见日志)
+    // Fail fast when the cores left globals unset (details are in the logs)
+    if STORAGE_PATH.get().is_none() || DB_PATH.get().is_none() {
+        return Err("data path globals were not initialized (see logs)".to_string());
+    }
     Ok(())
-}
-
-/// 模型路径初始化（复用）
-fn init_model_paths(model_path: &Path) {
-    let set_path = |once: &OnceLock<String>, name: &str| {
-        let p = model_path.join(name).to_string_lossy().into_owned();
-        once.set(p)
-            .unwrap_or_else(|_| log::warn!("{} already set", name));
-    };
-
-    set_path(&EMBEDDING_MODEL_PATH, EMBEDDING_MODEL_NAME);
-    set_path(&EMBEDDING_TOKENIZER_PATH, EMBEDDING_TOKENIZER_NAME);
-    set_path(&VISION_MODEL_PATH, VISION_NAME);
-    set_path(&VISION_TOKENIZER_PATH, VISION_TOKENIZER_NAME);
-    set_path(&AUDIO_ENCODER_PATH, AUDIO_ENCODER_NAME);
-    set_path(&AUDIO_DECODER_PATH, AUDIO_DECODER_NAME);
-    set_path(&AUDIO_TOKENIZER_PATH, AUDIO_TOKENIZER_NAME);
-    set_path(&WHISPER_MODEL_PATH, WHISPER_MODEL_NAME);
-    set_path(&OCR_DET_MODEL_PATH, OCR_DET_MODEL_NAME);
-    set_path(&OCR_CLS_MODEL_PATH, OCR_CLS_MODEL_NAME);
-    set_path(&OCR_REC_MODEL_PATH, OCR_REC_MODEL_NAME);
-    set_path(&OCR_DICT_PATH, OCR_DICT_NAME);
 }
