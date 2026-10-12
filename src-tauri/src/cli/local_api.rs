@@ -4,14 +4,14 @@
 //! The host is the same server code, running either inside the GUI process
 //! (when multi-device is enabled) or inside a daemon spawned by the CLI;
 //! the detection mechanism guarantees at most one host at any time.
-//! The probe/shutdown handshake lives in `cluster::local_probe` (shared with
+//! The probe/shutdown handshake lives in `cluster::local_process_client` (shared with
 //! the GUI's yield logic).
 //! 宿主是同一段服务代码,跑在 GUI 进程(多机互联开启时)或 CLI 拉起的
 //! daemon 进程里;探测机制保证任一时刻只有一个宿主。
-//! 探测/关闭握手在 `cluster::local_probe`(与 GUI 让位逻辑共用)。
+//! 探测/关闭握手在 `cluster::local_process_client`(与 GUI 让位逻辑共用)。
 
 use mango_finder_lib::cluster::api_types::{CliSearchData, CliSimilarData};
-use mango_finder_lib::cluster::local_probe::{self, LocalProbe};
+use mango_finder_lib::cluster::local_process_client::{self, LocalProbe};
 use mango_finder_lib::structs::search_result::SearchResult;
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -41,7 +41,7 @@ pub async fn detect() -> Option<i32> {
 /// Detect a specific port (for host re-check after shutdown)
 /// 探测指定端口(供 shutdown 后的宿主身份复查)
 pub async fn detect_port(port: i32) -> Option<i32> {
-    matches!(local_probe::probe(port).await, LocalProbe::Mine).then_some(port)
+    matches!(local_process_client::probe(port).await, LocalProbe::Mine).then_some(port)
 }
 
 /// Ensure the local service is available: probe → spawn the daemon if absent
@@ -58,7 +58,7 @@ pub async fn detect_port(port: i32) -> Option<i32> {
 /// 等待。`MANGO_FINDER_NO_DAEMON` 非空时跳过拉起(仅探测)。
 pub async fn ensure_server() -> Option<i32> {
     let port = local_port().await;
-    match local_probe::probe(port).await {
+    match local_process_client::probe(port).await {
         LocalProbe::Mine => return Some(port),
         LocalProbe::Other => {
             log::warn!(
@@ -149,7 +149,7 @@ async fn spawn_daemon() -> Option<()> {
 async fn wait_ready(port: i32) -> Option<i32> {
     let deadline = Instant::now() + Duration::from_secs(DAEMON_READY_TIMEOUT_SECS);
     loop {
-        if matches!(local_probe::probe(port).await, LocalProbe::Mine) {
+        if matches!(local_process_client::probe(port).await, LocalProbe::Mine) {
             log::info!("local daemon ready on port {}", port);
             return Some(port);
         }
@@ -162,16 +162,16 @@ async fn wait_ready(port: i32) -> Option<i32> {
 }
 
 /// Search; returns (results, full match count before applying limit).
-/// The POST/envelope plumbing lives in `cluster::local_probe::post_json`.
-/// 搜索,返回 (结果, 应用 limit 前的完整匹配数)。POST/信封解析在
-/// `cluster::local_probe::post_json`。
+/// The POST plumbing lives in `cluster::local_process_client::post_and_get_data`.
+/// 搜索,返回 (结果, 应用 limit 前的完整匹配数)。POST 解析阶梯在
+/// `cluster::local_process_client::post_and_get_data`。
 pub async fn search(
     query: &str,
     search_type: &str,
     limit: usize,
     port: i32,
 ) -> Result<(Vec<SearchResult>, usize), String> {
-    let data: CliSearchData = local_probe::post_json(
+    let data: CliSearchData = local_process_client::post_and_get_data(
         port,
         "/cli/search",
         json!({ "query": query, "search_type": search_type, "limit": limit }),
@@ -183,7 +183,7 @@ pub async fn search(
 /// Similarity query for an indexed file
 /// 已索引文件相似查询
 pub async fn similars(file_id: i64, limit: usize, port: i32) -> Result<Vec<SearchResult>, String> {
-    let data: CliSimilarData = local_probe::post_json(
+    let data: CliSimilarData = local_process_client::post_and_get_data(
         port,
         &format!("/cli/similar/{}", file_id),
         json!({ "limit": limit }),
@@ -193,9 +193,9 @@ pub async fn similars(file_id: i64, limit: usize, port: i32) -> Result<Vec<Searc
 }
 
 /// Ask the host to shut down (daemon exits; a GUI host ignores it);
-/// shared implementation in `cluster::local_probe`.
+/// shared implementation in `cluster::local_process_client`.
 /// 请求宿主退出(daemon 退出;GUI 宿主忽略);共享实现在
-/// `cluster::local_probe`。
+/// `cluster::local_process_client`。
 pub async fn request_shutdown(port: i32) -> Result<(), String> {
-    local_probe::request_shutdown(port).await
+    local_process_client::request_shutdown(port).await
 }

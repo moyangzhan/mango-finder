@@ -3,7 +3,7 @@ pub mod cluster_search;
 pub mod device_checker;
 pub mod http_client;
 pub mod http_server;
-pub mod local_probe;
+pub mod local_process_client;
 pub mod mdns_service;
 pub mod mock;
 

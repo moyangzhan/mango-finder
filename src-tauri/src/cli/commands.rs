@@ -5,6 +5,7 @@ use std::net::UdpSocket;
 use std::path::Path;
 use std::time::Instant;
 
+use mango_finder_lib::cluster::local_process_client;
 use mango_finder_lib::entities::FileInfo;
 use mango_finder_lib::enums::FileCategory;
 use mango_finder_lib::global::{
@@ -286,33 +287,20 @@ pub async fn handle_shutdown() {
     // 已退出(空闲超时/并发让位),表现为传输错误但服务实际已停止。
     let _ = local_api::request_shutdown(port).await;
 
-    // Poll for the real exit: the daemon exits within ~1s (graceful drain),
-    // a GUI host keeps answering. Require two consecutive unreachable probes
-    // so a momentary slow /ping (busy GUI) is not misread as "stopped";
-    // after the deadline it is a GUI host.
-    // 轮询真实退出:daemon 约 1s 内退出(优雅排水),GUI 宿主持续应答。
-    // 需连续两次探测不通,避免 GUI 忙碌导致单次 ping 超时被误判为已停止;
-    // 超时仍未退出则判定为 GUI 宿主
     // Daemon drain is bounded at 10s; allow 12s before declaring a GUI host
-    let deadline = Instant::now() + std::time::Duration::from_secs(12);
-    let mut consecutive_gone = 0;
-    let (status, message) = loop {
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-        if local_api::detect_port(port).await.is_none() {
-            consecutive_gone += 1;
-            if consecutive_gone >= 2 {
-                break ("stopped", "Local service (daemon) stopped");
+    // daemon 排水上限 10s,留 12s 再判定为 GUI 宿主
+    let (status, message) =
+        match local_process_client::wait_until_released(port, std::time::Duration::from_secs(12))
+            .await
+        {
+            local_process_client::ReleaseOutcome::Released => {
+                ("stopped", "Local service (daemon) stopped")
             }
-        } else {
-            consecutive_gone = 0;
-        }
-        if Instant::now() >= deadline {
-            break (
+            local_process_client::ReleaseOutcome::StillHeld => (
                 "running",
                 "Service is hosted by the GUI; it stops when the GUI exits",
-            );
-        }
-    };
+            ),
+        };
     let data = serde_json::json!({ "status": status, "message": message });
     output::print_success(OutputKind::Shutdown, &data);
 }

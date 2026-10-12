@@ -644,47 +644,33 @@ async fn serve_on(
 /// Port held by our own CLI daemon: ask it to exit and wait until it really
 /// does (probe no longer `Mine`) before the caller rebinds — close first,
 /// then start. The probe/shutdown handshake is shared with the CLI via
-/// `cluster::local_probe`.
+/// `cluster::local_process_client`.
 /// 端口被自家 CLI daemon 占用时:请求其退出并等待端口真正释放(探测不再是
 /// 自家服务),再由调用方重绑 —— 先关后开。探测/关闭握手与 CLI 共用
-/// `cluster::local_probe`。
+/// `cluster::local_process_client`。
 async fn try_yield_to_cli_daemon(port: i32) -> bool {
-    use super::local_probe::{self, LocalProbe};
+    use super::local_process_client::{self, LocalProbe, ReleaseOutcome};
 
     // Only our own daemon yields; a GUI host or another holder does not
     // 只有自家 daemon 会退出;GUI 宿主或外部占用者不会让位
-    if local_probe::probe(port).await != LocalProbe::Mine {
+    if local_process_client::probe(port).await != LocalProbe::Mine {
         return false;
     }
-    let _ = local_probe::request_shutdown(port).await;
+    let _ = local_process_client::request_shutdown(port).await;
 
-    // Wait for the real exit (up to 12s, two consecutive non-Mine probes):
-    // the daemon's graceful drain is itself bounded at 10s (in-flight
-    // responses), so a 5s budget would misjudge a legitimately draining
-    // daemon as stuck. Mirrors handle_shutdown's guard so a momentarily slow
-    // /ping cannot be misread as "exited".
-    // 等待真正退出(上限 12s,连续两次探测非自家):daemon 的优雅排水上限
-    // 10s(在途响应),5s 预算会把正常排水中的 daemon 误判为卡死。与
-    // handle_shutdown 的防护一致,单次慢 /ping 不会被误读为"已退出"。
-    let deadline = Instant::now() + Duration::from_secs(12);
-    let mut consecutive_gone = 0;
-    loop {
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        if local_probe::probe(port).await != LocalProbe::Mine {
-            consecutive_gone += 1;
-            if consecutive_gone >= 2 {
-                log::info!("CLI daemon on port {} has yielded", port);
-                return true;
-            }
-        } else {
-            consecutive_gone = 0;
+    // Daemon drain is bounded at 10s (in-flight responses); allow 12s
+    // before declaring it stuck
+    // daemon 排水上限 10s(在途响应),留 12s 再判定为未退出
+    match local_process_client::wait_until_released(port, Duration::from_secs(12)).await {
+        ReleaseOutcome::Released => {
+            log::info!("CLI daemon on port {} has yielded", port);
+            true
         }
-        if Instant::now() >= deadline {
-            break;
+        ReleaseOutcome::StillHeld => {
+            log::warn!("CLI daemon on port {} did not exit in time", port);
+            false
         }
     }
-    log::warn!("CLI daemon on port {} did not exit in time", port);
-    false
 }
 
 /// Stop HTTP server
