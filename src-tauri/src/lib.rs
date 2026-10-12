@@ -250,7 +250,7 @@ pub fn run() {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 app_util::init_paths(app_handle).await;
-                initializer::process(false).await;
+                initializer::process().await;
             });
             let menu = app_util::create_tray_menu(app_handle)?;
             let tray_builder = TrayIconBuilder::with_id(TRAY_ID);

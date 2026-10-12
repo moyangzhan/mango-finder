@@ -84,7 +84,7 @@ fn main() {
     // see the function comment)
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        initializer::process(true).await;
+        initializer::process().await;
     });
 
     // The GUI sets the rust-i18n locale via the frontend calling

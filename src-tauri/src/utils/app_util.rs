@@ -11,7 +11,6 @@ use crate::global::{
 };
 use crate::utils::file_util;
 use crate::utils::task_util;
-use chrono::Utc;
 use log::{error, info, warn};
 use rust_i18n::t;
 use std::env;
@@ -131,11 +130,8 @@ pub async fn set_data_path(
     // DB persistent lock
     let old_data_path_val = crate::read_lock!(APP_DATA_PATH).clone();
     task_util::lock_active_task(&task_util::ActiveTask {
-        task_type: "data_copying".to_string(),
-        category: None,
-        new_mode: None,
         old_path: Some(old_data_path_val.clone()),
-        started_at: Utc::now().timestamp(),
+        ..task_util::ActiveTask::new("data_copying")
     })
     .map_err(|e| e.to_string())?;
 

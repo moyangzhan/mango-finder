@@ -16,7 +16,7 @@ use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 use tauri::AppHandle;
 use tokio::sync::RwLock as AsyncRwLock;
 
-pub const DB_VERSION: i32 = 4;
+pub const DB_VERSION: i32 = 5;
 pub const DEFAULT_PAGE_SIZE: usize = 20;
 pub const HUGGINFACE_WEBSITE: &str = "https://huggingface.co";
 pub const HUGGINFACE_MIRROR: &str = "https://hf-mirror.com";
@@ -77,6 +77,7 @@ pub const CONFIG_NAME_INDEXER_SETTING: &'static str = "indexer_setting";
 pub const CONFIG_NAME_WATCHER_SETTING: &'static str = "fs_watcher_setting";
 pub const CONFIG_NAME_ACTIVE_LOCALE: &'static str = "active_locale";
 pub const CONFIG_NAME_DB_VERSION: &'static str = "db_version";
+pub const CONFIG_NAME_PATHS_CACHE_GEN: &'static str = "paths_cache_gen";
 pub const CONFIG_NAME_ACTIVE_SELF_HOSTED_PLATFORM: &'static str = "active_self_hosted_platform";
 
 pub static APP_DATA_PATH: RwLock<String> = RwLock::new(String::new());

@@ -20,14 +20,14 @@ use serde_json;
 use std::sync::LazyLock;
 use tokio::sync::{RwLock as AsyncRwLock, RwLockWriteGuard as AsyncRwLockWriteGuard};
 
-pub async fn process(standalone: bool) {
+pub async fn process() {
     db_initializer::init()
         .context("Failed to initialize database")
         .unwrap_or_else(|e| error!("db init error: {e:?}"));
 
     // One-shot crash-leftover cleanup (orphan task locks, temp image dirs)
     // 一次性清理崩溃遗留(孤儿任务锁、临时图片目录)
-    crate::one_time_job::run_startup(standalone);
+    crate::one_time_job::run_startup();
 
     // Initialize the client_id
     init_sync_string_setting(CONFIG_NAME_CLIENT_ID, &CLIENT_ID);

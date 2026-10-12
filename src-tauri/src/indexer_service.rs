@@ -18,7 +18,6 @@ use crate::searcher;
 use crate::structs::indexer_setting::IndexerSetting;
 use crate::traits::indexing_template::IndexingTemplate;
 use crate::utils::{frontend_util, indexing_task_util, task_util};
-use chrono::Utc;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -57,11 +56,9 @@ pub async fn start_content_storage_change(category: &str, new_mode: &str) -> Res
 
     // DB persistent lock
     task_util::lock_active_task(&task_util::ActiveTask {
-        task_type: "content_storage_change".to_string(),
         category: Some(category.to_string()),
         new_mode: Some(new_mode.to_string()),
-        old_path: None,
-        started_at: Utc::now().timestamp(),
+        ..task_util::ActiveTask::new("content_storage_change")
     })
     .map_err(|e| e.to_string())?;
 
@@ -534,14 +531,8 @@ pub async fn start_indexing(paths: Vec<String>, from: &str) -> Result<bool, Stri
     }
 
     // DB persistent lock
-    task_util::lock_active_task(&task_util::ActiveTask {
-        task_type: "indexing".to_string(),
-        category: None,
-        new_mode: None,
-        old_path: None,
-        started_at: Utc::now().timestamp(),
-    })
-    .map_err(|e| e.to_string())?;
+    task_util::lock_active_task(&task_util::ActiveTask::new("indexing"))
+        .map_err(|e| e.to_string())?;
 
     STOP_INDEX_SIGNAL.store(false, Ordering::SeqCst);
     let embedding_model = EmbeddingService::model_name().await;

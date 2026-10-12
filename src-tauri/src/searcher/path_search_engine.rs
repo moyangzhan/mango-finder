@@ -1,7 +1,7 @@
 use crate::entities::FileInfo;
 use crate::enums::{FileCategory, HitType};
 use crate::global::DEFAULT_PAGE_SIZE;
-use crate::global::{PATHS_CACHE, PATHS_CACHE_BUILD_TIME};
+use crate::global::{CONFIG_NAME_PATHS_CACHE_GEN, PATHS_CACHE, PATHS_CACHE_BUILD_TIME};
 use crate::repositories::{config_repo, file_info_repo};
 use crate::structs::search_result::SearchResult;
 use crate::utils::file_util;
@@ -15,12 +15,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicI64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
-/// 缓存版本号(DB config 键):任何进程删除索引行时递增;
+/// 缓存版本号(CONFIG_NAME_PATHS_CACHE_GEN):任何进程删除索引行时递增;
 /// 持有缓存的宿主在计时器里发现版本不一致即全量重建,
 /// 使跨进程删除(如 CLI index clear)在 ≤10s 内对常驻缓存生效
-/// Cache generation (DB config key): any process deleting index rows bumps it;
-/// resident hosts rebuild on mismatch at the next 10s tick.
-const PATHS_CACHE_GEN_KEY: &str = "paths_cache_gen";
+/// Cache generation (CONFIG_NAME_PATHS_CACHE_GEN): any process deleting index
+/// rows bumps it; resident hosts rebuild on mismatch at the next 10s tick.
 static CACHE_GEN: AtomicI64 = AtomicI64::new(i64::MIN);
 /// 全量重建互斥:timer 与 init 可能并发触发 build_index,不保护会互相
 /// clear/push 交错产生重复条目
@@ -28,7 +27,7 @@ static CACHE_GEN: AtomicI64 = AtomicI64::new(i64::MIN);
 static BUILDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn read_db_gen() -> Option<i64> {
-    config_repo::get_val(PATHS_CACHE_GEN_KEY)
+    config_repo::get_val(CONFIG_NAME_PATHS_CACHE_GEN)
         .trim()
         .parse()
         .ok()
@@ -43,7 +42,7 @@ pub fn notify_paths_removed() {
     // Only bump the DB generation; do NOT store the local gen so the timer
     // always detects the mismatch and rebuilds (storing it here would
     // suppress the rebuild for callers that don't prune the local cache)
-    if let Err(e) = config_repo::increment(PATHS_CACHE_GEN_KEY) {
+    if let Err(e) = config_repo::increment(CONFIG_NAME_PATHS_CACHE_GEN) {
         log::warn!("Failed to bump paths cache generation: {}", e);
     }
 }

@@ -3,7 +3,6 @@ use crate::global::{ACTIVE_LOCALE, APP_DATA_PATH, CLIENT_ID, UI_MOUNTED};
 use crate::repositories::file_content_embedding_repo;
 use crate::searcher;
 use crate::utils::{app_util, task_util};
-use chrono::Utc;
 use std::fs::read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -135,11 +134,8 @@ pub async fn retry_data_copy(old_path: String, _app: AppHandle) -> Result<String
 
     // Lock active task
     task_util::lock_active_task(&task_util::ActiveTask {
-        task_type: "data_copying".to_string(),
-        category: None,
-        new_mode: None,
         old_path: Some(old_path.clone()),
-        started_at: Utc::now().timestamp(),
+        ..task_util::ActiveTask::new("data_copying")
     })
     .map_err(|e| e.to_string())?;
 

@@ -18,9 +18,9 @@ fn meta_columns() -> String {
 pub fn insert(file_info: &FileInfo) -> Result<Option<FileInfo>, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
-        "insert into file_info(name,category,path,file_ext,file_size,content,content_ref_path,metadata,md5,is_invalid,invalid_reason,file_create_time,file_update_time) values (:name,:category,:path,:file_ext,:file_size,:content,:content_ref_path,:metadata,:md5,:is_invalid,:invalid_reason,:file_create_time,:file_update_time)"
+        "insert into file_info(name,category,path,file_ext,file_size,content,content_ref_path,metadata,md5,is_invalid,invalid_reason,file_create_time,file_update_time) values (:name,:category,:path,:file_ext,:file_size,:content,:content_ref_path,:metadata,:md5,:is_invalid,:invalid_reason,:file_create_time,:file_update_time) on conflict(path) do nothing",
     )?;
-    let last_insert_rowid = stmt.insert(named_params! {
+    let affected = stmt.execute(named_params! {
         ":name": &file_info.name,
         ":category": file_info.category,
         ":path": &file_info.path,
@@ -35,9 +35,23 @@ pub fn insert(file_info: &FileInfo) -> Result<Option<FileInfo>, RepositoryError>
         ":file_create_time": datetime_util::micro_datetime_to_str(&file_info.file_create_time),
         ":file_update_time": datetime_util::micro_datetime_to_str(&file_info.file_update_time),
     })?;
+    if affected == 0 {
+        // Lost a concurrent-insert race on path: return the winning row so
+        // the caller continues on it instead of erroring
+        // 并发插入同 path 的竞态输家:回查已有行并返回,调用方在其上继续
+        let mut query_stmt = conn.prepare("select * from file_info where path = ?1 limit 1")?;
+        let existing = query_stmt
+            .query_row([&file_info.path], |row| Ok(Some(build_file_info(row)?)))
+            .unwrap_or_else(|e| {
+                log::debug!("file_info_repo.insert() conflict fallback error: {}", e);
+                None
+            });
+        return Ok(existing);
+    }
+    let rowid = conn.last_insert_rowid();
     let mut query_stmt = conn.prepare("select * from file_info where rowid = ?1")?;
     let file_info = query_stmt
-        .query_row([last_insert_rowid], |row| Ok(Some(build_file_info(row)?)))
+        .query_row([rowid], |row| Ok(Some(build_file_info(row)?)))
         .unwrap_or_else(|e| {
             log::debug!("file_info_repo.insert() Error: {}", e);
             None

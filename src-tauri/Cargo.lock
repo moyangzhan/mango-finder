@@ -4019,6 +4019,7 @@ dependencies = [
  "infer",
  "jieba-rs",
  "kreuzberg-paddle-ocr",
+ "libc",
  "local-ip-address",
  "log",
  "lopdf",
