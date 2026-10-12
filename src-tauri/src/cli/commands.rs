@@ -235,16 +235,6 @@ async fn in_process_search(
     search_type: &str,
     limit: usize,
 ) -> (Vec<SearchResult>, usize) {
-    // 进程内关键词搜索前确保路径缓存已构建:该缓存原由 GUI 的 ui_mounted
-    // 初始化,CLI 进程不经过它 —— 不构建则路径匹配半边恒为空(与 GUI 结果
-    // 不一致的预存在问题,此处顺带修复)
-    // Ensure the path cache is built before in-process keyword search: it is
-    // initialized by the GUI's ui_mounted, which a CLI process never runs —
-    // without it the path-match half of results is always empty (a
-    // pre-existing divergence from GUI results, fixed here as well).
-    if search_type == "keyword" {
-        searcher::path_search_engine::init().await;
-    }
     let results = searcher::search_by_type(query, Some(search_type)).await;
     let total = results.len();
     (results.into_iter().take(limit).collect(), total)
@@ -287,8 +277,9 @@ pub async fn handle_shutdown() {
     // 已退出(空闲超时/并发让位),表现为传输错误但服务实际已停止。
     let _ = local_api::request_shutdown(port).await;
 
-    // Daemon drain is bounded at 10s; allow 12s before declaring a GUI host
-    // daemon 排水上限 10s,留 12s 再判定为 GUI 宿主
+    // The daemon's graceful shutdown is bounded at 10s; allow 12s before
+    // declaring a GUI host
+    // daemon 优雅停机上限 10s,留 12s 再判定为 GUI 宿主
     let (status, message) =
         match local_process_client::wait_until_released(port, std::time::Duration::from_secs(12))
             .await

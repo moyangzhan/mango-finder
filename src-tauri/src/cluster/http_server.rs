@@ -277,12 +277,12 @@ pub async fn wait_server_stopped() {
 async fn cli_shutdown() -> CommonResponse<()> {
     if IS_DAEMON.load(Ordering::Relaxed) {
         tokio::spawn(async {
-            // Graceful drain instead of a fixed sleep: stop sends the signal,
+            // Graceful shutdown instead of a fixed sleep: stop sends the signal,
             // then we wait until the serve task actually finished (it clears
             // SHUTDOWN_SENDER once all in-flight responses are written). This
             // both flushes our own response and avoids killing other CLIs'
             // in-flight queries. Bounded at 10s for safety.
-            // 优雅排水而非固定 sleep:stop 发信号后,等待 serve 任务真正结束
+            // 优雅停机而非固定 sleep:stop 发信号后,等待 serve 任务真正结束
             // (全部在途响应写完后会清空 SHUTDOWN_SENDER)。既保证本响应写回,
             // 也不会杀掉其他 CLI 的在途查询;上限 10s 兜底。
             stop_http_server().await;
@@ -533,9 +533,11 @@ pub async fn start_http_server_loopback() -> Result<(), String> {
     }
     let (port, device_id, device_name) = resolve_identity().await;
 
-    // The daemon never yields: a busy port means a host already exists,
-    // which the CLI-side single-instance check guards against.
-    // daemon 不做让位:端口被占说明已有宿主,由 CLI 侧的单实例检查兜底
+    // The daemon never yields: a busy port means a host already exists
+    // (GUI or a concurrent daemon that won the bind race) — this process
+    // is the loser and exits (see serve::run).
+    // daemon 不做让位:端口被占说明已有宿主(GUI 或竞争中先完成绑定的
+    // daemon),本进程是输家,直接退出(见 serve::run)
     let addr = SocketAddr::from(([127, 0, 0, 1], port as u16));
     let listener = create_exclusive_socket_on(addr)
         .map_err(|e| format!("Port {} is already in use: {}", port, e))?;
@@ -658,9 +660,9 @@ async fn try_yield_to_cli_daemon(port: i32) -> bool {
     }
     let _ = local_process_client::request_shutdown(port).await;
 
-    // Daemon drain is bounded at 10s (in-flight responses); allow 12s
-    // before declaring it stuck
-    // daemon 排水上限 10s(在途响应),留 12s 再判定为未退出
+    // The daemon's graceful shutdown is bounded at 10s (in-flight responses);
+    // allow 12s before declaring it stuck
+    // daemon 优雅停机上限 10s(在途响应),留 12s 再判定为未退出
     match local_process_client::wait_until_released(port, Duration::from_secs(12)).await {
         ReleaseOutcome::Released => {
             log::info!("CLI daemon on port {} has yielded", port);

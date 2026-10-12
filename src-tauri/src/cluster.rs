@@ -134,12 +134,12 @@ pub async fn save_cluster_setting(setting: &ClusterSetting) -> Result<(), String
             // Stop HTTP server
             http_server::stop_http_server().await;
 
-            // Wait until the server has actually stopped (graceful drain of
-            // in-flight requests completes) instead of a fixed 500ms sleep:
-            // the drain can outlive the sleep, after which start_http_server
+            // Wait until the server has actually stopped (graceful shutdown
+            // finishes the in-flight requests) instead of a fixed 500ms sleep:
+            // shutdown can outlive the sleep, after which start_http_server
             // would short-circuit as "already running" and never rebind.
-            // 等待服务真正停止(在途请求排水完成),而非固定 500ms sleep:
-            // 排水超过 sleep 时 start_http_server 会因"已运行"短路而不再
+            // 等待服务真正停止(优雅停机会完成在途请求),而非固定 500ms sleep:
+            // 停机超过 sleep 时 start_http_server 会因"已运行"短路而不再
             // 重绑,导致新旧端口都没有监听。
             http_server::wait_server_stopped().await;
 

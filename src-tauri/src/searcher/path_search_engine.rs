@@ -14,6 +14,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicI64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
+use tokio::sync::OnceCell;
 
 /// 缓存版本号(CONFIG_NAME_PATHS_CACHE_VERSION):任何进程删除索引行时递增;
 /// 持有缓存的宿主在计时器里发现版本不一致即全量重建,
@@ -25,6 +26,10 @@ static CACHE_VERSION: AtomicI64 = AtomicI64::new(i64::MIN);
 /// clear/push 交错产生重复条目
 /// Full-rebuild mutex: timer and init may trigger build_index concurrently
 static BUILDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 共享的一次性初始化:首个调用方建缓存并启动计时器,并发/后续调用等待同一次构建
+/// Shared one-shot init: the first caller builds and starts the timer,
+/// concurrent/later callers await the same build
+static INIT: OnceCell<()> = OnceCell::const_new();
 
 fn read_db_version() -> Option<i64> {
     config_repo::get_val(CONFIG_NAME_PATHS_CACHE_VERSION)
@@ -49,6 +54,10 @@ pub fn notify_paths_removed() {
 
 /// Keyword-based exact match search for file paths
 pub async fn search(query: &str) -> Vec<SearchResult> {
+    // 读方不得观察到未构建的缓存(如撞上 daemon 绑定后的预热构建)
+    // Readers must never observe an unbuilt cache (e.g. racing the daemon's
+    // post-bind warm build)
+    init().await;
     let start = Instant::now();
     let keywords: Vec<&str> = query.split_whitespace().collect();
     let Ok(automaton) = create_automaton(&keywords) else {
@@ -124,9 +133,15 @@ pub async fn search(query: &str) -> Vec<SearchResult> {
     result
 }
 
+/// Build the path cache on first use and start the refresh timer; concurrent
+/// callers share the same build, later calls are no-ops.
+/// 首次调用构建路径缓存并启动刷新计时器;并发调用共享同一次构建,后续为空操作
 pub async fn init() {
-    build_index().await;
-    tokio::spawn(paths_index_timer());
+    INIT.get_or_init(|| async {
+        build_index().await;
+        tokio::spawn(paths_index_timer());
+    })
+    .await;
 }
 async fn build_index() {
     // 并发保护:已在重建中则跳过(下一 tick 会再检测到版本差异重试)
