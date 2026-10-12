@@ -217,11 +217,16 @@ pub fn count() -> Result<i64, RepositoryError> {
     Ok(count)
 }
 
-pub fn list_paths(page: i64, size: i64, asc: bool) -> Result<Vec<String>, RepositoryError> {
+/// Returns (id, path) pairs so the path-search cache can carry the real DB id
+/// (the cache previously fabricated ids from its line number, which drifted
+/// after any deletion or incremental append).
+/// 返回 (id, path) 二元组,让路径搜索缓存携带真实 DB id(此前缓存用行号
+/// 伪造 id,删除或增量追加后即错位)。
+pub fn list_paths(page: i64, size: i64, asc: bool) -> Result<Vec<(i64, String)>, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;
     let order_direction = if asc { "asc" } else { "desc" };
     let sql = format!(
-        "select path from file_info order by id {} limit :size offset :offset",
+        "select id, path from file_info order by id {} limit :size offset :offset",
         order_direction
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -230,7 +235,7 @@ pub fn list_paths(page: i64, size: i64, asc: bool) -> Result<Vec<String>, Reposi
             ":size": size,
             ":offset": (page - 1) * size,
         },
-        |row| row.get(0),
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
     )?;
     let mut result = Vec::new();
     for item in rows {
@@ -347,14 +352,14 @@ pub fn list_paths_by_min_update_time(
     min_update_time: &DateTime<Local>,
     page: i64,
     size: i64,
-) -> Result<Vec<String>, RepositoryError> {
+) -> Result<Vec<(i64, String)>, RepositoryError> {
     let update_time = datetime_util::datetime_to_str(min_update_time);
     log::debug!("update_time: {}", update_time);
     let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(
-        "select path from file_info where update_time > :min_update_time order by id desc limit :size offset :offset",
+        "select id, path from file_info where update_time > :min_update_time order by id desc limit :size offset :offset",
     )?;
-    let rows = stmt.query_map(named_params! {":min_update_time": update_time, ":size": size, ":offset": (page - 1) * size, }, |row| row.get(0))?;
+    let rows = stmt.query_map(named_params! {":min_update_time": update_time, ":size": size, ":offset": (page - 1) * size, }, |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
     let mut result = Vec::new();
     for item in rows {
         result.push(item?);

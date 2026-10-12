@@ -44,12 +44,12 @@ static REQUEST_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 /// 本地端口探测结果
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocalProbe {
-    /// This machine's Mango Finder service answered with our own device_id
-    /// 本机 Mango Finder 服务应答且 device_id 匹配
-    Ours,
+    /// Mango Finder's own service answered (device_id matched)
+    /// 应答的是 Mango Finder 自身的服务(device_id 匹配)
+    Mine,
     /// Something is listening but it is not our service (port collision)
     /// 有进程监听但不是我们的服务(端口撞车)
-    Foreign,
+    Other,
     /// Nothing answered (connection refused / timeout)
     /// 无应答(拒绝连接/超时)
     Unreachable,
@@ -67,6 +67,10 @@ fn client_id() -> String {
 pub async fn probe(port: i32) -> LocalProbe {
     let own = client_id();
     let url = format!("http://127.0.0.1:{}/ping", port);
+    // 超时视为端口空闲:有的机器上空闲端口也表现为超时(SYN 被丢弃),
+    // 若归为 Other 会导致 daemon 永远无法拉起
+    // Timeout means free: on some machines a free port also times out
+    // (dropped SYNs); classifying it as Other would break daemon spawning
     let Ok(resp) = PROBE_CLIENT
         .get(url)
         .header("X-Device-ID", &own)
@@ -78,7 +82,7 @@ pub async fn probe(port: i32) -> LocalProbe {
     if !resp.status().is_success() {
         // Something answered HTTP but not with our /ping shape
         // 有 HTTP 应答但不是我们的 /ping
-        return LocalProbe::Foreign;
+        return LocalProbe::Other;
     }
     match resp
         .json::<CommonResponse<crate::cluster::api_types::PingData>>()
@@ -86,12 +90,12 @@ pub async fn probe(port: i32) -> LocalProbe {
     {
         Ok(envelope) => {
             if envelope.data.map(|d| d.device_id) == Some(own) {
-                LocalProbe::Ours
+                LocalProbe::Mine
             } else {
-                LocalProbe::Foreign
+                LocalProbe::Other
             }
         }
-        Err(_) => LocalProbe::Foreign,
+        Err(_) => LocalProbe::Other,
     }
 }
 

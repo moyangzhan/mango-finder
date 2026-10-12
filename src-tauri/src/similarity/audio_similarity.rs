@@ -138,9 +138,17 @@ pub async fn find_similars_by_fingerprint_value(
     exclude_file_id: Option<i64>,
     limit: usize,
 ) -> Result<Vec<SearchResult>, AppError> {
-    // Query Music type files directly using audio_type index (category=3, audio_type=2)
-    let music_file_ids =
+    // Candidates must include BOTH Music and Mixed: the detector routes both
+    // here and both store fingerprints at index time — querying Music only
+    // meant mixed (vocal) tracks could never match each other.
+    // 候选必须同时含 Music 与 Mixed:检测器把两者都路由到这里,且两者入库时
+    // 都存指纹 —— 只查 Music 会导致人声混合曲目永远互不匹配。
+    let mut music_file_ids =
         file_info_repo::list_ids_by_category_and_audio_type(3, AudioType::Music as i32)?;
+    music_file_ids.extend(file_info_repo::list_ids_by_category_and_audio_type(
+        3,
+        AudioType::Mixed as i32,
+    )?);
     let music_files = file_info_repo::list_by_ids(&music_file_ids)?;
 
     let mut similarities: Vec<(FileInfo, f32)> = Vec::new();

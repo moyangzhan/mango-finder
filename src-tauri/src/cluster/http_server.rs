@@ -642,7 +642,7 @@ async fn serve_on(
 }
 
 /// Port held by our own CLI daemon: ask it to exit and wait until it really
-/// does (probe no longer `Ours`) before the caller rebinds — close first,
+/// does (probe no longer `Mine`) before the caller rebinds — close first,
 /// then start. The probe/shutdown handshake is shared with the CLI via
 /// `cluster::local_probe`.
 /// 端口被自家 CLI daemon 占用时:请求其退出并等待端口真正释放(探测不再是
@@ -651,14 +651,14 @@ async fn serve_on(
 async fn try_yield_to_cli_daemon(port: i32) -> bool {
     use super::local_probe::{self, LocalProbe};
 
-    // Only our own daemon yields; a GUI host or a foreign holder does not
+    // Only our own daemon yields; a GUI host or another holder does not
     // 只有自家 daemon 会退出;GUI 宿主或外部占用者不会让位
-    if local_probe::probe(port).await != LocalProbe::Ours {
+    if local_probe::probe(port).await != LocalProbe::Mine {
         return false;
     }
     let _ = local_probe::request_shutdown(port).await;
 
-    // Wait for the real exit (up to 12s, two consecutive non-Ours probes):
+    // Wait for the real exit (up to 12s, two consecutive non-Mine probes):
     // the daemon's graceful drain is itself bounded at 10s (in-flight
     // responses), so a 5s budget would misjudge a legitimately draining
     // daemon as stuck. Mirrors handle_shutdown's guard so a momentarily slow
@@ -670,7 +670,7 @@ async fn try_yield_to_cli_daemon(port: i32) -> bool {
     let mut consecutive_gone = 0;
     loop {
         tokio::time::sleep(Duration::from_millis(200)).await;
-        if local_probe::probe(port).await != LocalProbe::Ours {
+        if local_probe::probe(port).await != LocalProbe::Mine {
             consecutive_gone += 1;
             if consecutive_gone >= 2 {
                 log::info!("CLI daemon on port {} has yielded", port);
@@ -787,8 +787,8 @@ async fn handle_chunks(
     })
 }
 
-/// POST /file/:file_id/cluster_similars - Find similar files across devices with dual loop prevention
-/// POST /file/:file_id/cluster_similars - 跨设备查找相似文件（双重防循环机制）
+/// POST /cluster/file/:file_id/similars - Find similar files across devices with dual loop prevention
+/// POST /cluster/file/:file_id/similars - 跨设备查找相似文件（双重防循环机制）
 ///
 /// This endpoint is called by remote devices to find similar files.
 /// It searches locally and forwards the request to other devices.
@@ -805,7 +805,7 @@ async fn handle_find_similars(
     Json(req): Json<RemoteFindSimilarsRequest>,
 ) -> CommonResponse<FindSimilarsData> {
     log::info!(
-        "POST /file/{}/cluster_similars request_id={}, limit={}",
+        "POST /cluster/file/{}/similars request_id={}, limit={}",
         file_id,
         req.request_id,
         req.limit

@@ -206,7 +206,11 @@ pub static UI_MOUNTED: AtomicBool = AtomicBool::new(false);
 ///
 pub static TEST_MODE_REMOTE_DEVICE: AtomicBool = AtomicBool::new(false);
 
-pub static PATHS_CACHE: LazyLock<AsyncRwLock<Vec<String>>> =
+/// Path-search cache entries as (file_info.id, path): the real DB id travels
+/// with the path so search results never fabricate ids from line numbers
+/// 路径搜索缓存元素为 (file_info.id, path):真实 id 随路径入缓存,
+/// 搜索结果不再用行号伪造 id
+pub static PATHS_CACHE: LazyLock<AsyncRwLock<Vec<(i64, String)>>> =
     LazyLock::new(|| AsyncRwLock::new(vec![]));
 pub static PATHS_CACHE_BUILD_TIME: LazyLock<AsyncRwLock<DateTime<Local>>> =
     LazyLock::new(|| AsyncRwLock::new(Local::now()));

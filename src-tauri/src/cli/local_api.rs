@@ -41,14 +41,14 @@ pub async fn detect() -> Option<i32> {
 /// Detect a specific port (for host re-check after shutdown)
 /// 探测指定端口(供 shutdown 后的宿主身份复查)
 pub async fn detect_port(port: i32) -> Option<i32> {
-    matches!(local_probe::probe(port).await, LocalProbe::Ours).then_some(port)
+    matches!(local_probe::probe(port).await, LocalProbe::Mine).then_some(port)
 }
 
 /// Ensure the local service is available: probe → spawn the daemon if absent
 /// → poll until ready. Any failure returns None and the caller falls back to
 /// the in-process path. Behavior per probe outcome:
-/// - `Ours`        → use it directly
-/// - `Foreign`     → the port is held by another program: fail fast without
+/// - `Mine`        → use it directly
+/// - `Other`     → the port is held by another program: fail fast without
 ///   spawning (otherwise every command would pay the full readiness timeout)
 /// - `Unreachable` → spawn `mfd serve` and wait for readiness
 /// A non-empty `MANGO_FINDER_NO_DAEMON` skips spawning (probe only).
@@ -59,10 +59,10 @@ pub async fn detect_port(port: i32) -> Option<i32> {
 pub async fn ensure_server() -> Option<i32> {
     let port = local_port().await;
     match local_probe::probe(port).await {
-        LocalProbe::Ours => return Some(port),
-        LocalProbe::Foreign => {
+        LocalProbe::Mine => return Some(port),
+        LocalProbe::Other => {
             log::warn!(
-                "port {} is held by a foreign process, skipping local service",
+                "port {} is held by another process, skipping local service",
                 port
             );
             return None;
@@ -149,7 +149,7 @@ async fn spawn_daemon() -> Option<()> {
 async fn wait_ready(port: i32) -> Option<i32> {
     let deadline = Instant::now() + Duration::from_secs(DAEMON_READY_TIMEOUT_SECS);
     loop {
-        if matches!(local_probe::probe(port).await, LocalProbe::Ours) {
+        if matches!(local_probe::probe(port).await, LocalProbe::Mine) {
             log::info!("local daemon ready on port {}", port);
             return Some(port);
         }
