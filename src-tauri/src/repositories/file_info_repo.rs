@@ -604,12 +604,51 @@ pub fn list_by_name(name: &str) -> Result<Vec<FileInfo>, RepositoryError> {
 
 /// List id + image_hash of all image files with a stored hash
 /// 列出所有已存储感知哈希的图片文件（供外部文件纯视觉比对使用）
-pub fn list_image_hashes() -> Result<Vec<(i64, Option<Vec<u8>>)>, RepositoryError> {
+/// 视觉回退候选:经 SQLite UDF 在库内过滤汉明距离,只有匹配行跨越边界
+/// Visual fallback candidates: SQLite UDF filters hamming distance in-DB;
+/// only matching rows cross the boundary
+pub fn find_visual_candidates_by_hash(
+    source_hash: &[u8],
+    max_distance: i64,
+    limit: i64,
+) -> Result<Vec<(i64, Option<Vec<u8>>)>, RepositoryError> {
+    use rusqlite::functions::FunctionFlags;
+
     let conn = crate::db_init_manager::open_db()?;
-    let mut stmt = conn.prepare(
-        "select id, image_hash from file_info where category = 2 and image_hash is not null",
-    )?;
-    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+
+    // 汉明距离 UDF(连接级,每次查询注册一次)
+    conn.create_scalar_function(
+        "hamming_dist",
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            let a: Vec<u8> = ctx.get(0)?;
+            let b: Vec<u8> = ctx.get(1)?;
+            let dist: i64 = a
+                .iter()
+                .zip(b.iter())
+                .map(|(x, y)| (x ^ y).count_ones() as i64)
+                .sum();
+            Ok(dist)
+        },
+    )
+    .map_err(RepositoryError::Database)?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, image_hash FROM file_info \
+             WHERE category = 2 AND image_hash IS NOT NULL \
+             AND hamming_dist(image_hash, ?1) <= ?2 \
+             ORDER BY hamming_dist(image_hash, ?1) ASC \
+             LIMIT ?3",
+        )
+        .map_err(RepositoryError::Database)?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params![source_hash, max_distance, limit],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(RepositoryError::Database)?;
     let mut result = Vec::new();
     for item in rows {
         result.push(item?);

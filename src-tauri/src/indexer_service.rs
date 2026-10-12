@@ -883,8 +883,6 @@ pub fn remove_file_index(path: &str) -> Result<(), String> {
         file_content_fts_repo::delete_by_file_id(file_info.id)?;
         file_content_embedding_repo::delete_by_file_id(file_info.id)?;
         file_metadata_embedding_repo::delete_by_file_id(file_info.id)?;
-        // 通知其他常驻进程的路径缓存重建
-        // Notify path caches in other resident processes to rebuild
     }
     Ok(())
 }

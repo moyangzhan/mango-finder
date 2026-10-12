@@ -821,7 +821,7 @@ pub async fn handle_index(action: IndexAction) {
             // Clamp pagination: a negative page_size becomes SQLite's
             // unbounded LIMIT (full-table dump); a non-positive page yields a
             // negative OFFSET that SQLite treats as 0 (repeats page 1).
-            let page = page.max(1);
+            let page = page.clamp(1, 1_000_000); // also caps (page-1)*size overflow
             let page_size = page_size.clamp(1, 1000);
             match file_info_repo::list(page, page_size) {
                 Ok(files) => {

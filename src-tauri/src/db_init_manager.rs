@@ -199,7 +199,29 @@ impl<'a> std::ops::Deref for ConnectionGuard<'a> {
 pub fn open_db() -> Result<Connection, rusqlite::Error> {
     let conn = Connection::open(crate::utils::app_util::get_db_path())?;
     conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    register_hamming_udf(&conn)?;
     Ok(conn)
+}
+
+/// 汉明距离 UDF,视觉回退查询在 SQL 内过滤用
+/// Hamming distance UDF for in-DB visual fallback filtering
+fn register_hamming_udf(conn: &Connection) -> Result<(), rusqlite::Error> {
+    use rusqlite::functions::FunctionFlags;
+    conn.create_scalar_function(
+        "hamming_dist",
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            let a: Vec<u8> = ctx.get(0)?;
+            let b: Vec<u8> = ctx.get(1)?;
+            // 长度不等时不 zip 截断(会低估距离),返回大值使其被过滤
+            if a.len() != b.len() {
+                return Ok(i64::MAX);
+            }
+            let dist: i64 = a.iter().zip(b.iter()).map(|(x, y)| (x ^ y).count_ones() as i64).sum();
+            Ok(dist)
+        },
+    )
 }
 
 fn try_open_connection(db_path: &PathBuf) -> Result<Connection, String> {
