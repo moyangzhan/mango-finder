@@ -711,13 +711,13 @@ fn warn_external_slowness(path: &str) {
         }
         FileCategory::Image => {
             log::warn!(
-                "'{}' is not indexed; computing its perceptual hash and caption embedding on the fly (loads the vision model, usually a few seconds).",
+                "'{}' is not indexed; computing its perceptual hash and caption embedding on the fly (model load or a remote call may take a few seconds).",
                 path
             );
         }
         FileCategory::Audio => {
             log::warn!(
-                "'{}' is not indexed; fingerprinting or transcribing it on the fly. Whisper transcription of long audio may take minutes.",
+                "'{}' is not indexed; fingerprinting or transcribing it on the fly. Transcription of long audio may take minutes.",
                 path
             );
         }
@@ -736,7 +736,7 @@ fn build_external_notice(
             "its audio fingerprint was extracted on the fly".to_string()
         }
         Some(_) => format!(
-            "it was transcribed with Whisper and {} chunk(s) were embedded on the fly",
+            "it was transcribed and {} chunk(s) were embedded on the fly",
             outcome.chunk_count
         ),
         None if outcome.category == FileCategory::Image => {

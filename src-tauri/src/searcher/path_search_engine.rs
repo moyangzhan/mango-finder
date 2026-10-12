@@ -1,7 +1,7 @@
 use crate::entities::FileInfo;
 use crate::enums::{FileCategory, HitType};
 use crate::global::DEFAULT_PAGE_SIZE;
-use crate::global::{CONFIG_NAME_PATHS_CACHE_GEN, PATHS_CACHE, PATHS_CACHE_BUILD_TIME};
+use crate::global::{CONFIG_NAME_PATHS_CACHE_VERSION, PATHS_CACHE, PATHS_CACHE_BUILD_TIME};
 use crate::repositories::{config_repo, file_info_repo};
 use crate::structs::search_result::SearchResult;
 use crate::utils::file_util;
@@ -15,19 +15,19 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicI64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
-/// 缓存版本号(CONFIG_NAME_PATHS_CACHE_GEN):任何进程删除索引行时递增;
+/// 缓存版本号(CONFIG_NAME_PATHS_CACHE_VERSION):任何进程删除索引行时递增;
 /// 持有缓存的宿主在计时器里发现版本不一致即全量重建,
 /// 使跨进程删除(如 CLI index clear)在 ≤10s 内对常驻缓存生效
-/// Cache generation (CONFIG_NAME_PATHS_CACHE_GEN): any process deleting index
+/// Cache version (CONFIG_NAME_PATHS_CACHE_VERSION): any process deleting index
 /// rows bumps it; resident hosts rebuild on mismatch at the next 10s tick.
-static CACHE_GEN: AtomicI64 = AtomicI64::new(i64::MIN);
+static CACHE_VERSION: AtomicI64 = AtomicI64::new(i64::MIN);
 /// 全量重建互斥:timer 与 init 可能并发触发 build_index,不保护会互相
 /// clear/push 交错产生重复条目
 /// Full-rebuild mutex: timer and init may trigger build_index concurrently
 static BUILDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-fn read_db_gen() -> Option<i64> {
-    config_repo::get_val(CONFIG_NAME_PATHS_CACHE_GEN)
+fn read_db_version() -> Option<i64> {
+    config_repo::get_val(CONFIG_NAME_PATHS_CACHE_VERSION)
         .trim()
         .parse()
         .ok()
@@ -36,14 +36,14 @@ fn read_db_gen() -> Option<i64> {
 /// 通知其他进程:索引行有删除,持有缓存的宿主应重建(本进程本地版本同步跳过)
 /// Notify other processes that index rows were removed (resident hosts rebuild)
 pub fn notify_paths_removed() {
-    // 只递增 DB 版本,不存 local gen:让 timer 统一检测并触发重建。
-    // 若在这里存 local gen,会抑制本进程的重建(remove_file_index 等不剪
+    // 只递增 DB 版本,不存本地版本:让 timer 统一检测并触发重建。
+    // 若在这里存本地版本,会抑制本进程的重建(remove_file_index 等不剪
     // 本地缓存的调用方就会留下幽灵路径)
-    // Only bump the DB generation; do NOT store the local gen so the timer
+    // Only bump the DB version; do NOT store the local version so the timer
     // always detects the mismatch and rebuilds (storing it here would
     // suppress the rebuild for callers that don't prune the local cache)
-    if let Err(e) = config_repo::increment(CONFIG_NAME_PATHS_CACHE_GEN) {
-        log::warn!("Failed to bump paths cache generation: {}", e);
+    if let Err(e) = config_repo::increment(CONFIG_NAME_PATHS_CACHE_VERSION) {
+        log::warn!("Failed to bump paths cache version: {}", e);
     }
 }
 
@@ -135,10 +135,10 @@ async fn build_index() {
     }
     // 记录构建前的版本号:若构建期间有进程递增了版本,下一 tick 会再次
     // 不匹配并重建(自愈),不会把半新半旧的状态当成最新
-    // Record the pre-build generation: a bump during the build makes the next
+    // Record the pre-build version: a bump during the build makes the next
     // tick mismatch and rebuild again (self-healing) instead of adopting a
     // half-built state as current.
-    let gen_before = read_db_gen().unwrap_or(0);
+    let version_before = read_db_version().unwrap_or(0);
     let mut build_complete = true;
     let size = 1000;
     // 先查 count 再清缓存:count 失败(如 SQLITE_BUSY → 0)时不清,
@@ -157,7 +157,7 @@ async fn build_index() {
     }
     if total == 0 {
         log::debug!("file_info total == 0");
-        CACHE_GEN.store(gen_before, AtomicOrdering::SeqCst);
+        CACHE_VERSION.store(version_before, AtomicOrdering::SeqCst);
         BUILDING.store(false, AtomicOrdering::SeqCst);
         return;
     }
@@ -184,12 +184,12 @@ async fn build_index() {
             (*cache).push((id, path));
         }
     }
-    // 页读取中途出错时不清 gen/build_time,让下一 tick 检测到版本差异重试
+    // 页读取中途出错时不清 version/build_time,让下一 tick 检测到版本差异重试
     if !build_complete {
         BUILDING.store(false, AtomicOrdering::SeqCst);
         return;
     }
-    CACHE_GEN.store(gen_before, AtomicOrdering::SeqCst);
+    CACHE_VERSION.store(version_before, AtomicOrdering::SeqCst);
     BUILDING.store(false, AtomicOrdering::SeqCst);
     let mut guard = PATHS_CACHE_BUILD_TIME.write().await;
     *guard = Local::now()
@@ -209,11 +209,11 @@ async fn paths_index_timer() {
     loop {
         interval.tick().await;
         // 版本不一致说明其他进程删除过索引行,增量推送无法感知删除,全量重建
-        // A generation mismatch means another process removed index rows,
+        // A version mismatch means another process removed index rows,
         // which the append-only push cannot see — rebuild in full.
-        if let Some(db_gen) = read_db_gen() {
-            if db_gen != CACHE_GEN.load(AtomicOrdering::SeqCst) {
-                log::info!("paths cache generation changed, rebuilding");
+        if let Some(db_version) = read_db_version() {
+            if db_version != CACHE_VERSION.load(AtomicOrdering::SeqCst) {
+                log::info!("paths cache version changed, rebuilding");
                 build_index().await;
                 continue;
             }
@@ -303,7 +303,7 @@ pub async fn remove_from_index(path: &str, is_file: bool) {
         }
     }
     // 本进程缓存已就地更新;递增版本通知其他常驻宿主
-    // Local cache pruned; bump generation for other resident hosts
+    // Local cache pruned; bump version for other resident hosts
     notify_paths_removed();
 }
 

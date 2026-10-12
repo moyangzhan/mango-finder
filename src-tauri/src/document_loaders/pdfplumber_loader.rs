@@ -1,6 +1,6 @@
 use super::{image_filename, images_dir_for};
 use crate::global::{MAX_DOCUMENT_LOAD_CHARS, PDF_EXTS};
-use crate::image_parser;
+use crate::local_image_parser;
 use crate::ocr_service;
 use crate::traits::document_loader::DocumentLoader;
 use lopdf::Document as LopdfDocument;
@@ -141,7 +141,7 @@ impl PdfPlumberLoader {
                                 format!("![{}]({}{})", img.name, img_rel_prefix, img_name);
                             let mut parts = vec![img_ref];
 
-                            let blip_caption = image_parser::generate_caption(&img_path);
+                            let blip_caption = local_image_parser::generate_caption(&img_path);
                             let ocr_text = ocr_service::recognize_file(&img_path);
                             if !blip_caption.is_empty() {
                                 parts.push(format!("**Image Description:** {}", blip_caption));
@@ -383,7 +383,7 @@ fn extract_images_from_page(
         let img_ref = format!("![{}]({}{})", name_str, img_rel_prefix, final_filename);
 
         let mut parts = vec![img_ref];
-        let blip_caption = image_parser::generate_caption(&final_path);
+        let blip_caption = local_image_parser::generate_caption(&final_path);
         let ocr_text = ocr_service::recognize_file(&final_path);
         if !blip_caption.is_empty() {
             parts.push(format!("**Image Description:** {}", blip_caption));

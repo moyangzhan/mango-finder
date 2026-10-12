@@ -266,12 +266,22 @@ async fn find_similars_for_external_image(
         source_hash_bytes.ok_or_else(|| format!("Failed to decode image: {}", path))?;
     let source_hash = image_similarity::bytes_to_image_hash(&source_hash_bytes);
 
-    let caption_path = path.to_string();
-    let content = tokio::task::spawn_blocking(move || {
-        image_parser::build_local_analysis_text(std::path::Path::new(&caption_path))
-    })
-    .await
-    .unwrap_or_default();
+    // Parser init/analyze failure degrades to the visual-only fallback below
+    // (same path as an empty caption)
+    // 解析器初始化/打标失败降级为下方纯视觉回退(与空打标同路)
+    let content = match image_parser::ImageParser::new().await {
+        Ok(parser) => match parser.analyze(path).await {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("Image caption failed, visual-only fallback: {}", e);
+                String::new()
+            }
+        },
+        Err(e) => {
+            log::warn!("Image parser init failed, visual-only fallback: {}", e);
+            String::new()
+        }
+    };
 
     // 有语义向量时用 ANN 取候选；否则扫描全部图片哈希做纯视觉比对。
     // 三种"无向量"情形(打标为空/无分块/嵌入失败)统一收敛到同一个回退
@@ -333,8 +343,7 @@ async fn find_similars_for_external_audio(
         let samples = audio_util::load_audio_to_f32(&decode_path)
             .map_err(|e| format!("Failed to decode audio: {}", e))?;
         let feature_type = audio_util::detect_audio_type_by_features(&samples);
-        let fingerprint =
-            audio_util::extract_music_fingerprint(&samples);
+        let fingerprint = audio_util::extract_music_fingerprint(&samples);
         Ok::<_, String>((feature_type, fingerprint, samples))
     })
     .await
@@ -354,11 +363,14 @@ async fn find_similars_for_external_audio(
             })
         }
         AudioType::Speech | AudioType::Unknown => {
-            // 转写:用已解码的采样点(不再读文件)
-            let parser =
-                AudioParser::new().map_err(|e| format!("Failed to load Whisper model: {}", e))?;
+            // 转写走与索引同模式的解析器;Local 复用已解码采样点,Remote 读文件
+            // Transcribe with the same parser mode as indexing; local reuses
+            // the decoded samples, remote reads the file
+            let parser = AudioParser::new()
+                .await
+                .map_err(|e| format!("Failed to init audio parser: {}", e))?;
             let transcription = parser
-                .parse_from_samples(&samples)
+                .transcribe(path, Some(&samples))
                 .await
                 .map_err(|e| format!("Failed to transcribe audio: {}", e))?;
 
@@ -424,9 +436,8 @@ fn visual_scan_candidates(
     // score >= 30 要求 distance <= 7(公式: score = (10 - d) * 10);
     // SQL LIMIT 取用户 limit 与 ANN_CANDIDATE_LIMIT 的较大值,不截断
     let sql_limit = (limit.max(image_similarity::ANN_CANDIDATE_LIMIT)) as i64;
-    let rows =
-        file_info_repo::find_visual_candidates_by_hash(source_hash, 7, sql_limit)
-            .map_err(|e| e.to_string())?;
+    let rows = file_info_repo::find_visual_candidates_by_hash(source_hash, 7, sql_limit)
+        .map_err(|e| e.to_string())?;
     Ok(rows
         .into_iter()
         .map(|(file_id, image_hash)| ImageSimilarityCandidate {

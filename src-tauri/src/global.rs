@@ -77,7 +77,7 @@ pub const CONFIG_NAME_INDEXER_SETTING: &'static str = "indexer_setting";
 pub const CONFIG_NAME_WATCHER_SETTING: &'static str = "fs_watcher_setting";
 pub const CONFIG_NAME_ACTIVE_LOCALE: &'static str = "active_locale";
 pub const CONFIG_NAME_DB_VERSION: &'static str = "db_version";
-pub const CONFIG_NAME_PATHS_CACHE_GEN: &'static str = "paths_cache_gen";
+pub const CONFIG_NAME_PATHS_CACHE_VERSION: &'static str = "paths_cache_version";
 pub const CONFIG_NAME_ACTIVE_SELF_HOSTED_PLATFORM: &'static str = "active_self_hosted_platform";
 
 pub static APP_DATA_PATH: RwLock<String> = RwLock::new(String::new());

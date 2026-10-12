@@ -1,95 +1,93 @@
-use crate::utils::app_util;
-use crate::utils::audio_util;
-use anyhow::Result;
-use log::error;
-use std::sync::Arc;
-use tokio::sync::Mutex as AsyncMutex;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use crate::entities::AiModel;
+use crate::enums::{FileParserMode, ModelPlatformName, ModelType};
+use crate::errors::AppError;
+use crate::global::{ACTIVE_MODEL_PLATFORM, INDEXER_SETTING};
+use crate::local_audio_parser::LocalAudioParser;
+use crate::model_platform_services::openai::OpenAi;
+use crate::model_platform_services::openai_compatible_service::OpenAiCompatibleService;
+use crate::model_platform_services::siliconflow::SiliconFlow;
+use crate::repositories::ai_model_repo;
+use crate::traits::audio_analyzer::AudioAnalyzer;
 
-/// Audio transcription parser using whisper.cpp.
-/// Supports multiple audio formats and auto-detects language.
-///
-/// 使用 whisper.cpp 的音频转录解析器。
-/// 支持多种音频格式，自动检测语言。
+/// Audio parser chosen by `audio_parser_mode`; shared by the indexing and
+/// external-file pipelines so both transcribe identically.
+/// 按 audio_parser_mode 选出的音频解析器;索引与外部文件管线共用,保证同源转写。
 pub struct AudioParser {
-    ctx: Arc<AsyncMutex<WhisperContext>>,
+    local: Option<LocalAudioParser>,
+    remote_model: Option<AiModel>,
+    remote_service: Option<Box<dyn AudioAnalyzer>>,
 }
 
 impl AudioParser {
-    pub fn new() -> Result<Self> {
-        let model_path = app_util::get_whisper_model_path();
-        let ctx_params = WhisperContextParameters::default();
-
-        let ctx = WhisperContext::new_with_params(&model_path, ctx_params).map_err(|e| {
-            error!("Failed to load whisper model from {}: {:?}", model_path, e);
-            anyhow::anyhow!("Failed to load whisper model: {:?}", e)
-        })?;
-
-        Ok(Self {
-            ctx: Arc::new(AsyncMutex::new(ctx)),
-        })
-    }
-
-    /// Transcribe audio file to text.
-    ///
-    /// # Arguments
-    /// - `audio_file`: Path to the audio file
-    ///
-    /// # Returns
-    /// Transcribed text content
-    ///
-    /// 将音频文件转录为文本。
-    ///
-    /// # 参数
-    /// - `audio_file`: 音频文件路径
-    ///
-    /// # 返回值
-    /// 转录后的文本内容
-    pub async fn parse(&self, audio_file: &str) -> Result<String> {
-        let samples = audio_util::load_audio_to_f32(audio_file)?;
-        self.parse_from_samples(&samples).await
-    }
-
-    /// Transcribe from pre-loaded audio samples (avoids re-decoding the file)
-    /// 从已加载的音频采样点转录(避免重复解码文件)
-    pub async fn parse_from_samples(&self, audio_samples: &[f32]) -> Result<String> {
-        let mut full_transcript = String::new();
-
-        let ctx = self.ctx.lock().await;
-        let mut state = ctx.create_state().map_err(|e| {
-            error!("Failed to create whisper state: {:?}", e);
-            anyhow::anyhow!("Failed to create whisper state: {:?}", e)
-        })?;
-
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_print_progress(false);
-        params.set_print_timestamps(false);
-
-        // Whisper 推理是重 CPU 计算,放 block_in_place 避免 tokio worker 被独占
-        // Whisper inference is heavy CPU; block_in_place avoids starving the worker
-        let (state, num_segments) = tokio::task::block_in_place(|| {
-            state.full(params, audio_samples).map_err(|e| {
-                error!("Whisper transcription failed: {:?}", e);
-                anyhow::anyhow!("Whisper transcription failed: {:?}", e)
-            })?;
-            let n = state.full_n_segments();
-            Ok::<_, anyhow::Error>((state, n))
-        })?;
-
-        for i in 0..num_segments {
-            let segment = state.get_segment(i).ok_or_else(|| {
-                error!("Failed to get segment {}", i);
-                anyhow::anyhow!("Failed to get segment {}", i)
-            })?;
-
-            let text = segment.to_str().map_err(|e| {
-                error!("Failed to get segment text: {:?}", e);
-                anyhow::anyhow!("Failed to get segment text: {:?}", e)
-            })?;
-
-            full_transcript.push_str(text);
+    pub async fn new() -> Result<Self, AppError> {
+        match INDEXER_SETTING.read().await.audio_parser_mode.clone() {
+            FileParserMode::Local => Ok(Self {
+                local: Some(LocalAudioParser::new()?),
+                remote_model: None,
+                remote_service: None,
+            }),
+            // Self-hosted platforms (Ollama/vLLM) do not support ASR
+            FileParserMode::SelfHosted => Err(AppError::UnsupportedAudioAnalyze(
+                "Self-hosted platforms (Ollama/vLLM) do not support ASR".to_string(),
+            )),
+            FileParserMode::Remote => {
+                let (platform_name, base_url) = {
+                    let active_platform = crate::read_lock!(ACTIVE_MODEL_PLATFORM);
+                    (
+                        active_platform.name.clone(),
+                        active_platform.base_url.clone(),
+                    )
+                };
+                let asr: &str = ModelType::Asr.into();
+                let ai_model =
+                    ai_model_repo::get_one_by_type(platform_name.as_str(), ModelType::Asr.into())
+                        .ok()
+                        .flatten()
+                        .ok_or_else(|| AppError::AiModelNotFound(format!("model type:{}", asr)))?;
+                let service: Box<dyn AudioAnalyzer> =
+                    match ModelPlatformName::from(platform_name.as_str()) {
+                        ModelPlatformName::OpenAi => Box::new(OpenAi::new().await),
+                        ModelPlatformName::SiliconFlow => Box::new(SiliconFlow::new().await),
+                        ModelPlatformName::DashScope | ModelPlatformName::DeepSeek => {
+                            log::warn!("DeepSeek and DashScope do not support audio analysis yet.");
+                            return Err(AppError::UnsupportedAudioAnalyze(
+                                "Deepseek and Dashscope".to_string(),
+                            ));
+                        }
+                        _ => {
+                            Box::new(OpenAiCompatibleService::new(&platform_name, &base_url).await)
+                        }
+                    };
+                Ok(Self {
+                    local: None,
+                    remote_model: Some(ai_model),
+                    remote_service: Some(service),
+                })
+            }
         }
+    }
 
-        Ok(full_transcript)
+    /// Local reuses pre-decoded samples when given; remote ASR reads the file.
+    /// Local 复用已解码采样点(若提供);远程 ASR 读文件。
+    pub async fn transcribe(&self, path: &str, samples: Option<&[f32]>) -> Result<String, String> {
+        if let Some(parser) = &self.local {
+            let result = match samples {
+                Some(s) => parser.parse_from_samples(s).await,
+                None => parser.parse(path).await,
+            };
+            return result.map_err(|e| e.to_string());
+        }
+        let model = self
+            .remote_model
+            .as_ref()
+            .ok_or("No ASR model configured")?;
+        let service = self
+            .remote_service
+            .as_ref()
+            .ok_or("No ASR service configured")?;
+        service
+            .analyze_audio(model, path)
+            .await
+            .map_err(|e| e.to_string())
     }
 }

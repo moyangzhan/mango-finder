@@ -2,7 +2,7 @@ use super::{image_filename, images_dir_for};
 use crate::global::{
     ANYTOMD_EXTRA_EXTS, DOCX_EXTS, EXCEL_EXTS, MAX_DOCUMENT_LOAD_CHARS, PLAIN_TEXT_EXTS, PPTX_EXTS,
 };
-use crate::image_parser;
+use crate::local_image_parser;
 use crate::ocr_service;
 use crate::traits::document_loader::DocumentLoader;
 use std::fs;
@@ -159,7 +159,7 @@ impl AnyToMdLoader {
                 fs::write(&img_path, bytes)?;
 
                 let mut parts = Vec::new();
-                let blip_caption = image_parser::generate_caption(&img_path);
+                let blip_caption = local_image_parser::generate_caption(&img_path);
                 let ocr_text = ocr_service::recognize_file(&img_path);
                 if !blip_caption.is_empty() {
                     parts.push(format!("**Image Description:** {}", blip_caption));
