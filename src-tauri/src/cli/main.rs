@@ -1,5 +1,5 @@
 mod commands;
-mod host_api;
+mod daemon;
 mod output;
 mod render;
 mod serve;
