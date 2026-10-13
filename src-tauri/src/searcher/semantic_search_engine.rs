@@ -103,7 +103,7 @@ fn merge_and_filter_results(
     }
     let mut file_map: HashMap<i64, SearchTmp> = HashMap::new();
 
-    // 1. 处理内容路结果 | Process content search results
+    // 1. Process content-path results
     for item in content_result {
         log::debug!(
             "Content Search - file_id: {}, chunk_id: {}, score: {}",
@@ -125,7 +125,7 @@ fn merge_and_filter_results(
         }
     }
 
-    // 2. 处理元数据路结果 (赋予 1.1 倍的加成) | Process metadata results (apply 1.1x boost)
+    // 2. Process metadata results (1.1x boost)
     for item in meta_result {
         log::debug!(
             "Meta Search - file_id: {}, score: {}, distance: {}, sparse_score: {}",
@@ -149,9 +149,9 @@ fn merge_and_filter_results(
     }
 
     let extact_words_match = !fts_result.is_empty();
-    // 3. 处理 FTS 全文检索结果 (通常关键词匹配非常精准，给予固定高分或权重) | Process FTS results (keyword matches are precise, give fixed high score)
+    // 3. Process FTS results (keyword matches are precise, fixed high score)
     for item in fts_result {
-        //补偿10分 | Add 10 points bonus
+        // +10 bonus
         let fts_boosted_score = (item.score.min(100) as usize + 10).min(100);
         let entry = file_map.entry(item.file_info.id).or_insert(SearchTmp {
             file_id: item.file_info.id,
@@ -177,13 +177,13 @@ fn merge_and_filter_results(
         }
     }
 
-    // 4. 如果有完全匹配关键词，则针对未命中关键词的文档进行【降权惩罚】 | If exact keyword matches exist, penalize documents without keyword hits
+    // 4. With exact keyword matches, penalize documents missing the keyword
     if extact_words_match {
         for entry in file_map.values_mut() {
-            // 如果该文档在 FTS 全文检索中完全没有出现 | If the document didn't appear in FTS results
+            // Absent from FTS results entirely
             if !entry.hit_types.contains(&HitType::ContentKeyword) {
-                // 策略：得分打 6 折。例如：90分降至 54分，70分降至 42分 | Strategy: 60% score penalty. e.g., 90 -> 54, 70 -> 42
-                // 这能有效让出高位给包含硬核关键词的结果 | This effectively yields top positions to results with exact keywords
+                // Strategy: 60% score penalty (90 -> 54, 70 -> 42)
+                // Yields top positions to results with exact keywords
                 entry.max_score = (entry.max_score as f32 * 0.6) as usize;
             }
         }

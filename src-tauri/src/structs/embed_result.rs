@@ -35,9 +35,9 @@ impl EmbedResult {
             for i in 0..limit {
                 let weight = s_data[i];
                 let token_id = input_ids[i] as u32;
-                // 1. 过滤掉权重过低或为 0 的项 | Filter out items with low or zero weight
-                // 2. 过滤掉特殊字符（如 BGE-M3 的 [CLS], [SEP], [PAD]） | Filter out special tokens (e.g., [CLS], [SEP], [PAD] in BGE-M3)
-                //    通常 BGE-M3 的词表里，PAD 是 0, CLS 是 0, SEP 是 2 等（视分词器而定） | Typically in BGE-M3 vocab: PAD=0, CLS=0, SEP=2 (varies by tokenizer)
+                // 1. Filter out items with low or zero weight
+                // 2. Filter out special tokens ([CLS], [SEP], [PAD] in BGE-M3)
+                //    typically PAD=0, CLS=0, SEP=2 (tokenizer-dependent)
                 if weight > 0.0 && token_id != 0 {
                     let e = sparse_map.entry(token_id).or_insert(0.0f32);
                     if weight > *e {

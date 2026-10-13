@@ -95,7 +95,6 @@ pub async fn save_cluster_setting(setting: &ClusterSetting) -> Result<(), String
     drop(global_setting); // Release lock before async operations
 
     // Notify frontend that setting saved successfully (clear any previous port error)
-    // 通知前端设置保存成功（清空之前的端口错误）
     if let Some(app_handle) = crate::global::APP_HANDLE.get() {
         let _ = app_handle.emit(
             "cluster-setting-saved",
@@ -139,9 +138,6 @@ pub async fn save_cluster_setting(setting: &ClusterSetting) -> Result<(), String
             // finishes the in-flight requests) instead of a fixed 500ms sleep:
             // shutdown can outlive the sleep, after which start_http_server
             // would short-circuit as "already running" and never rebind.
-            // 等待服务真正停止(优雅停机会完成在途请求),而非固定 500ms sleep:
-            // 停机超过 sleep 时 start_http_server 会因"已运行"短路而不再
-            // 重绑,导致新旧端口都没有监听。
             http_server::wait_server_stopped().await;
 
             // Start HTTP server with new port

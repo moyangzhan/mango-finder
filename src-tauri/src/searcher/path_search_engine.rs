@@ -41,9 +41,6 @@ fn read_db_version() -> Option<i64> {
 /// 通知其他进程:索引行有删除,持有缓存的宿主应重建(本进程本地版本同步跳过)
 /// Notify other processes that index rows were removed (resident hosts rebuild)
 pub fn notify_paths_removed() {
-    // 只递增 DB 版本,不存本地版本:让 timer 统一检测并触发重建。
-    // 若在这里存本地版本,会抑制本进程的重建(remove_file_index 等不剪
-    // 本地缓存的调用方就会留下幽灵路径)
     // Only bump the DB version; do NOT store the local version so the timer
     // always detects the mismatch and rebuilds (storing it here would
     // suppress the rebuild for callers that don't prune the local cache)
@@ -54,7 +51,6 @@ pub fn notify_paths_removed() {
 
 /// Keyword-based exact match search for file paths
 pub async fn search(query: &str) -> Vec<SearchResult> {
-    // 读方不得观察到未构建的缓存(如撞上 daemon 绑定后的预热构建)
     // Readers must never observe an unbuilt cache (e.g. racing the daemon's
     // post-bind warm build)
     init().await;
@@ -101,8 +97,6 @@ pub async fn search(query: &str) -> Vec<SearchResult> {
                         // Real DB id carried by the cache entry — the old
                         // line-number fabrication pointed follow-up commands
                         // (file/similar by id) at the wrong rows.
-                        // 缓存条目携带的真实 DB id —— 旧的行号伪造会让
-                        // 后续按 id 的命令(file/similar)命中错误的行。
                         id: *file_id,
                         path: path.to_string(),
                         name: file_name,
@@ -144,26 +138,24 @@ pub async fn init() {
     .await;
 }
 async fn build_index() {
-    // 并发保护:已在重建中则跳过(下一 tick 会再检测到版本差异重试)
+    // Concurrency guard: skip if a rebuild is in flight (next tick retries on version mismatch)
     if BUILDING.swap(true, AtomicOrdering::SeqCst) {
         return;
     }
-    // 记录构建前的版本号:若构建期间有进程递增了版本,下一 tick 会再次
-    // 不匹配并重建(自愈),不会把半新半旧的状态当成最新
     // Record the pre-build version: a bump during the build makes the next
     // tick mismatch and rebuild again (self-healing) instead of adopting a
     // half-built state as current.
     let version_before = read_db_version().unwrap_or(0);
     let mut build_complete = true;
     let size = 1000;
-    // 先查 count 再清缓存:count 失败(如 SQLITE_BUSY → 0)时不清,
-    // 避免把好缓存清成空后提前退出
+    // Count before clearing: on count failure (e.g. SQLITE_BUSY → 0) keep the
+    // cache rather than clearing it to empty and exiting early
     let total = match file_info_repo::count() {
         Ok(n) => n,
         Err(e) => {
             log::error!("build_index: count failed: {}", e);
             BUILDING.store(false, AtomicOrdering::SeqCst);
-            return; // 不清缓存、不推进版本,下一 tick 重试
+            return; // keep cache and version; retry next tick
         }
     };
     {
@@ -189,7 +181,7 @@ async fn build_index() {
         };
         if paths.is_empty() {
             log::debug!("no new paths");
-            break; // 正常:没有更多页
+            break; // normal: no more pages
         }
         let mut cache = PATHS_CACHE.write().await;
         for (id, path) in paths {
@@ -199,7 +191,7 @@ async fn build_index() {
             (*cache).push((id, path));
         }
     }
-    // 页读取中途出错时不清 version/build_time,让下一 tick 检测到版本差异重试
+    // Mid-read error: leave version/build_time so the next tick retries on mismatch
     if !build_complete {
         BUILDING.store(false, AtomicOrdering::SeqCst);
         return;
@@ -223,7 +215,6 @@ async fn paths_index_timer() {
     let mut interval = tokio::time::interval(Duration::from_secs(10));
     loop {
         interval.tick().await;
-        // 版本不一致说明其他进程删除过索引行,增量推送无法感知删除,全量重建
         // A version mismatch means another process removed index rows,
         // which the append-only push cannot see — rebuild in full.
         if let Some(db_version) = read_db_version() {
@@ -243,7 +234,6 @@ pub async fn push_to_index() {
     if total == 0 {
         return;
     }
-    // 无锁取回变更行,再在单次写锁内经 path→槽位 map 对账(每行 O(1))
     // Gather changed rows without the lock, then reconcile in one write-guard
     // pass via a path-to-slot map (O(1) per row)
     let page_size = 1000;
@@ -262,11 +252,9 @@ pub async fn push_to_index() {
 
     if !incoming.is_empty() {
         let mut paths_guard = PATHS_CACHE.write().await;
-        // 先经 path→槽位 map 定位(已缓存条目刷新 id,新条目按序领槽),再落地
         // Locate via a path-to-slot map (cached entries refresh the id, new
         // entries take sequential slots), then apply
         let ops: Vec<(usize, i64, String)> = {
-            // 既有条目借用 guard 的 &str;本批新条目用 owned map
             // Existing entries borrow &str from the guard; batch-new use owned keys
             let slot_of: HashMap<&str, usize> = paths_guard
                 .iter()
@@ -294,7 +282,6 @@ pub async fn push_to_index() {
         };
         for (slot, id, path) in ops {
             if slot < paths_guard.len() {
-                // 已缓存:刷新 id(同路径行可能以新 id 重建)
                 // Cached: refresh the id (row may have been re-created)
                 paths_guard[slot].0 = id;
             } else {
@@ -317,7 +304,6 @@ pub async fn remove_from_index(path: &str, is_file: bool) {
             (*paths).retain(|(_, item)| !item.starts_with(directory.as_str()));
         }
     }
-    // 本进程缓存已就地更新;递增版本通知其他常驻宿主
     // Local cache pruned; bump version for other resident hosts
     notify_paths_removed();
 }

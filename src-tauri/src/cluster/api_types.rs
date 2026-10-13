@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Json, Response};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
-// Error Codes / 错误码
+// Error Codes
 // ============================================================================
 
 /// Error codes for cluster API responses
@@ -22,7 +22,7 @@ pub const CODE_NOT_FOUND: i32 = 404;
 pub const CODE_INTERNAL_ERROR: i32 = 500;
 
 // ============================================================================
-// Common Response / 通用响应
+// Common Response
 // ============================================================================
 
 /// Common API response wrapper
@@ -60,7 +60,7 @@ impl<T: Serialize + Clone> IntoResponse for CommonResponse<T> {
 }
 
 // ============================================================================
-// Ping API / Ping 接口
+// Ping API
 // ============================================================================
 
 /// Response data for GET /ping
@@ -79,7 +79,7 @@ pub struct PingData {
 }
 
 // ============================================================================
-// Local API /cli (CLI 等本机客户端)
+// Local API /cli (local on-machine clients like the CLI)
 // ============================================================================
 
 /// POST /cli/search request
@@ -117,7 +117,7 @@ pub struct CliSimilarData {
 }
 
 // ============================================================================
-// Search API / 搜索接口
+// Search API
 // ============================================================================
 
 /// Response data for POST /search
@@ -133,7 +133,7 @@ pub struct SearchData {
 }
 
 // ============================================================================
-// Chunks API / 文本片段接口
+// Chunks API
 // ============================================================================
 
 /// Response data for POST /chunks
@@ -147,7 +147,7 @@ pub struct ChunksData {
 }
 
 // ============================================================================
-// Find Similars API / 查找相似文件接口
+// Find Similars API
 // ============================================================================
 
 /// Response data for POST /file/:file_id/cluster_similars
@@ -163,7 +163,7 @@ pub struct FindSimilarsData {
 }
 
 // ============================================================================
-// File Content API / 文件内容接口
+// File Content API
 // ============================================================================
 
 /// Response data for GET /file/:file_id/content
@@ -177,7 +177,7 @@ pub struct FileContentData {
 }
 
 // ============================================================================
-// Pairing API / 配对接口
+// Pairing API
 // ============================================================================
 
 /// Response data for POST /pairing/request
@@ -204,7 +204,7 @@ pub struct ResetNotifyData {
 }
 
 // ============================================================================
-// Request Types / 请求类型
+// Request Types
 // ============================================================================
 
 /// Request body for POST /chunks

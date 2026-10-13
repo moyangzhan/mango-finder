@@ -83,10 +83,10 @@ static WARMUP_DONE: AtomicBool = AtomicBool::new(false);
 /// process has the `vec0` virtual table module available. GUI 和 CLI 都必须在
 /// 任何数据库访问之前调用一次。
 pub fn init_sqlite_extensions() {
-    // SAFETY: sqlite3_vec_init 是 sqlite-vec 扩展的入口点。
-    // 虽然 sqlite3_auto_extension 期望的回调签名是 fn(*mut sqlite3) -> c_int，
-    // 但 SQLite 允许入口点函数忽略参数，这是 sqlite-vec 官方推荐的初始化方式。
-    // 参考: https://github.com/asg017/sqlite-vec
+    // SAFETY: sqlite3_vec_init is the sqlite-vec entry point. SQLite allows the
+    // entry point to ignore its parameter even though sqlite3_auto_extension
+    // expects fn(*mut sqlite3) -> c_int; this is the officially recommended init.
+    // See https://github.com/asg017/sqlite-vec
     unsafe {
         sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
     }

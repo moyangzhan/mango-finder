@@ -56,7 +56,7 @@ pub async fn verify_loopback(req: Request, next: Next) -> Response {
 
 fn is_loopback_host(host: &str) -> bool {
     let host = host.trim();
-    // IPv6 字面量带端口时形如 "[::1]:port"
+    // IPv6 literal with port: "[::1]:port"
     if let Some(rest) = host.strip_prefix("[::1]") {
         return rest.is_empty() || rest.starts_with(':');
     }
@@ -101,9 +101,6 @@ pub async fn cli_shutdown() -> CommonResponse<()> {
             // SHUTDOWN_SENDER once all in-flight responses are written). This
             // both flushes our own response and avoids killing other CLIs'
             // in-flight queries. Bounded at 10s for safety.
-            // 优雅停机而非固定 sleep:stop 发信号后,等待 serve 任务真正结束
-            // (全部在途响应写完后会清空 SHUTDOWN_SENDER)。既保证本响应写回,
-            // 也不会杀掉其他 CLI 的在途查询;上限 10s 兜底。
             stop_http_server().await;
             wait_server_stopped().await;
             log::info!("CLI daemon exiting on /cli/shutdown");

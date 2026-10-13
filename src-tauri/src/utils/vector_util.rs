@@ -48,23 +48,23 @@ pub fn finalize_metadata_embedding(raw_weights: Vec<f32>, target_dim: usize) -> 
 pub fn calculate_content_score(distance: f32, sparse_score: f32, is_short_query: bool) -> usize {
     let dense_sim = (1.0 - distance.min(1.0)).max(0.0).min(1.0);
 
-    // Filter out unrelated results | 过滤语义不相关的结果
+    // Filter out unrelated results
     if dense_sim < 0.1 {
         return (sparse_score * 50.0) as usize;
     }
 
     let hybrid_score = if is_short_query {
-        // Short query mode: strict keyword validation | 短查询模式：严格关键词校验
+        // Short query mode: strict keyword validation
         if sparse_score > 0.15 {
             0.5 + (dense_sim * 0.5)
         } else if dense_sim > 0.65 {
-            // High semantic similarity but weak keyword: compensation for synonyms | 语义相似度高但关键词弱：同义词补偿
+            // High semantic + weak keyword: synonym compensation
             0.3 + (dense_sim * 0.35)
         } else {
             dense_sim * 0.2
         }
     } else {
-        // Long query mode: weaker constraints | 长查询模式：弱约束
+        // Long query mode: weaker constraints
         if sparse_score > 0.15 {
             (dense_sim * 1.0 + 0.05).min(1.0)
         } else if sparse_score > 0.02 {
@@ -105,17 +105,17 @@ pub fn calculate_content_score(distance: f32, sparse_score: f32, is_short_query:
 pub fn calculate_metadata_score(distance: f32, sparse_score: f32) -> usize {
     let dense_sim = (1.0 - distance.min(1.0)).max(0.0).min(1.0);
 
-    // Filter out unrelated results | 过滤语义不相关的结果
+    // Filter out unrelated results
     if dense_sim < 0.1 {
         return (sparse_score * 50.0) as usize;
     }
 
     let hybrid_score = if sparse_score < 0.01 {
-        // No keyword match: heavy penalty | 无关键词匹配：重罚
+        // No keyword match: heavy penalty
         dense_sim * 0.1
     } else {
         let base_boost = 0.4;
-        // Use tanh to amplify low sparse scores | 使用 tanh 放大低稀疏分数
+        // tanh amplifies low sparse scores
         let sparse_contribution = (sparse_score * 20.0).tanh() * 0.4;
         dense_sim * 0.2 + base_boost + sparse_contribution
     };

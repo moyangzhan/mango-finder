@@ -44,7 +44,6 @@ pub fn render(kind: OutputKind, data: &Value) {
         OutputKind::Check => render_check(data),
         // Flat key-value payloads (index clear / status / version / locale / shutdown)
         // use the generic renderer.
-        // 扁平 key-value 数据（index clear / status / version / locale / shutdown）走通用渲染
         OutputKind::IndexClear
         | OutputKind::Status
         | OutputKind::Version
@@ -108,7 +107,6 @@ fn render_similar(data: &Value) {
     add_results_table(results);
 
     // Footnotes outside the table.
-    // 表格外的附注信息
     if let Some(notice) = data["notice"].as_str() {
         crate::outln!("\n{}: {}", t!("cli.table.notice"), notice);
     }
@@ -259,7 +257,6 @@ fn render_file(data: &Value) {
     );
 
     // Content preview: single-line truncated; full content goes via JSON output.
-    // 内容预览：单行截断，完整内容走 JSON 输出
     let content = data["content"].as_str().unwrap_or("");
     if !content.is_empty() {
         let truncated = content.chars().count() > 200;
@@ -342,7 +339,6 @@ fn render_value_block(v: &Value, indent: usize) {
     for (k, val) in obj {
         match val {
             // Arrays of objects render as sub-tables (e.g. check's network interfaces).
-            // 对象数组渲染为子表格（如 check 的网络接口列表）
             Value::Array(arr) if !arr.is_empty() && arr[0].is_object() => {
                 crate::outln!("{pad}{}:", label(k));
                 let headers: Vec<String> = arr[0]
@@ -477,7 +473,6 @@ fn index_status_label(status: &Value, msg: &Value) -> String {
     if let Some(m) = msg.as_str() {
         // "success" is the normal receipt of the status itself, not an error
         // message; skip repeating it.
-        // "success" 是状态本身的正常回执而非异常信息，不再重复展示
         if !m.is_empty() && m != "success" {
             label.push_str(&format!(" ({})", truncate_middle(m, 60)));
         }
@@ -515,7 +510,6 @@ fn format_datetime(s: Option<&str>) -> String {
 }
 
 fn format_duration(secs: i64) -> String {
-    // IndexingTask.duration 的单位是秒(与 GUI 的 durationInSeconds 同源)
     // IndexingTask.duration is in seconds (same source as the GUI's
     // durationInSeconds column).
     if secs >= 60 {

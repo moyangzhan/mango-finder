@@ -14,9 +14,6 @@ pub fn exec_ddl_with_conn(conn: &Connection) -> Result<()> {
     // fts/metadata children and disk artifacts (parsed md/images) of loser
     // ids are NOT covered — disk leftovers are bounded and cleared by
     // `index clear`.
-    // content_vec/content_data 由 trg_delete_file_content_data 级联清理;
-    // fts/metadata 子表在此处理,败者 id 的磁盘产物(解析 md/图片)不覆盖 ——
-    // 量极小,`index clear` 会清。
     conn.execute_batch(
         r#"
         begin immediate;
@@ -71,7 +68,6 @@ mod tests {
     #[test]
     fn dedup_keeps_valid_row_and_enforces_unique_path() {
         // v1 creates vec0 virtual tables; the extension must be registered
-        // v1 会建 vec0 虚拟表,需先注册扩展
         crate::init_sqlite_extensions();
         let conn = Connection::open_in_memory().unwrap();
         crate::db_migrations::db_v1::exec_ddl_with_conn(&conn).unwrap();
@@ -84,12 +80,10 @@ mod tests {
             .unwrap();
         };
         // a: invalid id=1 + valid id=2,3 → keep 2 (valid beats smaller invalid)
-        // a: invalid id=1 + valid id=2,3 → 保留 2(valid 优先于更小的 invalid)
         ins("a", 1);
         ins("a", 0);
         ins("a", 0);
         // b: invalid only → keep min id
-        // b: 仅 invalid → 保留 min id
         ins("b", 1);
         ins("b", 1);
         // c: single row, untouched
@@ -114,7 +108,6 @@ mod tests {
         assert_eq!(total, 3);
 
         // Duplicate path now rejected by the unique index
-        // 重复 path 被唯一索引拒绝
         let err = conn
             .execute("insert into file_info(path) values ('a')", [])
             .unwrap_err();

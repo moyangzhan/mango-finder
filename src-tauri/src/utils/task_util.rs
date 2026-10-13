@@ -122,7 +122,6 @@ fn pid_is_alive_impl(pid: u32) -> bool {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() {
             // Access denied still proves existence; other errors: gone
-            // 拒绝访问仍能证明进程存在,其余错误视为已退出
             return GetLastError() == ERROR_ACCESS_DENIED;
         }
         let mut exit_code: u32 = 0;
@@ -136,7 +135,6 @@ fn pid_is_alive_impl(pid: u32) -> bool {
 #[cfg(not(windows))]
 fn pid_is_alive_impl(pid: u32) -> bool {
     // Signal 0 probes existence; EPERM means alive but owned by another user
-    // 信号 0 仅探测存在性;EPERM 表示存活但属其他用户
     let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
     rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }

@@ -33,7 +33,6 @@ pub async fn reject_device(device_id: String) -> Result<(), String> {
         .ok_or("Device not found")?;
 
     // Update device status to Rejected with remark (local user rejected remote device)
-    // 更新设备状态为 Rejected 并附带说明（本机用户拒绝了对方）
     let remark = t!("pairing.remark.user-rejected-device").to_string();
     device_repo::update_pairing_status_with_remark(
         device.id,
@@ -53,7 +52,6 @@ pub async fn reject_device(device_id: String) -> Result<(), String> {
     }
 
     // Send rejection response to the remote device
-    // 发送拒绝响应给对方设备
     let device_id_clone = device_id.clone();
     let ip = device.ip_address.clone();
     let port = device.port;
@@ -81,7 +79,6 @@ pub async fn reject_device(device_id: String) -> Result<(), String> {
 #[command]
 pub async fn unreject_device(device_id: String) -> Result<Device, String> {
     // Alias for reset_pairing_status for backward compatibility
-    // 向后兼容的别名
     reset_pairing_status(device_id).await
 }
 
@@ -104,12 +101,10 @@ pub async fn reset_pairing_status(device_id: String) -> Result<Device, String> {
         .ok_or("Device not found")?;
 
     // Store previous status before reset
-    // 重置前保存之前的状态
     let previous_status = device.pairing_status;
     let previous_status_str = <PairingStatus as Into<&'static str>>::into(previous_status);
 
     // Try to ping the device to check if it's reachable (for info update and pairing decision)
-    // 尝试 ping 设备来检查是否可达（用于信息更新和配对决策）
     let is_reachable = crate::cluster::http_client::ping_and_update_device_info(&mut device)
         .await
         .is_ok();
@@ -121,7 +116,6 @@ pub async fn reset_pairing_status(device_id: String) -> Result<Device, String> {
     device.pairing_status = PairingStatus::None;
 
     // Send reset notify to remote device
-    // 发送重置通知给对方设备（前端已控制只有特定状态才显示重置按钮）
     {
         let remote_device_id = device.device_id.clone();
         let ip = device.ip_address.clone();
@@ -322,9 +316,9 @@ pub async fn respond_pairing_request(id: i64, accept: bool) -> Result<(), String
     }
 
     // Send response to the requester (both accept and reject)
-    // 发送响应给请求方（接受和拒绝都要发送）
+    // Send the response to the requester (both accept and reject)
     // Get latest ip and port from device table (not from pairing_request table)
-    // 从 device 表获取最新的 ip 和 port（而不是从 pairing_request 表）
+    // Latest ip/port from the device table (not pairing_request)
     let requester_id = request.device_id.clone();
     let requester_device = device_repo::get_by_device_id(&requester_id).ok().flatten();
 
@@ -439,7 +433,6 @@ pub fn toggle_test_mode(enabled: bool) -> Result<bool, String> {
 
     if enabled {
         // Add mock devices if not exist
-        // 如果不存在则添加模拟设备
         for (device_id, name, port, index_count) in MOCK_DEVICES {
             if device_repo::get_by_device_id(device_id)
                 .unwrap_or(None)
@@ -480,7 +473,6 @@ pub fn toggle_test_mode(enabled: bool) -> Result<bool, String> {
         }
     } else {
         // Remove mock devices when disabled
-        // 禁用时删除模拟设备
         for (device_id, _, _, _) in MOCK_DEVICES {
             match device_repo::delete_by_device_id(device_id) {
                 Ok(_) => {

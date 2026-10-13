@@ -27,8 +27,8 @@ use crate::output::{self, OutputKind};
 use mango_finder_lib::structs::search_result::SearchResult;
 
 #[derive(Parser)]
-// 使用自定义的 Help 子命令（支持 [command] 参数），需禁用 clap 内置的 help 子命令，
-// 否则 debug 构建会因子命令重名触发 clap 的 debug_asserts panic
+// Custom Help subcommand (supports [command] arg); clap's built-in help must stay
+// disabled or its debug_asserts panic on the duplicate subcommand name
 #[command(
     name = "mfd",
     about = "Mango Finder Command Line Interface",
@@ -60,7 +60,6 @@ pub enum Commands {
         #[arg(required_unless_present = "help_doc")]
         query: Option<String>,
         /// Search type: semantic (default), keyword
-        // 值白名单:拼错直接报错,而不是静默改走语义搜索
         // Value whitelist: a typo fails fast instead of silently running a
         // semantic search
         #[arg(long, default_value = "semantic", value_parser = ["semantic", "keyword"])]
@@ -188,7 +187,7 @@ pub async fn handle_search(query: &str, search_type: &str, device: Option<String
     let start = Instant::now();
 
     if let Some(_device_id) = device {
-        // TODO: 跨设备搜索
+        // TODO: cross-device search
         output::print_error("Remote device search not yet implemented");
         return;
     }
@@ -197,9 +196,6 @@ pub async fn handle_search(query: &str, search_type: &str, device: Option<String
     // or the on-demand daemon); on failure silently fall back to the
     // in-process search. Output structure is identical across both paths —
     // both resolve (results, total) here and share one success tail.
-    // 快速路径:复用本机常驻服务(GUI 或按需拉起的 daemon)的热模型;
-    // 失败静默回落进程内搜索。两条路径在此统一求出 (results, total),
-    // 共用同一组装/输出尾段,结构天然一致
     let (results, total) = if let Some(port) = local_api::ensure_server().await {
         match local_api::search(query, search_type, limit, port).await {
             Ok((results, total)) => {
@@ -254,7 +250,6 @@ async fn find_similars(file_id: i64, limit: usize) -> Result<Vec<SearchResult>, 
             }
             Err(e) => {
                 // Keep the fallback reason visible, mirroring handle_search
-                // 与 handle_search 一致,保留回落原因日志
                 log::warn!("local API similar failed, fallback to in-process: {}", e);
             }
         }
@@ -273,13 +268,10 @@ pub async fn handle_shutdown() {
     // the daemon may exit between detect and POST (idle timeout / a
     // concurrent yield), which surfaces as a transport error although the
     // service actually stopped.
-    // 忽略请求结果、由轮询决定最终状态:daemon 可能在 detect 与 POST 之间
-    // 已退出(空闲超时/并发让位),表现为传输错误但服务实际已停止。
     let _ = local_api::request_shutdown(port).await;
 
     // The daemon's graceful shutdown is bounded at 10s; allow 12s before
     // declaring a GUI host
-    // daemon 优雅停机上限 10s,留 12s 再判定为 GUI 宿主
     let (status, message) =
         match local_process_client::wait_until_released(port, std::time::Duration::from_secs(12))
             .await
@@ -298,7 +290,7 @@ pub async fn handle_shutdown() {
 
 pub async fn handle_similar(file: &str, device: Option<String>, limit: usize, index: bool) {
     if let Some(_device_id) = device {
-        // TODO: 跨设备相似搜索
+        // TODO: cross-device similar search
         output::print_error("Remote device similarity search not yet implemented");
         return;
     }
@@ -332,7 +324,7 @@ pub async fn handle_similar(file: &str, device: Option<String>, limit: usize, in
                         "elapsed_ms": elapsed.as_millis()
                     });
                     if same_name_matches.len() > 1 {
-                        // 同名文件取 id 最小的一个，其余命中项列出供用户改用 ID 或路径重试
+                        // Same-name files: keep min id; list other hits so the user can retry by ID or path
                         data["notice"] = serde_json::json!(format!(
                             "{} files share the name '{}'; using id={} ({}). Pass a file ID or absolute path to pick another one.",
                             same_name_matches.len(),
@@ -340,8 +332,6 @@ pub async fn handle_similar(file: &str, device: Option<String>, limit: usize, in
                             file.id,
                             file.path
                         ));
-                        // 列表用于"换一个文件重试",排除已选中的那条,
-                        // 免得它占掉 5 个名额之一
                         // The list exists to retry with ANOTHER file; exclude
                         // the chosen entry so it does not waste one of the 5
                         // slots.
@@ -364,11 +354,11 @@ pub async fn handle_similar(file: &str, device: Option<String>, limit: usize, in
         SimilarTarget::External { path, name } => {
             warn_external_slowness(&path);
 
-            // --index：先单文件入库（解析与嵌入只做一次），再走已索引快路径查询；
-            // 入库失败时回退纯现场计算并提示
+            // --index: index the single file first (parse+embed once), then take the indexed
+            // fast path; on failure fall back to on-the-fly with a notice
             if index {
-                // 入库前规范化为绝对路径（Windows 下统一 \），与目录扫描产生的行格式一致，
-                // 避免监听增删、路径比较按字符串匹配时失效
+                // Canonicalize to absolute (Windows backslash) before insert so rows match the
+                // directory-scan format; watcher diffs and path compares are string-based
                 let stored_path = normalize_store_path(&path);
                 let indexed_file = match indexer_service::index_file(&stored_path).await {
                     Ok(()) => file_info_repo::get_by_path(&stored_path).ok().flatten(),
@@ -378,8 +368,6 @@ pub async fn handle_similar(file: &str, device: Option<String>, limit: usize, in
                     }
                 };
                 if let Some(file) = indexed_file {
-                    // 视频/其他类别只入库元数据、永不嵌入,相似查询恒为空;
-                    // 给出与无 --index 时一致的明确报错,而不是"已入库"的空结果
                     // Video/Other categories only get a metadata row and are
                     // never embedded (similarity is always empty); fail with
                     // the same clear error as without --index instead of an
@@ -499,8 +487,6 @@ fn canonical_case_path(path: &str) -> Option<String> {
     }
     let canon = std::fs::canonicalize(p).ok()?;
     let s = canon.to_string_lossy();
-    // Windows canonicalize 的 verbatim 前缀与索引行格式不一致,需转换:
-    // \\?\UNC\server\share → \\server\share,其余 \\?\ 前缀直接剥掉
     // Windows canonicalize's verbatim prefixes do not match indexed rows:
     // \\?\UNC\server\share → \\server\share; the plain \\?\ is stripped.
     let s = if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
@@ -569,7 +555,6 @@ async fn in_watched_directory(path: &str) -> bool {
         return false;
     };
     let setting = FS_WATCHER_SETTING.read().await;
-    // 首个分支必须是相等而非前缀:E:\docs2 会以 E:\docs 开头但不是其子目录
     // The first arm must be equality, not prefix: E:\docs2 starts with
     // E:\docs but is not inside it.
     setting.directories.iter().any(|dir| {
@@ -591,7 +576,7 @@ enum SimilarTarget {
 
 /// 解析 similar 命令的文件参数：纯数字按文件 ID；含路径分隔符按绝对路径精确匹配（未命中但文件存在时转现场计算）；其余按文件名精确匹配
 fn resolve_file_arg(arg: &str) -> Result<SimilarTarget, String> {
-    // 纯数字优先按 ID 解析（文件名恰为纯数字的情况需改用路径指定）
+    // Pure digits parse as ID first (use the path form when the filename itself is all digits)
     if let Ok(id) = arg.parse::<i64>() {
         return match file_info_repo::get_by_id(id) {
             Ok(Some(file)) => Ok(SimilarTarget::Indexed {
@@ -607,9 +592,6 @@ fn resolve_file_arg(arg: &str) -> Result<SimilarTarget, String> {
     }
 
     if arg.contains('\\') || arg.contains('/') {
-        // Windows 路径大小写不敏感而索引按字符串精确匹配:
-        // 先解析为磁盘真实大小写,再尝试原样输入与翻转分隔符
-        // (Windows 下索引中的路径为 \,而输入常为 /)
         // Windows paths are case-insensitive while the index matches exactly:
         // resolve to the on-disk case first, then try the input as-is and
         // the separator-flipped form (indexed paths use \, input often /).
@@ -640,7 +622,7 @@ fn resolve_file_arg(arg: &str) -> Result<SimilarTarget, String> {
                 Err(e) => return Err(format!("Failed to get file by path: {}", e)),
             }
         }
-        // 未索引但磁盘上存在的文件转现场计算（不写索引，速度取决于文件类型）
+        // On-disk but unindexed files go on-the-fly (no index writes; speed depends on file type)
         let path = Path::new(arg);
         if path.is_dir() {
             return Err(format!("Path is a directory, not a file: {}", arg));
@@ -737,15 +719,13 @@ pub async fn handle_index(action: IndexAction) {
     match action {
         IndexAction::Status => {
             let total = file_info_repo::count().unwrap_or(0);
-            // 与 GUI 同口径:按 content_index_status 统计已索引文件数,
-            // 而非 embedding 分块行数(一个 30 块的 PDF 曾显示 indexed>total)
             // Same metric as the GUI: distinct files with content_index_status
             // = Indexed, not the embedding-chunk row count (a 30-chunk PDF
             // used to show indexed > total).
             let indexed = count_indexed_files();
 
-            // 索引任务状态持久化在数据库中，跨进程可见；
-            // 进程内的原子状态（INDEXING 等）对一次性的 CLI 进程没有意义
+            // Indexing task state lives in the DB (visible cross-process); in-process atomic
+            // states (INDEXING etc.) are meaningless for a one-shot CLI
             let recent_tasks = indexing_task_repo::list(1, 5, "id", "desc").unwrap_or_default();
             let latest_task = recent_tasks.first();
 
@@ -763,11 +743,6 @@ pub async fn handle_index(action: IndexAction) {
                 return;
             }
 
-            // CLI 是一次性进程：后台 spawn 的任务会随进程退出被终止，
-            // 因此这里同步执行索引并输出最终结果。进度日志输出到 stderr，
-            // 需要中途停止时按 Ctrl+C 终止进程。
-            // 入参路径统一规范化为绝对路径(与磁盘真实大小写一致),
-            // 否则相对路径会以相对形式入库,后续按路径的查询/打开全部失效
             // Normalize every input path to its absolute on-disk form —
             // relative arguments would otherwise be stored relative and break
             // every later path-based lookup/open.
@@ -796,8 +771,6 @@ pub async fn handle_index(action: IndexAction) {
             }
         }
         IndexAction::List { page, page_size } => {
-            // 分页钳制:负 page_size 会成为 SQLite 的无上限 LIMIT(整表倾倒),
-            // 非正 page 的负 OFFSET 被 SQLite 当 0(静默重复第 1 页)
             // Clamp pagination: a negative page_size becomes SQLite's
             // unbounded LIMIT (full-table dump); a non-positive page yields a
             // negative OFFSET that SQLite treats as 0 (repeats page 1).
@@ -833,15 +806,13 @@ pub async fn handle_index(action: IndexAction) {
 
 pub async fn handle_file(id: i64, open: bool, device: Option<String>) {
     if let Some(_device_id) = device {
-        // TODO: 从远程设备获取文件
+        // TODO: fetch from remote devices
         output::print_error("Remote device file fetch not yet implemented");
         return;
     }
 
     match file_info_repo::get_by_id(id) {
         Ok(Some(mut file)) => {
-            // 与 GUI/cluster 读取路径一致:file 存储模式下 content 为空、
-            // 正文在 content_ref_path 指向的 .md 里,需读回填充
             // Same as the GUI/cluster read paths: under file storage mode the
             // content column is empty and the parsed text lives in the .md
             // referenced by content_ref_path — read it back.
@@ -927,7 +898,6 @@ pub fn handle_locale(value: Option<String>) {
         Some(locale) => {
             // The core's empty→Ok(0) soft no-op exists for the GUI frontend;
             // an explicit empty argument from the CLI is invalid input.
-            // core 的空串→Ok(0) 软契约是给 GUI 前端的;CLI 显式传空串按非法输入
             let result = if locale.is_empty() {
                 Err(String::new())
             } else {
@@ -941,7 +911,6 @@ pub fn handle_locale(value: Option<String>) {
                     });
                     output::print_success(OutputKind::LocaleSet, &data);
                 }
-                // core 的 Err 仅出现在非法输入(持久化是尽力而为)
                 // Err from the core = invalid input only (persist is best-effort)
                 Err(_) => {
                     output::print_error(&format!(
@@ -954,7 +923,7 @@ pub fn handle_locale(value: Option<String>) {
             }
         }
         None => {
-            // 显示当前 locale
+            // Show current locale
             let locale = current_locale();
 
             let data = serde_json::json!({
@@ -966,25 +935,21 @@ pub fn handle_locale(value: Option<String>) {
 }
 
 pub async fn handle_check() {
-    // 获取本地 IP
+    // Get local IP
     let local_ip = get_local_ip_address();
 
-    // 获取客户端 ID
+    // Get client ID
     let client_id = CLIENT_ID
         .read()
         .map(|id| id.clone())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    // 获取索引文件数量:与 status/index status 同口径(content_index_status),
-    // 否则"已扫描未嵌入"状态下 check 的 no-indexed-files 建议不会触发
     // Same indexed-files metric as status/index status (content_index_status);
     // otherwise check's no-indexed-files recommendation never fires for
     // scanned-but-never-embedded libraries.
     let indexed_files = count_indexed_files();
     let total_embeddings = file_content_embedding_repo::count().unwrap_or(0);
 
-    // 集群设置:走与真实服务一致的类型化来源(端口来源/默认值均一致),
-    // 超出合法范围的端口回退默认值,避免 as u16 截断后探测错误端口
     // Cluster setting: use the same typed source as the real service
     // (same port origin/default); out-of-range values fall back instead of an
     // `as u16` truncation probing the wrong port.
@@ -996,10 +961,8 @@ pub async fn handle_check() {
     };
     let cluster_enabled = setting.enabled;
     // local_port() already applies the valid-range clamp (single source)
-    // local_port() 已含合法区间钳制(单一来源)
     let port: u16 = local_api::local_port().await as u16;
 
-    // 端口检查:若本机服务(GUI/daemon)正持有该端口,它是健康状态而非占用问题
     // Port check: a port held by our own local service (GUI/daemon) is a
     // healthy state, not an occupancy problem.
     let own_service = local_api::detect().await.is_some();
@@ -1009,28 +972,28 @@ pub async fn handle_check() {
         mango_finder_lib::cluster::http_server::is_port_available(port as i32).await
     };
 
-    // 获取网络接口信息
+    // Get network interfaces
     let network_interfaces = get_network_interfaces();
 
-    // 获取存储路径
+    // Get storage path
     let storage_path = STORAGE_PATH
         .get()
         .map(|s| s.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    // 获取数据库路径
+    // Get database path
     let db_path = DB_PATH
         .get()
         .map(|s| s.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    // 检查模型配置
+    // Check model config
     let model_status = check_model_status();
 
-    // 获取已配对设备数量
+    // Get paired device count
     let paired_devices = get_paired_device_count();
 
-    // 构建检查结果
+    // Build check result
     let check = serde_json::json!({
         "system": {
             "version": env!("CARGO_PKG_VERSION"),
@@ -1061,15 +1024,13 @@ pub async fn handle_check() {
 }
 
 fn get_local_ip_address() -> Option<String> {
-    // 与集群广播同源(cluster::http_client::get_local_ip,mDNS 广播用的
-    // 就是它),保证 check 报告的 IP 与 GUI 对外通告的一致
     // Same source as the cluster broadcast (cluster::http_client::get_local_ip
     // — what mDNS advertises), so check reports the IP the GUI announces.
     if let Ok(ip) = mango_finder_lib::cluster::http_client::get_local_ip() {
         return Some(ip);
     }
 
-    // 方法1：通过 UDP 连接获取最可能的本地 IP
+    // Method 1: most likely local IP via UDP connect
     if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
         if socket.connect("8.8.8.8:80").is_ok() {
             if let Ok(addr) = socket.local_addr() {
@@ -1078,7 +1039,7 @@ fn get_local_ip_address() -> Option<String> {
         }
     }
 
-    // 方法2：从网络接口列表获取第一个 IPv4 地址
+    // Method 2: first IPv4 from the interface list
     if let Ok(interfaces) = list_afinet_netifas() {
         for (_, ip) in interfaces {
             if ip.is_ipv4() && !ip.is_loopback() {
@@ -1185,8 +1146,6 @@ fn get_recommendations(
 pub fn lightweight_locale() -> String {
     // config_repo::get_val walks the shared open_db() (busy_timeout applies);
     // empty string (row/db unavailable) falls back to en-US
-    // config_repo::get_val 走共享 open_db()(含 busy_timeout);
-    // 空串(DB/行不可用)回落 en-US
     let val = mango_finder_lib::repositories::config_repo::get_val("active_locale");
     if val.is_empty() {
         "en-US".to_string()
@@ -1199,8 +1158,6 @@ pub fn handle_help(command: Option<&str>) {
     let is_zh = current_locale() == "zh-CN";
     // docs/cli_cn.md / cli.md are the single source of truth for help:
     // full help = the whole document, per-command help = its section.
-    // docs/cli_cn.md / cli.md 是帮助的唯一事实来源:
-    // 全量帮助 = 整份文档,单命令帮助 = 从中截取对应 section
     let doc = if is_zh {
         include_str!("../../../docs/cli_cn.md")
     } else {
@@ -1213,7 +1170,6 @@ pub fn handle_help(command: Option<&str>) {
             None => {
                 // The available-command list is also derived from the doc's
                 // section headings, so no extra list is maintained.
-                // 可用命令列表同样取自文档的 section 标题,避免再维护一份
                 let available: Vec<&str> = doc
                     .lines()
                     .filter_map(|l| l.strip_prefix("### "))
@@ -1272,10 +1228,6 @@ fn extract_command_section(doc: &str, command: &str) -> Option<String> {
 fn open_with_system(path: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        // 不经 cmd.exe:cmd 会对双引号内的 %VAR% 做第一阶段展开,文件名含
-        // 已定义环境变量名(如 %PATH%)时会被改写后静默打开失败;
-        // explorer 直接接收 Win32 argv,与 GUI 的 open_directory 同路,
-        // % 与 & 等元字符天然安全
         // No cmd.exe in the chain: cmd phase-1 expands %VAR% even inside
         // double quotes, so a filename containing a defined env-var name
         // (e.g. %PATH%) gets rewritten and the open fails silently; explorer

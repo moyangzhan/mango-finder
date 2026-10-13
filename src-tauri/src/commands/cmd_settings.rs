@@ -23,12 +23,11 @@ pub async fn load_active_locale() -> Result<String, String> {
 
 #[command]
 pub async fn set_active_locale(app: AppHandle, locale: &str) -> Result<usize, String> {
-    // 空串软无操作:不重建托盘(GUI 原有行为) / empty is a soft no-op:
     // no tray rebuild (preserves the original GUI behavior)
     if locale.is_empty() {
         return Ok(0);
     }
-    // GUI 软契约:非法输入只警告返回 0,不报错 / soft contract: warn + 0
+    // GUI soft contract: invalid input warns and returns 0, never errors
     let rows = match locale_util::set_locale_core(locale) {
         Ok(rows) => rows,
         Err(e) => {

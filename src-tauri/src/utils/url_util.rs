@@ -20,7 +20,6 @@
 /// assert_eq!(encoded, "hello%20world.txt");
 /// ```
 pub fn url_encode(s: &str) -> String {
-    // 按 UTF-8 字节而非码点编码:非 ASCII 字符须展开为多字节 %XX 序列
     // Encode UTF-8 bytes, not code points: non-ASCII expands to multi-byte %XX
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
@@ -56,7 +55,6 @@ fn is_kept_raw(b: u8) -> bool {
 /// The decoded string, or None if the encoding is invalid (bad escape or
 /// decoded bytes not forming valid UTF-8)
 pub fn url_decode(s: &str) -> Option<String> {
-    // 按字节收集,最后统一 UTF-8 校验:多字节序列逐字符拼会变乱码
     // Collect bytes and validate UTF-8 once at the end: assembling multi-byte
     // sequences char-by-char would produce mojibake
     let mut bytes: Vec<u8> = Vec::with_capacity(s.len());
@@ -112,7 +110,7 @@ mod tests {
     #[test]
     fn test_url_encode_unicode() {
         assert_eq!(url_encode("中文"), "%E4%B8%AD%E6%96%87");
-        // 4 字节 emoji 覆盖最长 UTF-8 序列 / 4-byte emoji covers the longest sequence
+        // 4-byte emoji covers the longest UTF-8 sequence
         assert_eq!(url_encode("😀"), "%F0%9F%98%80");
     }
 
@@ -128,7 +126,6 @@ mod tests {
 
     #[test]
     fn test_url_decode_plus() {
-        // RFC 3986 路径段中 + 是字面加号,不是空格 / in a path segment '+'
         // is a literal plus, not a space
         assert_eq!(url_decode("hello+world"), Some("hello+world".to_string()));
         assert_eq!(url_decode("a%2Bb"), Some("a+b".to_string()));
@@ -136,14 +133,14 @@ mod tests {
 
     #[test]
     fn test_url_decode_invalid_escape() {
-        assert_eq!(url_decode("%G1"), None); // 非 hex 数字 / not a hex digit
-        assert_eq!(url_decode("abc%2"), None); // 尾部截断 / truncated escape
+        assert_eq!(url_decode("%G1"), None); // not a hex digit
+        assert_eq!(url_decode("abc%2"), None); // truncated escape
     }
 
     #[test]
     fn test_url_decode_unicode() {
         assert_eq!(url_decode("%E4%B8%AD%E6%96%87"), Some("中文".to_string()));
-        // 孤立延续字节不是合法 UTF-8 / lone continuation byte is invalid UTF-8
+        // Lone continuation byte is invalid UTF-8
         assert_eq!(url_decode("%80"), None);
     }
 

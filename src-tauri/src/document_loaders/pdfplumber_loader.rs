@@ -80,7 +80,6 @@ impl PdfPlumberLoader {
 
         // Dir folder name doubles as the markdown rel-path segment (bucket for
         // indexed parses, per-query temp dir for external ones)
-        // 目录名兼作 markdown 相对路径段(索引解析为桶名,外部解析为查询级临时目录)
         let bucket = images_dir
             .file_name()
             .and_then(|n| n.to_str())

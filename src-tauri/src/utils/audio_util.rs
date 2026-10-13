@@ -150,7 +150,6 @@ pub fn extract_audio_features(samples: &[f32]) -> AudioFeatures {
     }
 
     // Calculate zero crossing rate
-    // 计算过零率
     let mut zero_crossings = 0usize;
     for i in 1..samples.len() {
         if (samples[i - 1] >= 0.0 && samples[i] < 0.0)
@@ -162,12 +161,10 @@ pub fn extract_audio_features(samples: &[f32]) -> AudioFeatures {
     let zero_crossing_rate = zero_crossings as f32 / samples.len() as f32;
 
     // Calculate energy statistics
-    // 计算能量统计
     let energies: Vec<f32> = samples.iter().map(|&s| s * s).collect();
     let avg_energy = energies.iter().sum::<f32>() / energies.len() as f32;
 
     // Calculate energy variance
-    // 计算能量方差
     let energy_variance = if energies.len() > 1 {
         let mean = avg_energy;
         let variance: f32 =
@@ -178,11 +175,9 @@ pub fn extract_audio_features(samples: &[f32]) -> AudioFeatures {
     };
 
     // Calculate RMS energy
-    // 计算 RMS 能量
     let rms_energy = (energies.iter().sum::<f32>() / energies.len() as f32).sqrt();
 
     // Simple spectral centroid approximation using zero crossings
-    // 使用过零率近似频谱质心（简化版本）
     let spectral_centroid = zero_crossing_rate * 16000.0 / 2.0; // Approximate based on sample rate
 
     AudioFeatures {
@@ -207,14 +202,12 @@ pub fn extract_audio_features(samples: &[f32]) -> AudioFeatures {
 pub fn detect_audio_type_by_features(samples: &[f32]) -> AudioType {
     if samples.len() < 16000 {
         // Less than 1 second of audio
-        // 少于1秒的音频
         return AudioType::Unknown;
     }
 
     let features = extract_audio_features(samples);
 
     // Analyze in segments to detect patterns
-    // 分段分析以检测模式
     let segment_size = 16000; // 1 second segments
     let mut segment_zcrs: Vec<f32> = Vec::new();
     let mut segment_energies: Vec<f32> = Vec::new();
@@ -235,7 +228,6 @@ pub fn detect_audio_type_by_features(samples: &[f32]) -> AudioType {
     }
 
     // Calculate variance of segment energies
-    // 计算分段能量的方差
     let mean_energy: f32 = segment_energies.iter().sum::<f32>() / segment_energies.len() as f32;
     let energy_var: f32 = segment_energies
         .iter()
@@ -244,7 +236,6 @@ pub fn detect_audio_type_by_features(samples: &[f32]) -> AudioType {
         / segment_energies.len() as f32;
 
     // Classification based on features
-    // 基于特征分类
     //
     // Music characteristics:
     // - More consistent energy (lower energy variance across segments)
@@ -263,19 +254,16 @@ pub fn detect_audio_type_by_features(samples: &[f32]) -> AudioType {
     };
 
     // Music: energy coefficient of variation < 0.5, ZCR < 0.15
-    // 音乐：能量变异系数 < 0.5，过零率 < 0.15
     if energy_cv < 0.5 && features.zero_crossing_rate < 0.15 {
         return AudioType::Music;
     }
 
     // Speech: energy CV > 0.7 or ZCR > 0.2
-    // 语音：能量变异系数 > 0.7 或过零率 > 0.2
     if energy_cv > 0.7 || features.zero_crossing_rate > 0.2 {
         return AudioType::Speech;
     }
 
     // Mixed: between music and speech characteristics
-    // 混合：介于音乐和语音特征之间
     if energy_cv > 0.3 && energy_cv < 0.7 && features.zero_crossing_rate > 0.1 {
         return AudioType::Mixed;
     }
@@ -568,11 +556,9 @@ pub fn extract_music_fingerprint_from_file(path: &str) -> Option<MusicFingerprin
 /// 使用音频特征（主要）和转录内容（辅助）检测音频类型
 pub fn detect_audio_type(transcription: &str, file_path: &str) -> AudioType {
     // First, try to detect based on audio features
-    // 首先尝试基于音频特征检测
     let feature_based_type = detect_audio_type_from_file(file_path);
 
     // If feature detection gives a clear result, use it
-    // 如果特征检测给出明确结果，使用它
     if feature_based_type != AudioType::Unknown {
         return feature_based_type;
     }

@@ -620,7 +620,7 @@ pub fn get_default_file_content_language() -> FileContentLanguage {
     match locale.as_str() {
         l if l.starts_with("zh") => FileContentLanguage::Chinese,
         l if l.starts_with("en") => FileContentLanguage::English,
-        _ => FileContentLanguage::English, // 默认回退
+        _ => FileContentLanguage::English, // default fallback
     }
 }
 
@@ -630,15 +630,12 @@ pub fn get_default_file_content_language() -> FileContentLanguage {
 /// model-dir resolution differ. Core failures just log (GUI contract) — the
 /// trailing global check is the safety net.
 pub fn init_paths_standalone() -> Result<(), String> {
-    // 1. 数据目录:dirs::data_dir() 与 Tauri path().data_dir() 三平台同源
     // Data dir: dirs::data_dir() matches Tauri's data_dir on all platforms
     let data_base = dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(env!("CARGO_PKG_NAME"));
     init_paths_core(data_base);
 
-    // 2. 模型目录:优先可执行文件目录,回退当前目录
-    // (覆盖从源码目录直接运行 mfd 的开发流),承担 GUI resource_dir 的角色
     // Model dir: prefer the executable directory, fall back to the current
     // directory (dev flow running mfd from the source tree); plays the role
     // of the GUI's resource_dir.
@@ -656,7 +653,6 @@ pub fn init_paths_standalone() -> Result<(), String> {
     };
     init_model_assets(&resource_base);
 
-    // 3. fail-fast:核心未就绪即报错(细节见日志)
     // Fail fast when the cores left globals unset (details are in the logs)
     if STORAGE_PATH.get().is_none() || DB_PATH.get().is_none() {
         return Err("data path globals were not initialized (see logs)".to_string());

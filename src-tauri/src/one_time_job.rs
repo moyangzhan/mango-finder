@@ -9,12 +9,9 @@ use crate::utils::task_util;
 pub fn run_startup() {
     // Orphan task-lock cleanup: PID liveness separates dead owners from
     // live GUI/daemon tasks, so standalone runs it too
-    // 孤儿任务锁清理:PID 存活检测可区分死进程与 GUI/daemon 活任务,
-    // standalone(CLI/daemon)同样执行
     task_util::cleanup_orphan_task();
 
     // Sweep crashed-process temp image dirs async; age-gated, so it cannot
     // race a live query
-    // 异步清扫崩溃遗留的临时图片目录;按时间阈值,不会误删进行中查询的目录
     let _ = tokio::task::spawn_blocking(crate::document_loaders::cleanup_stale_temp_images_dirs);
 }

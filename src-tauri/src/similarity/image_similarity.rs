@@ -98,7 +98,6 @@ pub fn score_image_candidates(
 
         // Take maximum of visual and semantic scores via the shared helper,
         // so the rule lives in exactly one place.
-        // 复用共享 helper 取视觉/语义最大值,规则只维护一份
         let (final_score, similarity_type) = merge_hybrid_scores(visual_score, semantic_score);
 
         // Only include if similarity >= 30%

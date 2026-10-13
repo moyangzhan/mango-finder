@@ -20,7 +20,7 @@ impl SparseVector {
     /// 将模型输出的 HashMap 转换为有序存储结构 | Convert model output HashMap to ordered storage structure
     pub fn from_map(map: HashMap<u32, f32>) -> Self {
         let mut pairs: Vec<(u32, f32)> = map.into_iter().collect();
-        // 关键：必须按索引升序排列，才能支持搜索时的双指针 O(n) 计算 | Critical: must sort by index ascending to support O(n) two-pointer search
+        // Must sort by index ascending for the O(n) two-pointer search
         pairs.sort_by_key(|&(id, _)| id);
 
         let (indices, values) = pairs.into_iter().unzip();
@@ -46,8 +46,8 @@ impl SparseVector {
     /// 计算两个有序稀疏向量的内积 (极速版) | Compute dot product of two sorted sparse vectors (fast version)
     pub fn dot_product(&self, query_indices: &[u32], query_values: &[f32]) -> f32 {
         let mut score = 0.0;
-        let mut i = 0; // Doc 指针 | Doc pointer
-        let mut j = 0; // Query 指针 | Query pointer
+        let mut i = 0; // Doc pointer
+        let mut j = 0; // Query pointer
 
         let doc_indices = &self.indices;
         let doc_values = &self.values;
@@ -63,7 +63,7 @@ impl SparseVector {
                 j += 1;
             }
         }
-        // 归一化到 0-1 范围 | Normalize to 0-1 range
+        // Normalize to 0-1
         let query_norm = query_values.iter().map(|x| x * x).sum::<f32>().sqrt() + 1e-8;
         let doc_norm = self.values.iter().map(|x| x * x).sum::<f32>().sqrt() + 1e-8;
         (score / (query_norm * doc_norm)).min(1.0).max(0.0)

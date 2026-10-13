@@ -117,7 +117,6 @@ pub trait IndexingTemplate {
                     indexing_task_util::failed_incr(self.category(), 1).await;
                 }
             }
-            // 本批次有删除时通知一次(而非每文件递增)
             // Notify once per batch if any rows were removed
             if removed_any {
                 crate::searcher::path_search_engine::notify_paths_removed();
@@ -141,7 +140,6 @@ pub trait IndexingTemplate {
         let mut file_meta = file_util::get_meta_by_record(path, &file_info).await?;
 
         // Detect audio type for audio files based on transcription content
-        // 根据转录内容检测音频类型
         if self.category() == &FileCategory::Audio {
             use crate::structs::file_metadata::AudioType;
             use crate::utils::audio_util::{
@@ -152,7 +150,6 @@ pub trait IndexingTemplate {
             let _ = file_info_repo::update_audio_type(file_id, audio_type.into());
 
             // Extract and store audio fingerprint for music files (for music similarity search)
-            // 为音乐文件提取并存储音频指纹（用于音乐相似性搜索）
             if matches!(audio_type, AudioType::Music | AudioType::Mixed) {
                 if let Some(fingerprint) = extract_music_fingerprint_from_file(&file_info.path) {
                     let _ =

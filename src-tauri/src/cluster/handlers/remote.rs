@@ -280,7 +280,6 @@ pub async fn handle_find_similars(
     };
 
     // Check if this request has already been processed (prevent loops)
-    // 检查此请求是否已被处理过（防止循环）
     if check_and_mark_request(&req.request_id) {
         log::warn!(
             "Request {} already processed, returning empty results to prevent loop",

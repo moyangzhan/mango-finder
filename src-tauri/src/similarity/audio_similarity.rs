@@ -41,7 +41,6 @@ impl AudioSimilarityDetector {
         limit: usize,
     ) -> Result<Vec<SearchResult>, AppError> {
         // Read fingerprint from database (already extracted during indexing)
-        // 从数据库读取指纹（索引时已提取并存储）
         let source_fingerprint = match file_info.audio_fingerprint.as_ref() {
             Some(bytes) => match MusicFingerprint::from_bytes(bytes) {
                 Some(fp) => fp,
@@ -103,8 +102,6 @@ pub async fn find_similars_by_fingerprint_value(
     // Candidates must include BOTH Music and Mixed: the detector routes both
     // here and both store fingerprints at index time — querying Music only
     // meant mixed (vocal) tracks could never match each other.
-    // 候选必须同时含 Music 与 Mixed:检测器把两者都路由到这里,且两者入库时
-    // 都存指纹 —— 只查 Music 会导致人声混合曲目永远互不匹配。
     let mut music_file_ids =
         file_info_repo::list_ids_by_category_and_audio_type(3, AudioType::Music as i32)?;
     music_file_ids.extend(file_info_repo::list_ids_by_category_and_audio_type(
@@ -121,7 +118,6 @@ pub async fn find_similars_by_fingerprint_value(
         }
 
         // Read fingerprint from database and calculate similarity score
-        // 从数据库读取指纹并计算相似度
         if let Some(candidate_bytes) = candidate.audio_fingerprint.as_ref() {
             if let Some(candidate_fp) = MusicFingerprint::from_bytes(candidate_bytes) {
                 let similarity = compare_music_fingerprints(source_fingerprint, &candidate_fp);

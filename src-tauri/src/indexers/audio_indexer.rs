@@ -25,7 +25,6 @@ impl IndexingTemplate for AudioIndexer {
 
     async fn load_content(&self, file_info: &FileInfo) -> String {
         // Batch semantics: a failed file logs and yields empty, not an abort
-        // 批量语义:单文件失败记日志返回空串,不中断整轮
         self.parser
             .transcribe(&file_info.path, None)
             .await

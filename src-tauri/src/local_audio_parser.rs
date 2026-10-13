@@ -65,7 +65,6 @@ impl LocalAudioParser {
         params.set_print_progress(false);
         params.set_print_timestamps(false);
 
-        // Whisper 推理是重 CPU 计算,放 block_in_place 避免 tokio worker 被独占
         // Whisper inference is heavy CPU; block_in_place avoids starving the worker
         let (state, num_segments) = tokio::task::block_in_place(|| {
             state.full(params, audio_samples).map_err(|e| {

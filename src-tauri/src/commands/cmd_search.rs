@@ -32,7 +32,6 @@ pub async fn local_device_search(
     query: &str,
     search_type: &str,
 ) -> Result<LocalDeviceSearchResult, String> {
-    // 与 CLI/daemon 同源分发(searcher::search_by_type),三处行为保持一致
     // Same dispatch source as CLI/daemon (searcher::search_by_type)
     let results = searcher::search_by_type(query, Some(search_type)).await;
     let total = results.len();

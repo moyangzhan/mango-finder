@@ -214,7 +214,7 @@ fn register_hamming_udf(conn: &Connection) -> Result<(), rusqlite::Error> {
         |ctx| {
             let a: Vec<u8> = ctx.get(0)?;
             let b: Vec<u8> = ctx.get(1)?;
-            // 长度不等时不 zip 截断(会低估距离),返回大值使其被过滤
+            // Length mismatch: return a large distance so the entry is filtered out (zip truncation would understate it)
             if a.len() != b.len() {
                 return Ok(i64::MAX);
             }
@@ -227,8 +227,6 @@ fn register_hamming_udf(conn: &Connection) -> Result<(), rusqlite::Error> {
 fn try_open_connection(db_path: &PathBuf) -> Result<Connection, String> {
     let conn = Connection::open(db_path).map_err(|e| format!("Failed to open database: {}", e))?;
 
-    // busy_timeout: CLI 与 GUI/daemon 是同库的两个写入方,
-    // WAL 下写冲突时应等待重试而非立即报 "database is locked"
     // busy_timeout: the CLI and the GUI/daemon are two writers of the same DB;
     // under WAL a write conflict should wait and retry instead of failing
     // immediately with "database is locked".

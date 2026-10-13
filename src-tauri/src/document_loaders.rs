@@ -191,14 +191,12 @@ mod tests {
         std::fs::create_dir_all(base.join("0001")).unwrap();
 
         // Zero age = everything counts as stale; only tmp_* dirs are removed
-        // 零阈值 = 全部视为过期;只删 tmp_* 目录
         sweep_stale_temp_dirs_in(&base, std::time::Duration::ZERO);
         assert!(!base.join("tmp_old").exists());
         assert!(!base.join("tmp_fresh").exists());
         assert!(base.join("0001").exists());
 
         // Large age = nothing stale, bucket dirs kept
-        // 大阈值 = 无过期,桶目录保留
         sweep_stale_temp_dirs_in(&base, std::time::Duration::from_secs(365 * 24 * 3600));
         assert!(base.join("0001").exists());
 

@@ -35,7 +35,6 @@ pub async fn find_similars_for_local_file(
         file_info_repo::get_by_id(file_id)?.ok_or_else(|| "File not found".to_string())?;
 
     // Search local and remote devices in parallel
-    // 并行搜索本地和远程设备
     let (local_results, mut remote_results) = tokio::join!(
         local_similarity_service::find_similars_by_file_id(&file_info, limit),
         remote_similarity_service::remote_find_similars(&file_info, limit)
@@ -103,7 +102,6 @@ pub async fn find_similars_for_remote_file(
     log::info!("Generated request_id for similarity search: {}", request_id);
 
     // 1. Request source device to find similars (it will search locally + forward to other devices)
-    // 1. 请求源设备查找相似文件（它会在本地搜索并转发到其他设备）
     let remote_results = match http_client::find_similars(
         remote_file_id,
         Some(&request_id),
@@ -134,7 +132,6 @@ pub async fn find_similars_for_remote_file(
     };
 
     // 2. Also search locally
-    // 2. 同时在本地搜索
     // Note: We don't have the file locally, so we can only search if we have features
     // For now, we rely on the source device's search results
 
@@ -252,8 +249,6 @@ async fn find_similars_for_external_image(
     path: &str,
     limit: usize,
 ) -> Result<ExternalSimilarOutcome, String> {
-    // 解码与打标都是同步重活,放 spawn_blocking 避免阻塞 tokio worker;
-    // 两者分开执行,打标 panic(JoinError)不会丢弃已算出的哈希
     // Decoding and captioning are heavy sync work — off the async worker via
     // spawn_blocking; run them separately so a captioning panic (JoinError)
     // cannot discard the already-computed hash.
@@ -268,7 +263,6 @@ async fn find_similars_for_external_image(
 
     // Parser init/analyze failure degrades to the visual-only fallback below
     // (same path as an empty caption)
-    // 解析器初始化/打标失败降级为下方纯视觉回退(与空打标同路)
     let content = match image_parser::ImageParser::new().await {
         Ok(parser) => match parser.analyze(path).await {
             Ok(c) => c,
@@ -283,9 +277,6 @@ async fn find_similars_for_external_image(
         }
     };
 
-    // 有语义向量时用 ANN 取候选；否则扫描全部图片哈希做纯视觉比对。
-    // 三种"无向量"情形(打标为空/无分块/嵌入失败)统一收敛到同一个回退
-    // 分支,回退行为只维护一处
     // With a semantic vector use ANN candidates; otherwise scan all image
     // hashes for pure visual comparison. The three "no vector" cases (empty
     // caption / no chunks / embed failure) collapse into a single fallback
@@ -294,7 +285,7 @@ async fn find_similars_for_external_image(
     let caption_chunks: Option<Vec<_>> = if content.trim().is_empty() {
         None
     } else {
-        // 与索引写入路径保持一致：嵌入前折叠连续换行
+        // Match the indexing write path: collapse consecutive newlines before embedding
         match embed_text_to_chunks(&text_util::collapse_newlines(&content)).await {
             Ok(chunks) if chunks.is_empty() => None,
             Ok(chunks) => Some(chunks),
@@ -338,7 +329,7 @@ async fn find_similars_for_external_audio(
 ) -> Result<ExternalSimilarOutcome, String> {
     let decode_path = path.to_string();
 
-    // 解码一次 + 特征分类 + 音乐指纹提取,全部在 spawn_blocking 里
+    // Decode once + feature classification + music fingerprint, all inside spawn_blocking
     let (audio_type, fingerprint, samples) = tokio::task::spawn_blocking(move || {
         let samples = audio_util::load_audio_to_f32(&decode_path)
             .map_err(|e| format!("Failed to decode audio: {}", e))?;
@@ -363,7 +354,6 @@ async fn find_similars_for_external_audio(
             })
         }
         AudioType::Speech | AudioType::Unknown => {
-            // 转写走与索引同模式的解析器;Local 复用已解码采样点,Remote 读文件
             // Transcribe with the same parser mode as indexing; local reuses
             // the decoded samples, remote reads the file
             let parser = AudioParser::new()
@@ -374,8 +364,8 @@ async fn find_similars_for_external_audio(
                 .await
                 .map_err(|e| format!("Failed to transcribe audio: {}", e))?;
 
-            // 特征 Unknown 时用转写文本重分类(与索引期同一兜底规则);
-            // 重分类为 Music/Mixed 时改走指纹路径(与旧版行为一致)
+            // Feature Unknown: reclassify by transcript (same fallback as indexing);
+            // reclassified Music/Mixed goes through the fingerprint path (legacy behavior)
             let audio_type = if audio_type == AudioType::Unknown {
                 audio_util::detect_audio_type_from_transcription(&transcription)
             } else {
@@ -433,8 +423,8 @@ fn visual_scan_candidates(
     source_hash: &[u8],
     limit: usize,
 ) -> Result<Vec<ImageSimilarityCandidate>, String> {
-    // score >= 30 要求 distance <= 7(公式: score = (10 - d) * 10);
-    // SQL LIMIT 取用户 limit 与 ANN_CANDIDATE_LIMIT 的较大值,不截断
+    // score >= 30 needs distance <= 7 (score = (10 - d) * 10);
+    // SQL LIMIT = max(user limit, ANN_CANDIDATE_LIMIT), no truncation
     let sql_limit = (limit.max(image_similarity::ANN_CANDIDATE_LIMIT)) as i64;
     let rows = file_info_repo::find_visual_candidates_by_hash(source_hash, 7, sql_limit)
         .map_err(|e| e.to_string())?;

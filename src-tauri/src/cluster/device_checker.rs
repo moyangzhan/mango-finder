@@ -53,8 +53,6 @@ const EXPIRATION_CHECK_INTERVAL_SECS: u64 = 60 * 60;
 pub async fn start_status_checker(online_check_interval_secs: i32) {
     // Use compare_exchange to atomically check and set the running flag
     // This prevents race condition when multiple tasks call this function concurrently
-    // 使用 compare_exchange 原子地检查并设置运行标志
-    // 这可以防止多个任务并发调用此函数时的竞态条件
     let mut retries = 5;
     while ONLINE_CHECKER_RUNNING
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -107,7 +105,6 @@ async fn start_online_timer_inner(check_interval_secs: i32) {
 
     tokio::spawn(async move {
         // Check immediately on startup
-        // 启动时立即检查一次
         if let Err(e) = check_all_devices_online().await {
             log::error!("Error checking device online status on startup: {}", e);
         }
@@ -311,7 +308,6 @@ async fn verify_device_online(device: Device) -> Result<()> {
                     .map_err(|e| anyhow!("Failed to update device info: {}", e))?;
 
                     // Update online status to Online
-                    // 更新在线状态为 Online
                     device_repo::update_online_status(device.id, OnlineStatus::Online)
                         .map_err(|e| anyhow!("Failed to update device status: {}", e))?;
 
@@ -337,8 +333,6 @@ async fn verify_device_online(device: Device) -> Result<()> {
         Ok(resp) => {
             // Non-success status code (e.g., 403 Forbidden)
             // Device is still online (we got a response), but may have auth issues
-            // 非成功状态码（如 403 Forbidden）
-            // 设备仍在线（收到了响应），但可能存在认证问题
             log::warn!(
                 "Device {} returned status {} (device is online but request was rejected)",
                 device.name,

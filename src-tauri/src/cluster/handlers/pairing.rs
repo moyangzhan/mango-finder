@@ -298,7 +298,6 @@ pub async fn handle_pairing_respond(
             )
         } else {
             // Remote device rejected our request, mark as blocked
-            // 对方拒绝了本机的请求，标记为 blocked
             (
                 PairingStatus::Blocked,
                 t!("pairing.remark.remote-rejected").to_string(),
@@ -310,7 +309,6 @@ pub async fn handle_pairing_respond(
     }
 
     // Update the latest request status (any direction) - use responder_id to find the request
-    // 更新最新的请求状态（不限方向）- 使用 responder_id 查找请求
     if let Ok(Some(latest_request)) =
         pairing_request_repo::get_latest_by_device_id_any(&payload.responder_id)
     {
@@ -358,12 +356,9 @@ pub async fn handle_reset_notify(
     );
 
     // Get local device record for this remote device
-    // 获取该远程设备的本机记录
     if let Ok(Some(device)) = device_repo::get_by_device_id(&payload.from_device_id) {
-        // Reset pairing status to None with remark
-        // 重置配对状态为 None 并附带说明
-        // Note: is_manual=true because remote reset is triggered by user action on remote device
-        // 注意: is_manual=true 因为远程重置是由对方设备上的用户操作触发的
+        // Reset pairing status to None with remark; is_manual=true because the
+        // reset was triggered by a user action on the remote device
         let remark = t!("pairing.remark.remote-reset").to_string();
         device_repo::update_pairing_status_with_remark(
             device.id,
@@ -381,7 +376,6 @@ pub async fn handle_reset_notify(
         })?;
 
         // Update the latest pairing request record for this device
-        // 更新该设备最新的配对请求记录
         if let Ok(Some(latest_request)) =
             pairing_request_repo::get_latest_by_device_id_any(&payload.from_device_id)
         {

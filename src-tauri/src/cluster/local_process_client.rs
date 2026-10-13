@@ -17,7 +17,6 @@ static PROBE_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         // Loopback requests must bypass the system proxy: local proxies often
         // reject 127.0.0.1 targets, which makes every probe time out.
-        // 回环请求不走系统代理:本地代理常拒绝 127.0.0.1 目标,导致探测全部超时
         .no_proxy()
         .timeout(Duration::from_millis(PROBE_TIMEOUT_MS))
         .build()
@@ -59,8 +58,6 @@ fn client_id() -> String {
 pub async fn probe(port: i32) -> LocalProbe {
     let own = client_id();
     let url = format!("http://127.0.0.1:{}/ping", port);
-    // 超时视为端口空闲:有的机器上空闲端口也表现为超时(SYN 被丢弃),
-    // 若归为 Other 会导致 daemon 永远无法拉起
     // Timeout means free: on some machines a free port also times out
     // (dropped SYNs); classifying it as Other would break daemon spawning
     let Ok(resp) = PROBE_CLIENT

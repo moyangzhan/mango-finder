@@ -16,7 +16,7 @@ use crate::repositories::{device_repo, file_info_repo};
 const SERVICE_TYPE: &str = "_mangofinder._tcp.local.";
 
 // ============================================================================
-// Broadcast (Advertising) - 广播相关
+// Broadcast (Advertising)
 // ============================================================================
 
 /// mDNS broadcast daemon instance
@@ -108,7 +108,7 @@ pub fn is_mdns_broadcast_running() -> bool {
 }
 
 // ============================================================================
-// Browsing (Discovery) - 浏览相关
+// Browsing (Discovery)
 // ============================================================================
 
 /// mDNS browsing running flag
@@ -203,7 +203,7 @@ pub fn is_mdns_browsing_running() -> bool {
 }
 
 // ============================================================================
-// Legacy compatibility functions - 向后兼容
+// Legacy compatibility functions
 // ============================================================================
 
 /// Start mDNS service (broadcast + browsing) - for backward compatibility
@@ -222,7 +222,7 @@ pub async fn stop_mdns_service() {
 }
 
 // ============================================================================
-// Event handling - 事件处理
+// Event handling
 // ============================================================================
 
 /// Handle mDNS discovery events
@@ -234,7 +234,7 @@ async fn handle_mdns_event(event: ServiceEvent) {
             let port = info.get_port();
             let hostname = info.get_hostname();
 
-            // 分类地址：IPv4、IPv6 link-local、IPv6 global
+            // Classify: IPv4 / IPv6 link-local / IPv6 global
             let ipv4_addrs: Vec<_> = addresses.iter().filter(|a| a.is_ipv4()).collect();
             let ipv6_link_local: Vec<_> = addresses
                 .iter()
@@ -254,7 +254,7 @@ async fn handle_mdns_event(event: ServiceEvent) {
                 ipv6_global.len()
             );
 
-            // 优先选择地址：IPv4 > IPv6 global > IPv6 link-local
+            // Preference: IPv4 > IPv6 global > IPv6 link-local
             let host = ipv4_addrs
                 .first()
                 .or_else(|| ipv6_global.first())
@@ -262,7 +262,7 @@ async fn handle_mdns_event(event: ServiceEvent) {
                 .map(|a| a.to_string())
                 .unwrap_or_default();
 
-            // 如果没有解析到地址，记录警告并跳过
+            // No address resolved: warn and skip
             if host.is_empty() {
                 log::warn!(
                     "Device {} resolved but no valid address found, skipping",
@@ -271,7 +271,7 @@ async fn handle_mdns_event(event: ServiceEvent) {
                 return;
             }
 
-            // 记录最终选择的地址类型
+            // Log the chosen address type
             let selected_type = if ipv4_addrs.first().map(|a| a.to_string()) == Some(host.clone()) {
                 "IPv4"
             } else if host.starts_with("fe80::") {
@@ -322,9 +322,9 @@ async fn handle_mdns_event(event: ServiceEvent) {
             let existing_device = device_repo::get_by_device_id(&device_id).ok().flatten();
 
             // Skip devices that were rejected by local user (Rejected)
-            // 跳过本机用户拒绝的设备（Rejected）
+            // Skip devices the local user rejected
             // Note: Blocked devices (remote blocked us) are still discoverable, they can send new requests
-            // 注意：Blocked 设备（对方拉黑了我）仍然可被发现，它们可以发送新的请求
+            // Blocked devices (they blacklisted us) stay discoverable; they may send new requests
             if let Some(ref existing) = existing_device {
                 if existing.pairing_status == PairingStatus::Rejected {
                     log::debug!("Skipping rejected device: {}", device_id);
@@ -345,8 +345,6 @@ async fn handle_mdns_event(event: ServiceEvent) {
             // Create or update device record, preserving existing fields
             // NOTE: mDNS only discovers devices, it does NOT determine online_status.
             // online_status is determined by device_checker via HTTP requests.
-            // 注意：mDNS 只发现设备，不判断 online_status。
-            // online_status 由 device_checker 通过 HTTP 请求判断。
             let device = if let Some(mut existing) = existing_device {
                 // Update existing device with new discovery info
                 existing.name = device_name;
@@ -355,7 +353,6 @@ async fn handle_mdns_event(event: ServiceEvent) {
                 existing.version = version;
                 existing.index_count = index_count;
                 // Don't set online_status here - let device_checker handle it
-                // 不在这里设置 online_status - 由 device_checker 处理
                 existing.last_seen = chrono::Local::now();
                 existing
             } else {

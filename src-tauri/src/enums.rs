@@ -535,19 +535,16 @@ impl PairingStatus {
     /// - 例外: 手动操作可以将任意状态重置为 None
     pub fn can_transition_to(&self, new_status: &PairingStatus, is_manual: bool) -> bool {
         // Manual operations can reset ANY status to None
-        // 手动操作可以将任意状态重置为 None
         if is_manual && *new_status == PairingStatus::None {
             return true;
         }
 
         // Allow same status (no-op)
-        // 允许相同状态（无操作）
         if self == new_status {
             return true;
         }
 
         // Allow transition from lower priority to higher priority
-        // 允许从低优先级转换到高优先级
         self.priority() <= new_status.priority()
     }
 }

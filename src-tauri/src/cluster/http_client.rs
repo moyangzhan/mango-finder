@@ -42,7 +42,7 @@ pub fn cluster_url(ip: &str, port: i32, path: &str) -> String {
 }
 
 // ============================================
-// Internal helpers - 内部助手
+// Internal helpers
 // ============================================
 
 /// 统一请求前置:带设备头发送 + 状态码校验,错误串全局一致
@@ -203,7 +203,7 @@ pub async fn fetch_file_content(
 }
 
 // ============================================
-// Utility functions - 工具函数
+// Utility functions
 // ============================================
 
 /// Get local IP address
@@ -216,7 +216,7 @@ pub fn get_local_ip() -> Result<String, String> {
 }
 
 // ============================================
-// Device Ping API - 设备 Ping 接口
+// Device Ping API
 // ============================================
 
 /// Ping a remote device to check status
@@ -296,7 +296,7 @@ pub async fn ping_and_update_device_info(
 }
 
 // ============================================
-// Pairing API - 配对接口
+// Pairing API
 // ============================================
 
 /// Send pairing request to a remote device

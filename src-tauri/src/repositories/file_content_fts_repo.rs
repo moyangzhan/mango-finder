@@ -124,7 +124,7 @@ pub async fn search(query: &str, limit: usize) -> Result<Vec<FtsSearchResult>, R
             }
         }
 
-        // 1. 计算关键词覆盖率 (0.0 - 1.0) | Calculate keyword coverage (0.0 - 1.0)
+        // 1. Keyword coverage (0.0 - 1.0)
         let mut matched_keywords = HashSet::new();
         for kw in &keywords {
             if content.contains(kw) {
@@ -132,12 +132,12 @@ pub async fn search(query: &str, limit: usize) -> Result<Vec<FtsSearchResult>, R
             }
         }
         let coverage = matched_keywords.len() as f64 / kw_len;
-        // 2. 将 FTS5 Rank 转换为 0-1 之间的正向分 | Convert FTS5 Rank to 0-1 positive score
-        // FTS5 rank 越小越好（通常是负数），取反后越大越好 | Lower FTS5 rank is better (usually negative), inverted becomes higher is better
-        // 使用简单的逻辑回归函数映射 | Use simple logistic function for mapping
+        // 2. Convert FTS5 Rank to a 0-1 positive score
+        // Lower FTS5 rank is better (usually negative); inverted, higher is better
+        // Map via a simple logistic function
         let rank_score = 1.0 / (1.0 + (rank + 1.0).exp());
-        // 3. 综合计算 0-100 分 | Calculate final 0-100 score
-        // 公式逻辑：覆盖率占 70% 权重（保证搜到词的排在前面），BM25 排名占 30% 权重 | Formula: coverage 70% weight (ensure matched words rank higher), BM25 rank 30% weight
+        // 3. Final 0-100 score
+        // Coverage 70% weight (matched words rank first), BM25 rank 30%
         let final_score_f64 = coverage * 70.0 + rank_score * 30.0;
         let final_score = final_score_f64.clamp(0.0, 100.0) as usize;
 

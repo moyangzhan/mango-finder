@@ -27,7 +27,6 @@ const DAEMON_READY_TIMEOUT_SECS: u64 = 10;
 /// 钳制到合法区间,避免超范围值经 `as u16` 截断后探测与绑定落不同端口。
 pub async fn local_port() -> i32 {
     let setting = mango_finder_lib::cluster::get_cluster_setting().await;
-    // 钳制逻辑与服务端共用同一实现(http_server::clamp_port)
     // The clamp is shared with the server (http_server::clamp_port)
     mango_finder_lib::cluster::http_server::clamp_port(setting.port)
 }
@@ -102,7 +101,6 @@ pub async fn ensure_server() -> Option<i32> {
 #[cfg(windows)]
 async fn spawn_daemon() -> Option<()> {
     let exe = std::env::current_exe().ok()?;
-    // PowerShell 单引号字符串中,单引号需翻倍转义
     // In a PowerShell single-quoted string an apostrophe must be doubled
     let exe = exe.display().to_string().replace('\'', "''");
     let script = format!(
@@ -114,8 +112,6 @@ async fn spawn_daemon() -> Option<()> {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
-    // spawn_blocking: .status() 会同步等待 PowerShell 退出(数百 ms 到秒级),
-    // 不能阻塞 tokio worker
     // spawn_blocking: .status() synchronously waits for PowerShell to exit
     // (hundreds of ms to seconds); must not block a tokio worker.
     tokio::task::spawn_blocking(move || cmd.status())
@@ -134,7 +130,6 @@ async fn spawn_daemon() -> Option<()> {
         .arg("serve")
         // Own process group so the daemon is not killed by SIGHUP
         // when the terminal session exits.
-        // 独立进程组,避免随终端会话退出收到 SIGHUP
         .process_group(0)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

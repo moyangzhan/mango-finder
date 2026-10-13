@@ -128,13 +128,13 @@ pub fn hybrid_search(
                     "Raw Search Result - file_id: {}, chunk_id: {}, distance: {}, sparse_score: {}, score: {}",
                     fce.file_id, fce.chunk_index, fce.distance, fce.sparse_score, fce.score
                 );
-                // 1. 如果 Sparse 得分太低（说明关键词完全没对上），视为噪音，剔除 | If Sparse score is too low (keywords don't match), treat as noise and filter out
-                // 这是解决”中译英”短查询乱码召回的关键 | This is key to fixing Chinese-to-English short query noise recall
+                // 1. If Sparse score is too low (keywords don't match), treat as noise and filter out
+                // Key to fixing Chinese-to-English short-query noise recall
                 if fce.sparse_score < sparse_threshold {
                     return None;
                 }
 
-                // 2. 如果 Dense 距离太大，踢掉（说明语义不相关），无论 Sparse 得分多高都没用 | If Dense distance is too large, filter out (semantically unrelated), regardless of Sparse score
+                // 2. If Dense distance is too large, filter out (semantically unrelated), regardless of Sparse score
                 if min_score > 0 && fce.score < min_score {
                     return None;
                 }

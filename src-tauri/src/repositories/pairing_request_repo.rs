@@ -226,7 +226,6 @@ pub fn expire_old_requests() -> Result<usize, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;
 
     // First, get device_ids for requests that will be expired, grouped by direction
-    // 首先获取将要过期的请求的 device_id，按方向分组
     let out_device_ids: Vec<String> = conn
         .prepare(
             "SELECT DISTINCT device_id FROM pairing_request
@@ -246,11 +245,9 @@ pub fn expire_old_requests() -> Result<usize, RepositoryError> {
         .collect::<Result<Vec<_>, _>>()?;
 
     // Get localized remark for expired requests
-    // 获取过期请求的本地化说明
     let expired_remark = t!("pairing.remark.request-expired").to_string();
 
     // Expire the requests and update remark
-    // 过期请求并更新 remark
     let affected = conn.execute(
         "UPDATE pairing_request SET status = 'expired', remark = ?1, response_time = datetime('now', 'localtime')
          WHERE status = 'pending' AND datetime(create_time, '+24 hours') < datetime('now', 'localtime')",
@@ -258,7 +255,6 @@ pub fn expire_old_requests() -> Result<usize, RepositoryError> {
     )?;
 
     // Reset device pairing status from pending_out to none with remark for expired outgoing requests
-    // 将过期发出请求的设备状态从 pending_out 重置为 none，并更新 remark
     for device_id in out_device_ids {
         let _ = conn.execute(
             "UPDATE device SET pairing_status = 'none', pairing_remark = ?1 WHERE device_id = ?2 AND pairing_status = 'pending_out'",
@@ -267,7 +263,6 @@ pub fn expire_old_requests() -> Result<usize, RepositoryError> {
     }
 
     // Reset device pairing status from pending_in to none with remark for expired incoming requests
-    // 将过期接收请求的设备状态从 pending_in 重置为 none，并更新 remark
     for device_id in in_device_ids {
         let _ = conn.execute(
             "UPDATE device SET pairing_status = 'none', pairing_remark = ?1 WHERE device_id = ?2 AND pairing_status = 'pending_in'",

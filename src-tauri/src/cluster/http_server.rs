@@ -107,7 +107,6 @@ fn create_exclusive_socket_on(addr: SocketAddr) -> Result<TcpListener, Error> {
     let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
 
     // On Windows, set SO_EXCLUSIVEADDRUSE to prevent other sockets from binding to the same port
-    // 在 Windows 上设置 SO_EXCLUSIVEADDRUSE 防止其他 socket 绑定同一端口
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawSocket;
@@ -160,7 +159,6 @@ fn create_exclusive_socket_on(addr: SocketAddr) -> Result<TcpListener, Error> {
 /// 在 Windows 上使用 SO_EXCLUSIVEADDRUSE 确保端口独占绑定。
 pub async fn start_http_server() -> Result<(), String> {
     // Check if server is already running
-    // 检查服务器是否已经在运行
     if server_already_running() {
         log::info!("HTTP server is already running, skip start");
         return Ok(());
@@ -173,9 +171,6 @@ pub async fn start_http_server() -> Result<(), String> {
     // released before this process warms up its own). Retry a few times: a
     // concurrent CLI invocation may spawn a fresh daemon into the gap between
     // the old daemon's exit and our rebind — yield it too instead of failing.
-    // 绑定失败时先尝试请自家 CLI daemon 让位(先关后开,避免双份模型常驻)。
-    // 重试数次:并发 CLI 命令可能在旧 daemon 退出与本进程重绑的间隙里拉起新
-    // daemon —— 对它继续让位,而不是直接失败。
     let listener = match create_exclusive_socket(port) {
         Ok(l) => l,
         Err(e) => {
@@ -261,8 +256,6 @@ pub async fn start_http_server_loopback() -> Result<(), String> {
     // The daemon never yields: a busy port means a host already exists
     // (GUI or a concurrent daemon that won the bind race) — this process
     // is the loser and exits (see serve::run).
-    // daemon 不做让位:端口被占说明已有宿主
-    // (GUI 或竞争中先完成绑定的 daemon),本进程是输家,直接退出(见 serve::run)
     let addr = SocketAddr::from(([127, 0, 0, 1], port as u16));
     let listener = create_exclusive_socket_on(addr)
         .map_err(|e| format!("Port {} is already in use: {}", port, e))?;
@@ -305,7 +298,6 @@ async fn serve_on(
     });
 
     // /cli local API: local clients only, loopback + local CLIENT_ID double-check
-    // /cli 本地 API:仅供本机客户端,回环 + 本机 CLIENT_ID 双校验
     let cli_routes = Router::new()
         .route("/cli/search", post(local::cli_search))
         .route("/cli/similar/:file_id", post(local::cli_similar))
@@ -315,8 +307,6 @@ async fn serve_on(
     // Inter-device protocol gets a /cluster prefix, separated from the
     // /cli (local) namespace. No legacy-path compatibility: devices are
     // expected to upgrade together.
-    // 设备间协议加 /cluster 前缀,与 /cli(本机)命名空间区分;
-    // 不保留旧路径兼容:多设备约定一起升级
     let cluster_routes = Router::new()
         .route("/search", post(remote::handle_search))
         .route("/chunks", post(remote::handle_chunks))
@@ -361,8 +351,6 @@ async fn serve_on(
         // The server has actually stopped: clear the sender so a later
         // start_http_server (port change, disable→re-enable) can bind again
         // instead of seeing a stale "already running" flag.
-        // 服务已实际停止:清空 sender,后续 start_http_server
-        // (改端口、关闭再开启集群)才能重新绑定,而不是被残留标记误判为已运行
         if let Ok(mut guard) = SHUTDOWN_SENDER.write() {
             *guard = None;
         }
@@ -382,7 +370,6 @@ async fn try_yield_to_cli_daemon(port: i32) -> bool {
     use super::local_process_client::{self, LocalProbe, ReleaseOutcome};
 
     // Only our own daemon yields; a GUI host or another holder does not
-    // 只有自家 daemon 会退出;GUI 宿主或外部占用者不会让位
     if local_process_client::probe(port).await != LocalProbe::Mine {
         return false;
     }
@@ -390,7 +377,6 @@ async fn try_yield_to_cli_daemon(port: i32) -> bool {
 
     // The daemon's graceful shutdown is bounded at 10s (in-flight responses);
     // allow 12s before declaring it stuck
-    // daemon 优雅停机上限 10s(在途响应),留 12s 再判定为未退出
     match local_process_client::wait_until_released(port, Duration::from_secs(12)).await {
         ReleaseOutcome::Released => {
             log::info!("CLI daemon on port {} has yielded", port);
@@ -412,5 +398,4 @@ pub async fn stop_http_server() {
         }
     }
     // Note: Don't clear SHUTDOWN_SENDER here, let it be cleared when server actually stops
-    // 注意：不要在这里清空 SHUTDOWN_SENDER，让服务器实际停止时再清空
 }

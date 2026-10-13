@@ -191,7 +191,7 @@ pub struct FileMetaEmbedding {
 
     pub distance: f32,     // for search result
     pub sparse_score: f32, // for search result
-    pub score: usize, // for search result, weighted score of distance and sparse_score | distance 和 sparse_score 的加权总分
+    pub score: usize,      // for search result, weighted score of distance and sparse_score
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -206,7 +206,7 @@ pub struct FileContentEmbedding {
 
     pub distance: f32,     // for search result
     pub sparse_score: f32, // for search result
-    pub score: usize, // for search result, weighted score of distance and sparse_score | distance 和 sparse_score 的加权总分
+    pub score: usize,      // for search result, weighted score of distance and sparse_score
 }
 
 impl Default for FileContentEmbedding {

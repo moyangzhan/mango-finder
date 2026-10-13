@@ -157,7 +157,7 @@ pub fn list(
     column_key: &str,
     sort_order: &str,
 ) -> Result<Vec<IndexingTask>, RepositoryError> {
-    // 白名单验证列名和排序方向，防止 SQL 注入
+    // Whitelist column names and sort direction against SQL injection
     let allowed_columns = [
         "id",
         "create_time",
@@ -165,7 +165,6 @@ pub fn list(
         "status",
         "total_cnt",
         "duration",
-        // GUI 任务表还提供这四列排序(views/indexer/columns.ts)
         // The GUI task table also sorts on these four columns
         "content_processed_cnt",
         "content_indexed_success_cnt",

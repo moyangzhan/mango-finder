@@ -26,7 +26,6 @@ pub async fn process() {
         .unwrap_or_else(|e| error!("db init error: {e:?}"));
 
     // One-shot crash-leftover cleanup (orphan task locks, temp image dirs)
-    // 一次性清理崩溃遗留(孤儿任务锁、临时图片目录)
     crate::one_time_job::run_startup();
 
     // Initialize the client_id

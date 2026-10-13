@@ -38,7 +38,6 @@ pub fn insert(file_info: &FileInfo) -> Result<Option<FileInfo>, RepositoryError>
     if affected == 0 {
         // Lost a concurrent-insert race on path: return the winning row so
         // the caller continues on it instead of erroring
-        // 并发插入同 path 的竞态输家:回查已有行并返回,调用方在其上继续
         let mut query_stmt = conn.prepare("select * from file_info where path = ?1 limit 1")?;
         let existing = query_stmt
             .query_row([&file_info.path], |row| Ok(Some(build_file_info(row)?)))
@@ -630,7 +629,7 @@ pub fn find_visual_candidates_by_hash(
 
     let conn = crate::db_init_manager::open_db()?;
 
-    // 汉明距离 UDF(连接级,每次查询注册一次)
+    // Hamming distance UDF (per-connection, registered once per query)
     conn.create_scalar_function(
         "hamming_dist",
         2,

@@ -18,22 +18,14 @@ pub fn exec_ddl_with_conn(conn: &Connection) -> Result<()> {
     ); // Ignore error if column already exists
 
     // device table - stores discovered remote devices
-    // device 表 - 存储发现的远程设备
     //
     // pairing_status values and their behavior when receiving pairing requests:
-    // pairing_status 值及其在收到配对请求时的行为:
     //   - none:         No pairing relationship, request will be processed normally
-    //                    无配对关系，请求将正常处理
     //   - pending_in:   Received pairing request, waiting for local user to respond
-    //                    收到配对请求，等待本机用户响应
     //   - pending_out:  Sent pairing request, waiting for remote device to respond
-    //                    已发送配对请求，等待对方响应
     //   - paired:       Successfully paired, will return "already_paired"
-    //                    已配对成功，将返回"已配对"
     //   - rejected:     Local rejected remote's request (subsequent requests will be auto-rejected)
-    //                    本机拒绝了对方的请求（后续请求将被自动拒绝）
     //   - blocked:      Remote rejected local's request (blocked by remote)
-    //                    对方拒绝了本机的请求（被对方拉黑）
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS device (
@@ -61,20 +53,13 @@ pub fn exec_ddl_with_conn(conn: &Connection) -> Result<()> {
     )?;
 
     // pairing_request table - logs all pairing requests for debugging
-    // pairing_request 表 - 记录所有配对请求，用于调试
     //
     // status values:
-    // status 值说明:
     //   - pending:       Request is waiting for response
-    //                   请求等待响应中
     //   - accepted:      Request was accepted (user approved or auto-accepted)
-    //                   请求被接受（用户批准或自动接受）
     //   - rejected:      Request was rejected by user
-    //                   请求被用户拒绝
     //   - expired:       Request timed out (24 hours)
-    //                   请求已过期（24小时）
     //   - auto_rejected: Request was auto-rejected (device was previously rejected)
-    //                   请求被自动拒绝（设备之前已被拒绝）
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS pairing_request (

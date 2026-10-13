@@ -56,7 +56,6 @@ pub fn print_success(kind: OutputKind, data: &Value) {
 pub fn print_error(message: &str) {
     // table mode: single-line error to stderr so stdout keeps only table
     // content; JSON mode keeps the envelope structure.
-    // table 模式错误单行输出到 stderr，stdout 只保留表格内容；JSON 模式保持信封结构
     if is_table_mode() {
         outln_error!("{}: {}", t!("cli.table.error"), message);
     } else {
