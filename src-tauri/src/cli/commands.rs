@@ -490,8 +490,8 @@ async fn build_indexed_notice(file: &FileInfo) -> String {
 /// (both for lookup and before inserting via --index, which would otherwise
 /// create a duplicate row).
 /// 将存在的路径规范化为磁盘上的真实大小写。Windows 路径不区分大小写,但索引
-/// 按字符串精确匹配;大小写不同的输入必须先解析为索引中的形态(查找与
-/// --index 入库两侧都需要,否则会插入重复行)。
+/// 按字符串精确匹配;大小写不同的输入必须先解析为索引中的形态
+/// (查找与 --index 入库两侧都需要,否则会插入重复行)。
 fn canonical_case_path(path: &str) -> Option<String> {
     let p = Path::new(path);
     if !p.exists() {
@@ -985,8 +985,8 @@ pub async fn handle_check() {
 
     // 集群设置:走与真实服务一致的类型化来源(端口来源/默认值均一致),
     // 超出合法范围的端口回退默认值,避免 as u16 截断后探测错误端口
-    // Cluster setting: use the same typed source as the real service (same
-    // port origin/default); out-of-range values fall back instead of an
+    // Cluster setting: use the same typed source as the real service
+    // (same port origin/default); out-of-range values fall back instead of an
     // `as u16` truncation probing the wrong port.
     let setting = mango_finder_lib::cluster::get_cluster_setting().await;
     let device_name = if setting.device_name.is_empty() {

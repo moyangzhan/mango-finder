@@ -6,8 +6,8 @@ const CONFIG_NAME_ACTIVE_TASK: &str = "active_task";
 /// Age fallback of the orphan rule; also bounds PID-reuse misjudgment (a
 /// dead owner's pid reassigned to a live process looks alive for at most
 /// this long). Same value as the pre-PID heuristic.
-/// 孤儿判定的年龄兜底,同时限定 PID 复用误判的上界(死进程 pid 被复用后
-/// 最多被误认存活此时长);与引入 PID 前的阈值一致。
+/// 孤儿判定的年龄兜底,同时限定 PID 复用误判的上界
+/// (死进程 pid 被复用后最多被误认存活此时长);与引入 PID 前的阈值一致。
 const ORPHAN_TASK_THRESHOLD_SECS: i64 = 3600; // 1 hour
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -90,8 +90,8 @@ fn task_age_secs(task: &ActiveTask) -> i64 {
     chrono::Utc::now().timestamp() - task.started_at
 }
 
-/// Clear an orphaned lock; rows still "running" belong to dead owners (a
-/// live indexer holds the lock), so mark them cancelled.
+/// Clear an orphaned lock; rows still "running" belong to dead owners
+/// (a live indexer holds the lock), so mark them cancelled.
 /// 清除孤儿锁;仍处 running 的任务行必属死进程(活索引持有锁),标记 cancelled。
 fn clear_orphan(task: &ActiveTask) {
     log::warn!(

@@ -5,8 +5,8 @@ use rusqlite::Connection;
 /// DB_VERSION = 5
 /// Enforce one row per file_info.path: dedup legacy duplicates (a valid row
 /// beats a smaller invalid id), then build the unique index.
-/// file_info.path 每 path 一行:去重存量重复行(valid 行优先于更小的 invalid
-/// id),再建唯一索引。
+/// file_info.path 每 path 一行:去重存量重复行
+/// (valid 行优先于更小的 invalid id),再建唯一索引。
 pub fn exec_ddl_with_conn(conn: &Connection) -> Result<()> {
     info!("dbv5.exec_ddl_with_conn");
 

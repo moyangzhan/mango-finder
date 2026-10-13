@@ -243,8 +243,8 @@ pub fn count() -> Result<i64, RepositoryError> {
 /// Returns (id, path) pairs so the path-search cache can carry the real DB id
 /// (the cache previously fabricated ids from its line number, which drifted
 /// after any deletion or incremental append).
-/// 返回 (id, path) 二元组,让路径搜索缓存携带真实 DB id(此前缓存用行号
-/// 伪造 id,删除或增量追加后即错位)。
+/// 返回 (id, path) 二元组,让路径搜索缓存携带真实 DB id
+/// (此前缓存用行号伪造 id,删除或增量追加后即错位)。
 pub fn list_paths(page: i64, size: i64, asc: bool) -> Result<Vec<(i64, String)>, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;
     let order_direction = if asc { "asc" } else { "desc" };

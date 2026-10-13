@@ -272,8 +272,8 @@ fn app_home_dir() -> String {
 }
 
 /// Core data-path init shared by the GUI and the CLI: .config override →
-/// APP_DATA_PATH → storage/db/tmp globals. Failures log and continue (GUI
-/// contract); callers that need fail-fast check the globals afterwards.
+/// APP_DATA_PATH → storage/db/tmp globals. Failures log and continue
+/// (GUI contract); callers that need fail-fast check the globals afterwards.
 /// GUI/CLI 共用数据路径 core:.config 覆盖 → APP_DATA_PATH → storage/db/tmp
 /// 全局。失败记日志继续(GUI 契约);需 fail-fast 的调用方事后检查全局。
 pub fn init_paths_core(mut data_path: PathBuf) {
@@ -637,8 +637,8 @@ pub fn init_paths_standalone() -> Result<(), String> {
         .join(env!("CARGO_PKG_NAME"));
     init_paths_core(data_base);
 
-    // 2. 模型目录:优先可执行文件目录,回退当前目录(覆盖从源码目录直接
-    // 运行 mfd 的开发流),承担 GUI resource_dir 的角色
+    // 2. 模型目录:优先可执行文件目录,回退当前目录
+    // (覆盖从源码目录直接运行 mfd 的开发流),承担 GUI resource_dir 的角色
     // Model dir: prefer the executable directory, fall back to the current
     // directory (dev flow running mfd from the source tree); plays the role
     // of the GUI's resource_dir.

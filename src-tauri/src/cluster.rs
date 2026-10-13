@@ -1,6 +1,7 @@
 pub mod api_types;
 pub mod cluster_search;
 pub mod device_checker;
+pub(crate) mod handlers;
 pub mod http_client;
 pub mod http_server;
 pub mod local_process_client;

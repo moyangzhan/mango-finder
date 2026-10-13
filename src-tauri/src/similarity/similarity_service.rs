@@ -147,8 +147,8 @@ pub async fn find_similars_for_remote_file(
 /// 未索引外部文件现场相似度查询的结果
 pub struct ExternalSimilarOutcome {
     pub results: Vec<SearchResult>,
-    /// Number of chunk embeddings computed on the fly (documents / transcribed
-    /// audio); 0 for images and music
+    /// Number of chunk embeddings computed on the fly
+    /// (documents / transcribed audio); 0 for images and music
     pub chunk_count: usize,
     /// Detected audio subtype, present only for audio files
     pub audio_type: Option<AudioType>,

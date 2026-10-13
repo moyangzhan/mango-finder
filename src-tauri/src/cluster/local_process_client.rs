@@ -105,9 +105,9 @@ pub enum ReleaseOutcome {
 /// non-Mine probes (a single slow /ping is not misread as an exit) or the
 /// timeout, whichever comes first. Sleeps before the first probe so the
 /// just-notified host gets a chance to exit first.
-/// 轮询等待端口上的服务不再是自家:连续两次非 Mine(单次慢 /ping 不会
-/// 误判为退出)或超时,先到为准。首次探测前先睡眠,给刚收到通知的宿主
-/// 一点退出时间。
+/// 轮询等待端口上的服务不再是自家:连续两次非 Mine
+/// (单次慢 /ping 不会误判为退出)或超时,先到为准。首次探测前先睡眠,给
+/// 刚收到通知的宿主一点退出时间。
 pub async fn wait_until_released(port: i32, timeout: Duration) -> ReleaseOutcome {
     const POLL_INTERVAL_MS: u64 = 150;
     let deadline = Instant::now() + timeout;

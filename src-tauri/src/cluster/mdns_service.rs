@@ -2,6 +2,7 @@ use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Emitter;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -19,8 +20,7 @@ const SERVICE_TYPE: &str = "_mangofinder._tcp.local.";
 // ============================================================================
 
 /// mDNS broadcast daemon instance
-static MDNS_BROADCAST_DAEMON: std::sync::OnceLock<Arc<AsyncRwLock<Option<ServiceDaemon>>>> =
-    std::sync::OnceLock::new();
+static MDNS_BROADCAST_DAEMON: OnceLock<Arc<AsyncRwLock<Option<ServiceDaemon>>>> = OnceLock::new();
 
 /// Start mDNS broadcast (advertise this device)
 /// 启动 mDNS 广播（让其他设备发现本设备）
@@ -115,8 +115,7 @@ pub fn is_mdns_broadcast_running() -> bool {
 static MDNS_BROWSING: AtomicBool = AtomicBool::new(false);
 
 /// mDNS browsing daemon instance (separate from broadcast)
-static MDNS_BROWSING_DAEMON: std::sync::OnceLock<Arc<AsyncRwLock<Option<ServiceDaemon>>>> =
-    std::sync::OnceLock::new();
+static MDNS_BROWSING_DAEMON: OnceLock<Arc<AsyncRwLock<Option<ServiceDaemon>>>> = OnceLock::new();
 
 /// Start browsing for other MangoFinder devices
 /// 启动 mDNS 浏览（发现其他设备）
