@@ -4,7 +4,7 @@
 //! The server is the resident service answering /cli requests — the HTTP entry from `cluster::http_server` plus the hot resources behind it (path cache, embedding model); it is carried by the GUI process when multi-device is enabled, otherwise by the daemon spawned above.
 //! The exclusive bind guarantees at most one local server instance at any time, so a running server is reused as-is.
 //!
-//! The probe/shutdown handshake is the shared `cluster::server`, also used by the GUI (making the daemon yield before the GUI binds) and by `set_data_path` (daemon invalidation on data-dir switch).
+//! The probe/shutdown handshake is the shared `server` module, also used by the GUI (making the daemon yield before the GUI binds) and by `set_data_path` (daemon invalidation on data-dir switch).
 //!
 //! server 客户端;server 未运行时拉起一个 daemon(`daemon_server::run`)承载。
 //! 职责:探测 server → 按需拉起 daemon → 调用 /cli 端点。
@@ -12,11 +12,11 @@
 //! server 是应答 /cli 请求的常驻服务——入口为 `cluster::http_server` 的 HTTP 层,门后是路径缓存与嵌入模型等热资源;多机互联开启时由 GUI 进程承载,否则由上述拉起的 daemon 进程承载。
 //! 端口独占绑定保证任一时刻本地至多一个 server 实例,探测到已在运行就直接复用。
 //!
-//! 探测/关闭握手是共享的 `cluster::server`,GUI(绑定前请 daemon 让位)与 `set_data_path`(数据目录切换时的失效通知)也在使用。
+//! 探测/关闭握手是共享的 `server` 模块,GUI(绑定前请 daemon 让位)与 `set_data_path`(数据目录切换时的失效通知)也在使用。
 
 use mango_finder_lib::cluster::api_types::{CliSearchData, CliSimilarData};
-use mango_finder_lib::cluster::http_request_wrap;
-use mango_finder_lib::cluster::server::{self, ProbeOutcome};
+use mango_finder_lib::loopback_request;
+use mango_finder_lib::server::{self, ProbeOutcome};
 use mango_finder_lib::structs::search_result::SearchResult;
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -31,7 +31,7 @@ const DAEMON_READY_TIMEOUT_SECS: u64 = 10;
 /// 钳制到合法区间,避免超范围值经 `as u16` 截断后探测与绑定落不同端口。
 pub async fn server_port() -> i32 {
     let setting = mango_finder_lib::cluster::get_cluster_setting().await;
-    // The clamp is shared with the server (http_server::clamp_port)
+    // Single clamp source: http_server::clamp_port
     mango_finder_lib::cluster::http_server::clamp_port(setting.port)
 }
 
@@ -150,16 +150,15 @@ async fn wait_ready(port: i32) -> Option<i32> {
 }
 
 /// Search; returns (results, full match count before applying limit).
-/// The POST plumbing lives in `cluster::http_request_wrap::post_and_get_data`.
-/// 搜索,返回 (结果, 应用 limit 前的完整匹配数)。POST 解析阶梯在
-/// `cluster::http_request_wrap::post_and_get_data`。
+/// The POST plumbing lives in `loopback_request::post_and_get_data`.
+/// 搜索,返回 (结果, 应用 limit 前的完整匹配数)。POST 解析阶梯在 `loopback_request::post_and_get_data`。
 pub async fn search(
     query: &str,
     search_type: &str,
     limit: usize,
     port: i32,
 ) -> Result<(Vec<SearchResult>, usize), String> {
-    let data: CliSearchData = http_request_wrap::post_and_get_data(
+    let data: CliSearchData = loopback_request::post_and_get_data(
         port,
         "/cli/search",
         json!({ "query": query, "search_type": search_type, "limit": limit }),
@@ -171,7 +170,7 @@ pub async fn search(
 /// Similarity query for an indexed file
 /// 已索引文件相似查询
 pub async fn similars(file_id: i64, limit: usize, port: i32) -> Result<Vec<SearchResult>, String> {
-    let data: CliSimilarData = http_request_wrap::post_and_get_data(
+    let data: CliSimilarData = loopback_request::post_and_get_data(
         port,
         &format!("/cli/similar/{}", file_id),
         json!({ "limit": limit }),
@@ -180,8 +179,8 @@ pub async fn similars(file_id: i64, limit: usize, port: i32) -> Result<Vec<Searc
     Ok(data.results)
 }
 
-/// Ask the server to shut down (the daemon exits; a GUI-carried server ignores it); shared implementation in `cluster::server`.
-/// 请求 server 退出(daemon 退出;GUI 承载的 server 忽略);共享实现在 `cluster::server`。
+/// Ask the server to shut down (the daemon exits; a GUI-carried server ignores it); shared implementation in `server`.
+/// 请求 server 退出(daemon 退出;GUI 承载的 server 忽略);共享实现在 `server`。
 pub async fn request_shutdown(port: i32) -> Result<(), String> {
     server::request_shutdown(port).await
 }

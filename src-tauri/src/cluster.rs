@@ -3,11 +3,9 @@ pub mod cluster_search;
 pub mod device_checker;
 pub(crate) mod handlers;
 pub mod http_client;
-pub mod http_request_wrap;
 pub mod http_server;
 pub mod mdns_service;
 pub mod mock;
-pub mod server;
 
 use crate::structs::cluster_config::ClusterSetting;
 use std::sync::OnceLock;

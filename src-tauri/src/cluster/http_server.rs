@@ -347,11 +347,11 @@ async fn serve_on(
 }
 
 /// Port held by our own CLI daemon: ask it to exit and wait until it really does (probe no longer `Mine`) before the caller rebinds — close first, then start.
-/// The probe/shutdown handshake is shared with the CLI via `cluster::server`.
+/// The probe/shutdown handshake is shared with the CLI via `crate::server`.
 /// 端口被自家 CLI daemon 占用时:请求其退出并等待端口真正释放(探测不再是自家服务),再由调用方重绑 —— 先关后开。
-/// 探测/关闭握手与 CLI 共用 `cluster::server`。
+/// 探测/关闭握手与 CLI 共用 `crate::server`。
 async fn try_yield_to_cli_daemon(port: i32) -> bool {
-    use super::server::{self, ProbeOutcome, ReleaseOutcome};
+    use crate::server::{self, ProbeOutcome, ReleaseOutcome};
 
     // Only our own daemon yields; the GUI process or another holder does not
     if server::probe(port).await != ProbeOutcome::Mine {

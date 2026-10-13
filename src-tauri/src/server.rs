@@ -4,8 +4,8 @@
 //! 本机 server 的存活探测与退出握手:探测 / 请求退出 / 等待释放。
 //! CLI 二进制、GUI 让位逻辑(GUI 绑定前请 daemon 让位)与 `set_data_path`(数据目录切换时的失效通知)共用。
 
-use super::http_request_wrap::{client_id, post_common_response};
 use crate::cluster::api_types::CommonResponse;
+use crate::loopback_request::{client_id, post_common_response};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
@@ -37,8 +37,8 @@ pub enum ProbeOutcome {
     Unreachable,
 }
 
-/// Probe a port for our own local service.
-/// 探测端口上是否是本机服务。
+/// Probe a port for our own local server.
+/// 探测端口上是否是本机 server。
 pub async fn probe(port: i32) -> ProbeOutcome {
     let own = client_id();
     let url = format!("http://127.0.0.1:{}/ping", port);

@@ -6,7 +6,6 @@ use std::net::UdpSocket;
 use std::path::Path;
 use std::time::Instant;
 
-use mango_finder_lib::cluster::server;
 use mango_finder_lib::entities::FileInfo;
 use mango_finder_lib::enums::FileCategory;
 use mango_finder_lib::global::{
@@ -20,6 +19,7 @@ use mango_finder_lib::repositories::{
     indexing_task_repo,
 };
 use mango_finder_lib::searcher;
+use mango_finder_lib::server;
 use mango_finder_lib::similarity::similarity_service;
 use mango_finder_lib::structs::file_metadata::AudioType;
 use mango_finder_lib::utils::locale_util;
@@ -192,7 +192,7 @@ pub async fn handle_search(query: &str, search_type: &str, device: Option<String
         return;
     }
 
-    // Fast path: reuse the warm model of the local resident service (the GUI or the on-demand daemon); on failure silently fall back to the in-process search.
+    // Fast path: reuse the warm model of the local server (GUI-carried or an on-demand daemon); on failure silently fall back to the in-process search.
     // Output structure is identical across both paths —both resolve (results, total) here and share one success tail.
     let (results, total) = if let Some(port) = daemon_client::ensure_server().await {
         match daemon_client::search(query, search_type, limit, port).await {
@@ -234,8 +234,8 @@ async fn in_process_search(
     (results.into_iter().take(limit).collect(), total)
 }
 
-/// Similarity query: prefer the local resident service (warm model), fall back to in-process; both paths call the same underlying function, so the output is identical.
-/// 相似查询:优先走本机常驻服务(热模型),回落进程内;
+/// Similarity query: prefer the local server (warm model), fall back to in-process; both paths call the same underlying function, so the output is identical.
+/// 相似查询:优先走本机 server(热模型),回落进程内;
 /// 两条路径底层调用相同函数,输出一致
 async fn find_similars(file_id: i64, limit: usize) -> Result<Vec<SearchResult>, String> {
     if let Some(port) = daemon_client::ensure_server().await {
@@ -255,19 +255,19 @@ async fn find_similars(file_id: i64, limit: usize) -> Result<Vec<SearchResult>, 
 
 pub async fn handle_shutdown() {
     let Some(port) = daemon_client::detect().await else {
-        let data = serde_json::json!({ "message": "No running local service" });
+        let data = serde_json::json!({ "message": "No running local server" });
         output::print_success(OutputKind::Shutdown, &data);
         return;
     };
 
     // Ignore the request result and let the poll decide the final state:
-    // the daemon may exit between detect and POST (idle timeout / a concurrent yield), which surfaces as a transport error although the service actually stopped.
+    // the daemon may exit between detect and POST (idle timeout / a concurrent yield), which surfaces as a transport error although the server actually stopped.
     let _ = daemon_client::request_shutdown(port).await;
 
     // The daemon's graceful shutdown is bounded at 10s; allow 12s before declaring the server GUI-carried
     let (status, message) =
         match server::wait_until_released(port, std::time::Duration::from_secs(12)).await {
-            server::ReleaseOutcome::Released => ("stopped", "Local service (daemon) stopped"),
+            server::ReleaseOutcome::Released => ("stopped", "Local server (daemon) stopped"),
             server::ReleaseOutcome::StillHeld => (
                 "running",
                 "Server is carried by the GUI; it stops when the GUI exits",
@@ -945,7 +945,7 @@ pub async fn handle_check() {
     // server_port() already applies the valid-range clamp (single source)
     let port: u16 = daemon_client::server_port().await as u16;
 
-    // Port check: a port held by our own local service (GUI/daemon) is a healthy state, not an occupancy problem.
+    // Port check: a port held by our own local server (GUI-carried/daemon) is a healthy state, not an occupancy problem.
     let own_service = daemon_client::detect().await.is_some();
     let port_available = if own_service {
         true

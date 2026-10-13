@@ -18,7 +18,7 @@ pub async fn run() -> ! {
     http_server::mark_daemon();
     if let Err(e) = http_server::start_http_server_loopback().await {
         log::warn!(
-            "port is held by an existing host (GUI or a concurrent daemon), mfd serve exits: {}",
+            "port is held by an existing server (GUI-carried or a concurrent daemon), mfd serve exits: {}",
             e
         );
         std::process::exit(0);

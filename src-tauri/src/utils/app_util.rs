@@ -1,4 +1,3 @@
-use crate::cluster::server::{self, ProbeOutcome};
 use crate::enums::{FileContentLanguage, TrayMenuItem};
 use crate::global::{
     APP_DATA_PATH, AUDIO_DECODER_NAME, AUDIO_DECODER_PATH, AUDIO_ENCODER_NAME, AUDIO_ENCODER_PATH,
@@ -10,6 +9,7 @@ use crate::global::{
     TRAY_ID, VISION_MODEL_PATH, VISION_NAME, VISION_TOKENIZER_NAME, VISION_TOKENIZER_PATH,
     WHISPER_MODEL_NAME, WHISPER_MODEL_PATH,
 };
+use crate::server::{self, ProbeOutcome};
 use crate::utils::file_util;
 use crate::utils::task_util;
 use log::{error, info, warn};

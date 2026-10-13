@@ -1,5 +1,5 @@
-//! Generic HTTP request wrapper for the local server: shared 60s client, X-Device-ID header, CommonResponse error ladder.
-//! 本机 server 的通用 HTTP 请求封装:共享 60s 客户端、X-Device-ID 头、CommonResponse 错误阶梯。
+//! Loopback request helper for the local server (127.0.0.1 only): shared 60s client, X-Device-ID header, CommonResponse error ladder.
+//! 本机 server 的回环请求封装(仅 127.0.0.1):共享 60s 客户端、X-Device-ID 头、CommonResponse 错误阶梯。
 
 use crate::cluster::api_types::CommonResponse;
 use crate::global::CLIENT_ID;
