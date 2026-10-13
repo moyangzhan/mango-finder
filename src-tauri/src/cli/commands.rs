@@ -149,10 +149,10 @@ pub enum Commands {
         value: Option<String>,
     },
 
-    /// Shut down the local resident service (only stops the CLI daemon; a GUI-hosted service is left to the GUI)
+    /// Shut down the local server (only stops the CLI daemon; a GUI-carried server is left to the GUI)
     Shutdown,
 
-    /// Run as the local service host in foreground (spawned on demand by mfd itself)
+    /// Run as the daemon carrying the server, in foreground (spawned on demand by mfd itself)
     #[command(hide = true)]
     Serve,
 }
@@ -264,13 +264,13 @@ pub async fn handle_shutdown() {
     // the daemon may exit between detect and POST (idle timeout / a concurrent yield), which surfaces as a transport error although the service actually stopped.
     let _ = daemon_client::request_shutdown(port).await;
 
-    // The daemon's graceful shutdown is bounded at 10s; allow 12s before declaring a GUI host
+    // The daemon's graceful shutdown is bounded at 10s; allow 12s before declaring the server GUI-carried
     let (status, message) =
         match server::wait_until_released(port, std::time::Duration::from_secs(12)).await {
             server::ReleaseOutcome::Released => ("stopped", "Local service (daemon) stopped"),
             server::ReleaseOutcome::StillHeld => (
                 "running",
-                "Service is hosted by the GUI; it stops when the GUI exits",
+                "Server is carried by the GUI; it stops when the GUI exits",
             ),
         };
     let data = serde_json::json!({ "status": status, "message": message });

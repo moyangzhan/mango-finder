@@ -16,9 +16,10 @@ use std::sync::atomic::{AtomicI64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 use tokio::sync::OnceCell;
 
+/// Cache version (CONFIG_NAME_PATHS_CACHE_VERSION): any process deleting index rows bumps it;
+/// the process holding the cache rebuilds fully on mismatch at the next 10s tick, so cross-process deletions (e.g. CLI index clear) reach the resident cache within ≤10s.
 /// 缓存版本号(CONFIG_NAME_PATHS_CACHE_VERSION):任何进程删除索引行时递增;
-/// 持有缓存的宿主在计时器里发现版本不一致即全量重建,使跨进程删除(如 CLI index clear)在 ≤10s 内对常驻缓存生效
-/// Cache version (CONFIG_NAME_PATHS_CACHE_VERSION): any process deleting index rows bumps it; resident hosts rebuild on mismatch at the next 10s tick.
+/// 持有缓存的进程在计时器里发现版本不一致即全量重建,使跨进程删除(如 CLI index clear)在 ≤10s 内对常驻缓存生效
 static CACHE_VERSION: AtomicI64 = AtomicI64::new(i64::MIN);
 /// 全量重建互斥:timer 与 init 可能并发触发 build_index,不保护会互相 clear/push 交错产生重复条目
 /// Full-rebuild mutex: timer and init may trigger build_index concurrently
@@ -34,8 +35,8 @@ fn read_db_version() -> Option<i64> {
         .ok()
 }
 
-/// 通知其他进程:索引行有删除,持有缓存的宿主应重建(本进程本地版本同步跳过)
-/// Notify other processes that index rows were removed (resident hosts rebuild)
+/// Notify other processes that index rows were removed (the process holding the cache rebuilds)
+/// 通知其他进程:索引行有删除,持有缓存的进程应重建(本进程本地版本同步跳过)
 pub fn notify_paths_removed() {
     // Only bump the DB version; do NOT store the local version so the timer always detects the mismatch and rebuilds (storing it here would suppress the rebuild for callers that don't prune the local cache)
     if let Err(e) = config_repo::increment(CONFIG_NAME_PATHS_CACHE_VERSION) {

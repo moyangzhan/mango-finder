@@ -88,9 +88,9 @@ pub async fn cli_similar(
     }
 }
 
-/// Ask the daemon host to exit; a GUI host ignores it.
-/// Callers distinguish the host by pinging again after shutdown.
-/// 请求 daemon 宿主退出;GUI 宿主忽略。调用方靠 shutdown 后的二次 ping 判别宿主
+/// Request a server exit: the daemon exits, a GUI-carried server ignores it.
+/// Callers distinguish the carrier by pinging again after shutdown.
+/// 请求 server 退出:daemon 进程退出,GUI 承载的 server 忽略。调用方靠 shutdown 后的二次 ping 判别承载者。
 pub async fn cli_shutdown() -> CommonResponse<()> {
     if IS_DAEMON.load(Ordering::Relaxed) {
         tokio::spawn(async {

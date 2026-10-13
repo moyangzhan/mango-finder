@@ -1,8 +1,8 @@
-//! `mfd serve`: local service host spawned by the CLI on demand (hidden subcommand)
-//! `mfd serve`:CLI 按需拉起的本地服务宿主(隐藏子命令)
-//!
+//! `mfd serve`: the daemon process carrying the server, spawned by the CLI on demand (hidden subcommand)
 //! Loopback-only bind, single instance, auto-exits when idle; the model loads lazily and is pre-warmed at startup when an index exists.
 //! Prerequisite: main has finished init_paths + initializer(process).
+//!
+//! `mfd serve`:承载 server 的 daemon 进程,由 CLI 按需拉起(隐藏子命令)
 //! 只绑回环、单实例、空闲自动退出;模型懒加载,有索引时启动即预热。
 //! 前置条件:main 已完成 init_paths + initializer(process)。
 

@@ -22,8 +22,8 @@ static SHUTDOWN_SENDER: RwLock<Option<watch::Sender<bool>>> = RwLock::new(None);
 /// 集群服务默认端口
 pub const DEFAULT_PORT: i32 = 15678;
 
-/// Whether this process runs as the CLI daemon host (decides whether /cli/shutdown actually exits)
-/// 当前进程是否以 CLI daemon 宿主身份运行(决定 /cli/shutdown 是否真正退出)
+/// Whether this process is the CLI daemon carrying the server (decides whether /cli/shutdown actually exits)
+/// 当前进程是否为承载 server 的 CLI daemon(决定 /cli/shutdown 是否真正退出)
 pub static IS_DAEMON: AtomicBool = AtomicBool::new(false);
 
 /// Timestamp of the last /cli request (basis for daemon idle exit;
@@ -31,8 +31,8 @@ pub static IS_DAEMON: AtomicBool = AtomicBool::new(false);
 /// 最近一次 /cli 请求时间(daemon 空闲退出依据;/ping 探测不计入)
 static LAST_CLI_REQUEST: RwLock<Option<Instant>> = RwLock::new(None);
 
-/// Mark this process as the CLI daemon host and start the idle timer
-/// 标记当前进程为 CLI daemon 宿主,并启动空闲计时
+/// Mark this process as the CLI daemon carrying the server, and start the idle timer
+/// 标记当前进程为承载 server 的 CLI daemon,并启动空闲计时
 pub fn mark_daemon() {
     IS_DAEMON.store(true, Ordering::Relaxed);
     touch_cli_request();
@@ -235,8 +235,8 @@ fn server_already_running() -> bool {
     SHUTDOWN_SENDER.read().map(|g| g.is_some()).unwrap_or(false)
 }
 
-/// Start the HTTP server bound to loopback only (CLI daemon host, `mfd serve`)
-/// 以 CLI daemon 宿主身份启动,仅绑定回环地址,不向局域网暴露
+/// Start the HTTP server bound to loopback only (CLI daemon, `mfd serve`)
+/// 以 CLI daemon(`mfd serve`)身份启动,仅绑定回环地址,不向局域网暴露
 pub async fn start_http_server_loopback() -> Result<(), String> {
     if server_already_running() {
         log::info!("HTTP server is already running, skip start");
@@ -353,7 +353,7 @@ async fn serve_on(
 async fn try_yield_to_cli_daemon(port: i32) -> bool {
     use super::server::{self, ProbeOutcome, ReleaseOutcome};
 
-    // Only our own daemon yields; a GUI host or another holder does not
+    // Only our own daemon yields; the GUI process or another holder does not
     if server::probe(port).await != ProbeOutcome::Mine {
         return false;
     }

@@ -1,10 +1,18 @@
-//! Host service client: detect → spawn daemon on demand → call /cli endpoints
-//! 宿主服务客户端:探测 → 按需拉起 daemon → 调用 /cli 端点
+//! Server client; when no server is running it spawns a daemon (`daemon_server::run`) to carry it.
+//! Duties: detect the server → spawn a daemon on demand → call the /cli endpoints.
 //!
-//! The host is the same server code, running either inside the GUI process (when multi-device is enabled) or inside a daemon spawned by the CLI; the detection mechanism guarantees at most one host at any time.
-//! The probe/shutdown handshake lives in `cluster::server` (shared with the GUI's yield logic).
-//! 宿主是同一段服务代码,跑在 GUI 进程(多机互联开启时)或 CLI 拉起的 daemon 进程里;探测机制保证任一时刻只有一个宿主。
-//! 探测/关闭握手在 `cluster::server`(与 GUI 让位逻辑共用)。
+//! The server is the resident service answering /cli requests — the HTTP entry from `cluster::http_server` plus the hot resources behind it (path cache, embedding model); it is carried by the GUI process when multi-device is enabled, otherwise by the daemon spawned above.
+//! The exclusive bind guarantees at most one local server instance at any time, so a running server is reused as-is.
+//!
+//! The probe/shutdown handshake is the shared `cluster::server`, also used by the GUI (making the daemon yield before the GUI binds) and by `set_data_path` (daemon invalidation on data-dir switch).
+//!
+//! server 客户端;server 未运行时拉起一个 daemon(`daemon_server::run`)承载。
+//! 职责:探测 server → 按需拉起 daemon → 调用 /cli 端点。
+//!
+//! server 是应答 /cli 请求的常驻服务——入口为 `cluster::http_server` 的 HTTP 层,门后是路径缓存与嵌入模型等热资源;多机互联开启时由 GUI 进程承载,否则由上述拉起的 daemon 进程承载。
+//! 端口独占绑定保证任一时刻本地至多一个 server 实例,探测到已在运行就直接复用。
+//!
+//! 探测/关闭握手是共享的 `cluster::server`,GUI(绑定前请 daemon 让位)与 `set_data_path`(数据目录切换时的失效通知)也在使用。
 
 use mango_finder_lib::cluster::api_types::{CliSearchData, CliSimilarData};
 use mango_finder_lib::cluster::http_request_wrap;
@@ -27,27 +35,26 @@ pub async fn server_port() -> i32 {
     mango_finder_lib::cluster::http_server::clamp_port(setting.port)
 }
 
-/// Detect the host service (GUI or daemon); returns the port when it is ours
-/// 探测宿主服务(GUI 或 daemon);是本机服务时返回端口
+/// Detect the server (GUI-carried or daemon-carried); returns the port when it is ours
+/// 探测 server(GUI 承载或 daemon 承载);是本机服务时返回端口
 pub async fn detect() -> Option<i32> {
     detect_port(server_port().await).await
 }
 
-/// Detect a specific port (for host re-check after shutdown)
-/// 探测指定端口(供 shutdown 后的宿主身份复查)
+/// Detect a specific port (for the server re-check after shutdown)
+/// 探测指定端口(供 shutdown 后的 server 复查)
 pub async fn detect_port(port: i32) -> Option<i32> {
     matches!(server::probe(port).await, ProbeOutcome::Mine).then_some(port)
 }
 
-/// Ensure the host service is available: probe → spawn the daemon if absent → poll until ready.
+/// Ensure the server is available: probe → spawn the daemon if absent → poll until ready.
 /// Any failure returns None and the caller falls back to the in-process path.
 /// Behavior per probe outcome:
-/// - `Mine`        → use it directly
-/// - `Other`     → the port is held by another program: fail fast without
-///   spawning (otherwise every command would pay the full readiness timeout)
+/// - `Mine` → use it directly
+/// - `Other` → the port is held by another program: fail fast without spawning (otherwise every command would pay the full readiness timeout)
 /// - `Unreachable` → spawn `mfd serve` and wait for readiness
 /// A non-empty `MANGO_FINDER_NO_DAEMON` skips spawning (probe only).
-/// 确保宿主服务可用:探测 → 不在则拉起 daemon → 轮询就绪,任一步失败返回 None 由调用方回落进程内路径。
+/// 确保 server 可用:探测 → 不在则拉起 daemon → 轮询就绪,任一步失败返回 None 由调用方回落进程内路径。
 /// 探测结果决定行为:自家服务直接用;端口被外部程序占用则快速失败(否则每条命令都白等就绪超时);无监听则拉起并等待。
 /// `MANGO_FINDER_NO_DAEMON` 非空时跳过拉起(仅探测)。
 pub async fn ensure_server() -> Option<i32> {
@@ -56,7 +63,7 @@ pub async fn ensure_server() -> Option<i32> {
         ProbeOutcome::Mine => return Some(port),
         ProbeOutcome::Other => {
             log::warn!(
-                "port {} is held by another process, skipping host service",
+                "port {} is held by another process, skipping the server",
                 port
             );
             return None;
@@ -67,7 +74,7 @@ pub async fn ensure_server() -> Option<i32> {
         .map(|v| !v.is_empty())
         .unwrap_or(false)
     {
-        log::info!("host service absent; MANGO_FINDER_NO_DAEMON set, skip spawning daemon");
+        log::info!("server absent; MANGO_FINDER_NO_DAEMON set, skip spawning daemon");
         return None;
     }
     spawn_daemon().await?;
@@ -173,9 +180,8 @@ pub async fn similars(file_id: i64, limit: usize, port: i32) -> Result<Vec<Searc
     Ok(data.results)
 }
 
-/// Ask the host to shut down (daemon exits; a GUI host ignores it); shared implementation in `cluster::server`.
-/// 请求宿主退出(daemon 退出;GUI 宿主忽略);共享实现在
-/// `cluster::server`。
+/// Ask the server to shut down (the daemon exits; a GUI-carried server ignores it); shared implementation in `cluster::server`.
+/// 请求 server 退出(daemon 退出;GUI 承载的 server 忽略);共享实现在 `cluster::server`。
 pub async fn request_shutdown(port: i32) -> Result<(), String> {
     server::request_shutdown(port).await
 }
