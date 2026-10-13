@@ -35,7 +35,7 @@ pub fn init(format: &str) {
     let _ = OUTPUT_FORMAT.set(format.to_string());
 }
 
-fn is_table_mode() -> bool {
+pub fn is_table_mode() -> bool {
     OUTPUT_FORMAT.get().map(|f| f == "table").unwrap_or(false)
 }
 

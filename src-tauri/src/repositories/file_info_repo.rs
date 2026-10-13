@@ -598,10 +598,28 @@ pub fn get_by_path(path: &str) -> Result<Option<FileInfo>, RepositoryError> {
     }
 }
 
-pub fn list_by_name(name: &str) -> Result<Vec<FileInfo>, RepositoryError> {
+/// id/name/path projection of an indexed file — the only fields name resolution and disambiguation need
+/// 已索引文件的 id/name/path 投影:名字解析与消歧所需的全部字段
+#[derive(Debug, Clone)]
+pub struct NameHit {
+    pub id: i64,
+    pub name: String,
+    pub path: String,
+}
+
+/// Exact-name matches ordered by id asc; the caller keeps the min id when several files share the name.
+/// 按名精确匹配,按 id 升序;调用方在同名多行时取最小 id。
+pub fn list_by_name(name: &str) -> Result<Vec<NameHit>, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;
-    let mut stmt = conn.prepare("select * from file_info where name = ?1 order by id asc")?;
-    let rows = stmt.query_map([name], |row| Ok(build_file_info(row)?))?;
+    let mut stmt =
+        conn.prepare("select id, name, path from file_info where name = ?1 order by id asc")?;
+    let rows = stmt.query_map([name], |row| {
+        Ok(NameHit {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            path: row.get(2)?,
+        })
+    })?;
     let mut result = Vec::new();
     for item in rows {
         result.push(item?);

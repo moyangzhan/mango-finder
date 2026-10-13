@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use local_ip_address::list_afinet_netifas;
 use serde_json;
+use std::io::Read;
 use std::net::UdpSocket;
 use std::path::Path;
 use std::time::Instant;
@@ -14,7 +15,9 @@ use mango_finder_lib::global::{
 };
 use mango_finder_lib::indexer_service;
 use mango_finder_lib::repositories::{
-    device_repo, file_content_embedding_repo, file_info_repo, indexing_task_repo,
+    device_repo, file_content_embedding_repo,
+    file_info_repo::{self, NameHit},
+    indexing_task_repo,
 };
 use mango_finder_lib::searcher;
 use mango_finder_lib::similarity::similarity_service;
@@ -292,18 +295,18 @@ pub async fn handle_similar(file: &str, device: Option<String>, limit: usize, in
     let start = Instant::now();
     match target {
         SimilarTarget::Indexed {
-            file,
+            hit,
             same_name_matches,
         } => {
-            match find_similars(file.id, limit).await {
+            match find_similars(hit.id, limit).await {
                 Ok(results) => {
                     let elapsed = start.elapsed();
                     let mut data = serde_json::json!({
                         "mode": "indexed",
                         "file": {
-                            "id": file.id,
-                            "name": file.name,
-                            "path": file.path,
+                            "id": hit.id,
+                            "name": hit.name,
+                            "path": hit.path,
                         },
                         "results": results,
                         "total": results.len(),
@@ -314,19 +317,17 @@ pub async fn handle_similar(file: &str, device: Option<String>, limit: usize, in
                         data["notice"] = serde_json::json!(format!(
                             "{} files share the name '{}'; using id={} ({}). Pass a file ID or absolute path to pick another one.",
                             same_name_matches.len(),
-                            file.name,
-                            file.id,
-                            file.path
+                            hit.name,
+                            hit.id,
+                            hit.path
                         ));
                         // The list exists to retry with ANOTHER file; exclude the chosen entry so it does not waste one of the 5 slots.
-                        data["matched_files"] = serde_json::json!(
-                            same_name_matches
-                                .iter()
-                                .filter(|f| f.id != file.id)
-                                .take(5)
-                                .map(|f| serde_json::json!({"id": f.id, "path": f.path}))
-                                .collect::<Vec<_>>()
-                        );
+                        data["matched_files"] = serde_json::json!(same_name_matches
+                            .iter()
+                            .filter(|f| f.id != hit.id)
+                            .take(5)
+                            .map(|f| serde_json::json!({"id": f.id, "path": f.path}))
+                            .collect::<Vec<_>>());
                     }
                     output::print_success(OutputKind::Similar, &data);
                 }
@@ -535,11 +536,13 @@ async fn in_watched_directory(path: &str) -> bool {
 }
 
 enum SimilarTarget {
-    /// 已索引文件（file 为解析结果；same_name_matches 仅按文件名解析且存在多个同名文件时非空）
+    /// Indexed file projected to an id/name/path hit; same_name_matches lists every same-name hit, chosen one included, and is empty for id/path args
+    /// 已索引文件投影为 id/name/path 命中;same_name_matches 为按名解析的全部同名命中(含选中项),按 id/path 解析时为空
     Indexed {
-        file: FileInfo,
-        same_name_matches: Vec<FileInfo>,
+        hit: NameHit,
+        same_name_matches: Vec<NameHit>,
     },
+    /// External file on disk but not indexed; similarity computed on the fly
     /// 磁盘上存在但未索引的外部文件，走现场计算
     External { path: String, name: String },
 }
@@ -550,7 +553,11 @@ fn resolve_file_arg(arg: &str) -> Result<SimilarTarget, String> {
     if let Ok(id) = arg.parse::<i64>() {
         return match file_info_repo::get_by_id(id) {
             Ok(Some(file)) => Ok(SimilarTarget::Indexed {
-                file,
+                hit: NameHit {
+                    id: file.id,
+                    name: file.name,
+                    path: file.path,
+                },
                 same_name_matches: Vec::new(),
             }),
             Ok(None) => Err(format!(
@@ -583,7 +590,11 @@ fn resolve_file_arg(arg: &str) -> Result<SimilarTarget, String> {
             match file_info_repo::get_by_path(candidate) {
                 Ok(Some(file)) => {
                     return Ok(SimilarTarget::Indexed {
-                        file,
+                        hit: NameHit {
+                            id: file.id,
+                            name: file.name,
+                            path: file.path,
+                        },
                         same_name_matches: Vec::new(),
                     });
                 }
@@ -616,9 +627,9 @@ fn resolve_file_arg(arg: &str) -> Result<SimilarTarget, String> {
             arg
         )),
         Ok(matches) => {
-            let file = matches[0].clone();
+            let hit = matches[0].clone();
             Ok(SimilarTarget::Indexed {
-                file,
+                hit,
                 same_name_matches: matches,
             })
         }
@@ -767,6 +778,18 @@ pub async fn handle_index(action: IndexAction) {
     }
 }
 
+// Head-only text read for the table preview; a lossy tail byte is fine (the preview truncates at 200 chars anyway)
+fn read_text_head(path: &Path, max_bytes: u64) -> String {
+    std::fs::File::open(path)
+        .and_then(|mut f| {
+            let mut buf = Vec::new();
+            f.by_ref().take(max_bytes).read_to_end(&mut buf)?;
+            Ok(buf)
+        })
+        .map(|buf| String::from_utf8_lossy(&buf).into_owned())
+        .unwrap_or_default()
+}
+
 pub async fn handle_file(id: i64, open: bool, device: Option<String>) {
     if let Some(_device_id) = device {
         // TODO: fetch from remote devices
@@ -776,13 +799,17 @@ pub async fn handle_file(id: i64, open: bool, device: Option<String>) {
 
     match file_info_repo::get_by_id(id) {
         Ok(Some(mut file)) => {
-            // Same as the GUI/cluster read paths: under file storage mode the content column is empty and the parsed text lives in the .md referenced by content_ref_path — read it back.
-            if file.content.is_empty() {
+            // File-storage mode keeps the parsed text in the .md referenced by content_ref_path; read it back only when the output consumes it — full text for JSON, head only for the 200-char table preview, nothing for --open.
+            if file.content.is_empty() && !open {
                 if let (Some(rel), Some(storage)) =
                     (file.content_ref_path.as_deref(), STORAGE_PATH.get())
                 {
                     let md_path = std::path::Path::new(storage).join(rel);
-                    file.content = std::fs::read_to_string(&md_path).unwrap_or_default();
+                    file.content = if output::is_table_mode() {
+                        read_text_head(&md_path, 4 * 1024)
+                    } else {
+                        std::fs::read_to_string(&md_path).unwrap_or_default()
+                    };
                 }
             }
             if open {
