@@ -5,7 +5,7 @@ use std::net::UdpSocket;
 use std::path::Path;
 use std::time::Instant;
 
-use mango_finder_lib::cluster::local_process_client;
+use mango_finder_lib::cluster::host_client;
 use mango_finder_lib::entities::FileInfo;
 use mango_finder_lib::enums::FileCategory;
 use mango_finder_lib::global::{
@@ -22,7 +22,7 @@ use mango_finder_lib::structs::file_metadata::AudioType;
 use mango_finder_lib::utils::locale_util;
 use mango_finder_lib::utils::locale_util::current_locale;
 
-use crate::local_api;
+use crate::host_api;
 use crate::output::{self, OutputKind};
 use mango_finder_lib::structs::search_result::SearchResult;
 
@@ -196,8 +196,8 @@ pub async fn handle_search(query: &str, search_type: &str, device: Option<String
     // or the on-demand daemon); on failure silently fall back to the
     // in-process search. Output structure is identical across both paths —
     // both resolve (results, total) here and share one success tail.
-    let (results, total) = if let Some(port) = local_api::ensure_server().await {
-        match local_api::search(query, search_type, limit, port).await {
+    let (results, total) = if let Some(port) = host_api::ensure_server().await {
+        match host_api::search(query, search_type, limit, port).await {
             Ok((results, total)) => {
                 log::info!("search served by local API (port {})", port);
                 (results, total)
@@ -242,8 +242,8 @@ async fn in_process_search(
 /// 相似查询:优先走本机常驻服务(热模型),回落进程内;
 /// 两条路径底层调用相同函数,输出一致
 async fn find_similars(file_id: i64, limit: usize) -> Result<Vec<SearchResult>, String> {
-    if let Some(port) = local_api::ensure_server().await {
-        match local_api::similars(file_id, limit, port).await {
+    if let Some(port) = host_api::ensure_server().await {
+        match host_api::similars(file_id, limit, port).await {
             Ok(results) => {
                 log::info!("similar served by local API (port {})", port);
                 return Ok(results);
@@ -258,7 +258,7 @@ async fn find_similars(file_id: i64, limit: usize) -> Result<Vec<SearchResult>, 
 }
 
 pub async fn handle_shutdown() {
-    let Some(port) = local_api::detect().await else {
+    let Some(port) = host_api::detect().await else {
         let data = serde_json::json!({ "message": "No running local service" });
         output::print_success(OutputKind::Shutdown, &data);
         return;
@@ -268,18 +268,14 @@ pub async fn handle_shutdown() {
     // the daemon may exit between detect and POST (idle timeout / a
     // concurrent yield), which surfaces as a transport error although the
     // service actually stopped.
-    let _ = local_api::request_shutdown(port).await;
+    let _ = host_api::request_shutdown(port).await;
 
     // The daemon's graceful shutdown is bounded at 10s; allow 12s before
     // declaring a GUI host
     let (status, message) =
-        match local_process_client::wait_until_released(port, std::time::Duration::from_secs(12))
-            .await
-        {
-            local_process_client::ReleaseOutcome::Released => {
-                ("stopped", "Local service (daemon) stopped")
-            }
-            local_process_client::ReleaseOutcome::StillHeld => (
+        match host_client::wait_until_released(port, std::time::Duration::from_secs(12)).await {
+            host_client::ReleaseOutcome::Released => ("stopped", "Local service (daemon) stopped"),
+            host_client::ReleaseOutcome::StillHeld => (
                 "running",
                 "Service is hosted by the GUI; it stops when the GUI exits",
             ),
@@ -960,12 +956,12 @@ pub async fn handle_check() {
         setting.device_name.as_str()
     };
     let cluster_enabled = setting.enabled;
-    // local_port() already applies the valid-range clamp (single source)
-    let port: u16 = local_api::local_port().await as u16;
+    // host_port() already applies the valid-range clamp (single source)
+    let port: u16 = host_api::host_port().await as u16;
 
     // Port check: a port held by our own local service (GUI/daemon) is a
     // healthy state, not an occupancy problem.
-    let own_service = local_api::detect().await.is_some();
+    let own_service = host_api::detect().await.is_some();
     let port_available = if own_service {
         true
     } else {

@@ -1,6 +1,4 @@
-//! Client for the local resident host process (GUI server or CLI daemon),
-//! always dialed over loopback; used by both the CLI binary and the GUI's
-//! yield logic.
+//! Client for the resident host process (GUI server or CLI daemon), always dialed over loopback; used by the CLI binary and the GUI's yield logic.
 //! 本机常驻宿主进程(GUI 服务或 CLI daemon)的客户端,一律走回环;
 //! CLI 二进制与 GUI 让位逻辑共用。
 
@@ -15,16 +13,14 @@ const PROBE_TIMEOUT_MS: u64 = 600;
 
 static PROBE_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
-        // Loopback requests must bypass the system proxy: local proxies often
-        // reject 127.0.0.1 targets, which makes every probe time out.
+        // Loopback requests must bypass the system proxy: local proxies often reject 127.0.0.1 targets, which makes every probe time out.
         .no_proxy()
         .timeout(Duration::from_millis(PROBE_TIMEOUT_MS))
         .build()
         .expect("failed to build local probe client")
 });
 
-/// Shared request client (60s timeout: the first query may trigger a cold
-/// model load on the host side).
+/// Shared request client (60s timeout: the first query may trigger a cold model load on the host side).
 /// 共享请求客户端(60s 超时:首次查询可能触发宿主侧模型冷加载)。
 static REQUEST_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
@@ -37,7 +33,7 @@ static REQUEST_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 /// Probe outcome for a local port
 /// 本地端口探测结果
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LocalProbe {
+pub enum ProbeOutcome {
     /// Mango Finder's own service answered (device_id matched)
     /// 应答的是 Mango Finder 自身的服务(device_id 匹配)
     Mine,
@@ -55,21 +51,20 @@ fn client_id() -> String {
 
 /// Probe a port for our own local service.
 /// 探测端口上是否是本机服务。
-pub async fn probe(port: i32) -> LocalProbe {
+pub async fn probe(port: i32) -> ProbeOutcome {
     let own = client_id();
     let url = format!("http://127.0.0.1:{}/ping", port);
-    // Timeout means free: on some machines a free port also times out
-    // (dropped SYNs); classifying it as Other would break daemon spawning
+    // Timeout means free: on some machines a free port also times out (dropped SYNs); classifying it as Other would break daemon spawning
     let Ok(resp) = PROBE_CLIENT
         .get(url)
         .header("X-Device-ID", &own)
         .send()
         .await
     else {
-        return LocalProbe::Unreachable;
+        return ProbeOutcome::Unreachable;
     };
     if !resp.status().is_success() {
-        return LocalProbe::Other;
+        return ProbeOutcome::Other;
     }
     match resp
         .json::<CommonResponse<crate::cluster::api_types::PingData>>()
@@ -77,12 +72,12 @@ pub async fn probe(port: i32) -> LocalProbe {
     {
         Ok(parsed) => {
             if parsed.data.map(|d| d.device_id) == Some(own) {
-                LocalProbe::Mine
+                ProbeOutcome::Mine
             } else {
-                LocalProbe::Other
+                ProbeOutcome::Other
             }
         }
-        Err(_) => LocalProbe::Other,
+        Err(_) => ProbeOutcome::Other,
     }
 }
 
@@ -98,20 +93,17 @@ pub enum ReleaseOutcome {
     StillHeld,
 }
 
-/// Poll until the service on `port` stops answering as ours: two consecutive
-/// non-Mine probes (a single slow /ping is not misread as an exit) or the
-/// timeout, whichever comes first. Sleeps before the first probe so the
-/// just-notified host gets a chance to exit first.
-/// 轮询等待端口上的服务不再是自家:连续两次非 Mine
-/// (单次慢 /ping 不会误判为退出)或超时,先到为准。首次探测前先睡眠,给
-/// 刚收到通知的宿主一点退出时间。
+/// Poll until the service on `port` stops answering as ours: two consecutive non-Mine probes (a single slow /ping is not misread as an exit) or the timeout, whichever comes first.
+/// Sleeps before the first probe so the just-notified host gets a chance to exit first.
+/// 轮询等待端口上的服务不再是自家:连续两次非 Mine(单次慢 /ping 不会误判为退出)或超时,先到为准。
+/// 首次探测前先睡眠,给刚收到通知的宿主一点退出时间。
 pub async fn wait_until_released(port: i32, timeout: Duration) -> ReleaseOutcome {
     const POLL_INTERVAL_MS: u64 = 150;
     let deadline = Instant::now() + timeout;
     let mut consecutive_gone = 0;
     loop {
         tokio::time::sleep(Duration::from_millis(POLL_INTERVAL_MS)).await;
-        if probe(port).await != LocalProbe::Mine {
+        if probe(port).await != ProbeOutcome::Mine {
             consecutive_gone += 1;
             if consecutive_gone >= 2 {
                 return ReleaseOutcome::Released;
@@ -125,8 +117,7 @@ pub async fn wait_until_released(port: i32, timeout: Duration) -> ReleaseOutcome
     }
 }
 
-/// POST to a /cli endpoint and return the parsed CommonResponse (shared
-/// error ladder; data may be empty).
+/// POST to a /cli endpoint and return the parsed CommonResponse (shared error ladder; data may be empty).
 /// 向 /cli 端点 POST 并返回解析后的 CommonResponse(共享错误阶梯;data 可为空)。
 async fn post_common_response<T: serde::de::DeserializeOwned>(
     port: i32,
@@ -167,10 +158,8 @@ pub async fn post_and_get_data<T: serde::de::DeserializeOwned>(
         .ok_or_else(|| "No data in response".to_string())
 }
 
-/// Ask the local service host to shut down (the daemon exits; a GUI host
-/// ignores it). Auth is the loopback + X-Device-ID middleware on /cli/*.
-/// 请求本地宿主退出(daemon 退出;GUI 宿主忽略)。鉴权由 /cli/* 的
-/// 回环 + X-Device-ID 中间件承担。
+/// Ask the local service host to shut down (the daemon exits; a GUI host ignores it). Auth is the loopback + X-Device-ID middleware on /cli/*.
+/// 请求本地宿主退出(daemon 退出;GUI 宿主忽略)。鉴权由 /cli/* 的回环 + X-Device-ID 中间件承担。
 pub async fn request_shutdown(port: i32) -> Result<(), String> {
     post_common_response::<serde_json::Value>(port, "/cli/shutdown", serde_json::Value::Null)
         .await

@@ -1,4 +1,4 @@
-use crate::cluster::handlers::{local, pairing, remote};
+use crate::cluster::handlers::{cli, pairing, remote};
 use crate::global::{APP_HANDLE, CLIENT_ID};
 use axum::{
     Router, middleware,
@@ -208,9 +208,9 @@ pub async fn start_http_server() -> Result<(), String> {
 }
 
 /// Clamp to the valid port range (single source shared with the CLI's
-/// local_port): out-of-range values fall back to the default so `as u16`
+/// host_port): out-of-range values fall back to the default so `as u16`
 /// truncation can never make bind/probe/check disagree.
-/// 钳制到合法端口区间(与 CLI 的 local_port 共用的单一来源):超范围值统一
+/// 钳制到合法端口区间(与 CLI 的 host_port 共用的单一来源):超范围值统一
 /// 回退默认端口,`as u16` 截断不会让绑定/探测/check 落在不同端口上。
 pub fn clamp_port(port: i32) -> i32 {
     if (1..=65535).contains(&port) {
@@ -297,12 +297,12 @@ async fn serve_on(
         port,
     });
 
-    // /cli local API: local clients only, loopback + local CLIENT_ID double-check
+    // /cli API: local clients only, loopback + local CLIENT_ID double-check
     let cli_routes = Router::new()
-        .route("/cli/search", post(local::cli_search))
-        .route("/cli/similar/:file_id", post(local::cli_similar))
-        .route("/cli/shutdown", post(local::cli_shutdown))
-        .layer(middleware::from_fn(local::verify_loopback));
+        .route("/cli/search", post(cli::cli_search))
+        .route("/cli/similar/:file_id", post(cli::cli_similar))
+        .route("/cli/shutdown", post(cli::cli_shutdown))
+        .layer(middleware::from_fn(cli::verify_loopback));
 
     // Inter-device protocol gets a /cluster prefix, separated from the
     // /cli (local) namespace. No legacy-path compatibility: devices are
@@ -362,22 +362,22 @@ async fn serve_on(
 /// Port held by our own CLI daemon: ask it to exit and wait until it really
 /// does (probe no longer `Mine`) before the caller rebinds — close first,
 /// then start. The probe/shutdown handshake is shared with the CLI via
-/// `cluster::local_process_client`.
+/// `cluster::host_client`.
 /// 端口被自家 CLI daemon 占用时:请求其退出并等待端口真正释放
 /// (探测不再是自家服务),再由调用方重绑 —— 先关后开。探测/关闭握手与 CLI
-/// 共用 `cluster::local_process_client`。
+/// 共用 `cluster::host_client`。
 async fn try_yield_to_cli_daemon(port: i32) -> bool {
-    use super::local_process_client::{self, LocalProbe, ReleaseOutcome};
+    use super::host_client::{self, ProbeOutcome, ReleaseOutcome};
 
     // Only our own daemon yields; a GUI host or another holder does not
-    if local_process_client::probe(port).await != LocalProbe::Mine {
+    if host_client::probe(port).await != ProbeOutcome::Mine {
         return false;
     }
-    let _ = local_process_client::request_shutdown(port).await;
+    let _ = host_client::request_shutdown(port).await;
 
     // The daemon's graceful shutdown is bounded at 10s (in-flight responses);
     // allow 12s before declaring it stuck
-    match local_process_client::wait_until_released(port, Duration::from_secs(12)).await {
+    match host_client::wait_until_released(port, Duration::from_secs(12)).await {
         ReleaseOutcome::Released => {
             log::info!("CLI daemon on port {} has yielded", port);
             true
