@@ -1,15 +1,16 @@
 use crate::global::{APP_HANDLE, CLIENT_ID};
 use crate::server::handlers::{cli, pairing, remote};
 use axum::{
-    Router, middleware,
+    middleware,
     routing::{get, post},
+    Router,
 };
 use socket2::{Domain, Protocol, Socket, Type};
 use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tauri::Emitter;
 use tokio::net::TcpListener;
@@ -18,8 +19,8 @@ use tokio::sync::watch;
 /// HTTP server shutdown signal sender
 static SHUTDOWN_SENDER: RwLock<Option<watch::Sender<bool>>> = RwLock::new(None);
 
-/// Default port for cluster service
-/// 集群服务默认端口
+/// Default port, the fallback `utils::port_util::clamp_port` uses for out-of-range values
+/// 默认端口;`utils::port_util::clamp_port` 对超范围值使用的回退
 pub const DEFAULT_PORT: i32 = 15678;
 
 /// Whether this process is the CLI daemon carrying the server (decides whether /cli/shutdown actually exits)
@@ -90,13 +91,8 @@ pub async fn get_actual_port() -> i32 {
 /// On Windows, uses SO_EXCLUSIVEADDRUSE to ensure exclusive port binding.
 /// 在 Windows 上使用 SO_EXCLUSIVEADDRUSE 确保端口独占绑定。
 pub async fn is_port_available(port: i32) -> bool {
-    create_exclusive_socket(port).is_ok()
-}
-
-/// Create a socket with exclusive address use, bound to 0.0.0.0
-/// 创建独占地址的 socket（绑定 0.0.0.0）
-fn create_exclusive_socket(port: i32) -> Result<TcpListener, Error> {
-    create_exclusive_socket_on(SocketAddr::from(([0, 0, 0, 0], port as u16)))
+    // Probe the wildcard scope, the conservative superset: if 0.0.0.0 binds, the loopback scope binds too
+    create_exclusive_socket_on(SocketAddr::from(([0, 0, 0, 0], port as u16))).is_ok()
 }
 
 /// Create a socket with exclusive address use on the given address
@@ -110,7 +106,7 @@ fn create_exclusive_socket_on(addr: SocketAddr) -> Result<TcpListener, Error> {
     {
         use std::os::windows::io::AsRawSocket;
         use windows_sys::Win32::Networking::WinSock::{
-            SO_EXCLUSIVEADDRUSE, SOL_SOCKET, setsockopt,
+            setsockopt, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
         };
 
         socket.set_reuse_address(false)?;
@@ -146,16 +142,10 @@ fn create_exclusive_socket_on(addr: SocketAddr) -> Result<TcpListener, Error> {
     tokio::net::TcpListener::from_std(std_listener)
 }
 
-/// Start HTTP server with configured port
-/// 启动 HTTP 服务器，使用配置的端口
-///
-/// Port is loaded from database (cluster_setting.port).
-/// If binding fails, returns error and notifies frontend.
-/// 端口从数据库加载（cluster_setting.port）。
-/// 如果绑定失败，返回错误并通知前端。
-///
-/// Uses SO_EXCLUSIVEADDRUSE on Windows to ensure exclusive port binding.
-/// 在 Windows 上使用 SO_EXCLUSIVEADDRUSE 确保端口独占绑定。
+/// Start the HTTP server: 0.0.0.0 when the cluster is enabled (answering remote devices), loopback otherwise (local CLI only).
+/// On a busy port the daemon reports the error and exits (`daemon_server::run`); the GUI asks a holding daemon to yield and retries (`try_yield_to_cli_daemon`).
+/// 启动 HTTP server:集群开启绑 0.0.0.0(应答远程设备),否则仅回环(只服务本机 CLI)。
+/// 端口被占时 daemon 上报后退出(`daemon_server::run`);GUI 请持有端口的 daemon 让位后重试(`try_yield_to_cli_daemon`)。
 pub async fn start_http_server() -> Result<(), String> {
     // Check if server is already running
     if server_already_running() {
@@ -163,61 +153,88 @@ pub async fn start_http_server() -> Result<(), String> {
         return Ok(());
     }
 
-    let (port, device_id, device_name) = resolve_identity().await;
+    let identity = resolve_identity().await;
+    let addr = get_ip_scope(identity.port, identity.cluster_enabled);
 
-    // Bind with exclusive access; if the port is held by our own CLI daemon, ask it to yield first (close-then-start, so the daemon's model memory is released before this process warms up its own).
-    // Retry a few times: a concurrent CLI invocation may spawn a fresh daemon into the gap between the old daemon's exit and our rebind — yield it too instead of failing.
-    let listener = match create_exclusive_socket(port) {
-        Ok(l) => l,
-        Err(e) => {
-            let mut last_err = e;
-            let mut bound = None;
-            for _ in 0..5 {
-                if !try_yield_to_cli_daemon(port).await {
-                    break;
-                }
-                match create_exclusive_socket(port) {
-                    Ok(l) => {
-                        bound = Some(l);
+    let listener = if IS_DAEMON.load(Ordering::Relaxed) {
+        // Fair racer: a busy port means a server already exists (GUI-carried, or a concurrent daemon that won the bind race) — report and let the caller exit
+        create_exclusive_socket_on(addr)
+            .map_err(|e| format!("Port {} is already in use: {}", identity.port, e))?
+    } else {
+        // If the port is held by our own CLI daemon, ask it to yield first (close-then-start, so the daemon's model memory is released before this process warms up its own).
+        // Retry a few times: a concurrent CLI invocation may spawn a fresh daemon into the gap between the old daemon's exit and our rebind — yield it too instead of failing.
+        match create_exclusive_socket_on(addr) {
+            Ok(l) => l,
+            Err(e) => {
+                let mut last_err = e;
+                let mut bound = None;
+                for _ in 0..5 {
+                    if !try_yield_to_cli_daemon(identity.port).await {
                         break;
                     }
-                    Err(retry_err) => last_err = retry_err,
+                    match create_exclusive_socket_on(addr) {
+                        Ok(l) => {
+                            bound = Some(l);
+                            break;
+                        }
+                        Err(retry_err) => last_err = retry_err,
+                    }
                 }
-            }
-            match bound {
-                Some(l) => l,
-                None => {
-                    log::error!("Failed to bind port {}: {}", port, last_err);
-                    emit_port_error(port);
-                    return Err(format!("Port {} is already in use: {}", port, last_err));
+                match bound {
+                    Some(l) => l,
+                    None => {
+                        log::error!("Failed to bind port {}: {}", identity.port, last_err);
+                        emit_port_error(identity.port);
+                        return Err(format!(
+                            "Port {} is already in use: {}",
+                            identity.port, last_err
+                        ));
+                    }
                 }
             }
         }
     };
 
-    // Update cluster port in database and global state (ensures consistency)
-    if let Err(e) = crate::cluster::update_cluster_port(port).await {
-        log::error!("Failed to update cluster port: {}", e);
+    // Update cluster port in database and global state (ensures consistency); the daemon reads the same source and skips the write-back
+    if !IS_DAEMON.load(Ordering::Relaxed) {
+        if let Err(e) = crate::cluster::update_cluster_port(identity.port).await {
+            log::error!("Failed to update cluster port: {}", e);
+        }
     }
 
-    serve_on(listener, device_id, device_name, port).await
+    serve_on(
+        listener,
+        identity.device_id,
+        identity.device_name,
+        identity.port,
+    )
+    .await
 }
 
-/// Clamp to the valid port range (single source shared with the CLI's server_port): out-of-range values fall back to the default so `as u16` truncation can never make bind/probe/check disagree.
-/// 钳制到合法端口区间(与 CLI 的 server_port 共用的单一来源):超范围值统一回退默认端口,`as u16` 截断不会让绑定/探测/check 落在不同端口上。
-pub fn clamp_port(port: i32) -> i32 {
-    if (1..=65535).contains(&port) {
-        port
+/// The bind IP scope per the cluster-enabled setting
+/// 由集群开关决定的绑定 IP 范围
+fn get_ip_scope(port: i32, cluster_enabled: bool) -> SocketAddr {
+    if cluster_enabled {
+        SocketAddr::from(([0, 0, 0, 0], port as u16))
     } else {
-        DEFAULT_PORT
+        SocketAddr::from(([127, 0, 0, 1], port as u16))
     }
 }
 
-/// Resolve the shared server identity: port (DB cluster_setting with the typed default) plus device_id/device_name for ServerState.
-/// 解析公共服务身份:端口(DB cluster_setting,类型默认值兜底)与 ServerState 所需的 device_id/device_name。
-async fn resolve_identity() -> (i32, String, String) {
+/// Startup identity resolved once from the config: port, device_id/device_name for ServerState, plus the cluster-enabled flag deciding the bind IP scope.
+/// 启动时一次性解析的身份:端口、ServerState 所需的 device_id/device_name,以及决定绑定 IP 范围的集群开关。
+struct ServerIdentity {
+    port: i32,
+    device_id: String,
+    device_name: String,
+    cluster_enabled: bool,
+}
+
+/// Resolve the startup identity (DB cluster_setting with the typed defaults)
+/// 解析启动身份(DB cluster_setting,类型默认值兜底)
+async fn resolve_identity() -> ServerIdentity {
     let setting = crate::cluster::get_cluster_setting().await;
-    let port = clamp_port(setting.port);
+    let port = crate::utils::port_util::clamp_port(setting.port, DEFAULT_PORT);
     let device_id = crate::read_lock!(CLIENT_ID).clone();
     let device_name = if setting.device_name.is_empty() {
         hostname::get()
@@ -226,30 +243,18 @@ async fn resolve_identity() -> (i32, String, String) {
     } else {
         setting.device_name
     };
-    (port, device_id, device_name)
+    ServerIdentity {
+        port,
+        device_id,
+        device_name,
+        cluster_enabled: setting.enabled,
+    }
 }
 
 /// Whether the HTTP server is already running in this process
 /// 本进程内服务是否已在运行
 fn server_already_running() -> bool {
     SHUTDOWN_SENDER.read().map(|g| g.is_some()).unwrap_or(false)
-}
-
-/// Start the HTTP server bound to loopback only (CLI daemon, `mfd serve`)
-/// 以 CLI daemon(`mfd serve`)身份启动,仅绑定回环地址,不向局域网暴露
-pub async fn start_http_server_loopback() -> Result<(), String> {
-    if server_already_running() {
-        log::info!("HTTP server is already running, skip start");
-        return Ok(());
-    }
-    let (port, device_id, device_name) = resolve_identity().await;
-
-    // The daemon never yields: a busy port means a server already exists (GUI-carried, or a concurrent daemon that won the bind race) — this process is the loser and exits (see daemon_server::run).
-    let addr = SocketAddr::from(([127, 0, 0, 1], port as u16));
-    let listener = create_exclusive_socket_on(addr)
-        .map_err(|e| format!("Port {} is already in use: {}", port, e))?;
-
-    serve_on(listener, device_id, device_name, port).await
 }
 
 /// Notify frontend about port binding failure (user-friendly message)
@@ -347,20 +352,22 @@ async fn serve_on(
 }
 
 /// Port held by our own CLI daemon: ask it to exit and wait until it really does (probe no longer `Mine`) before the caller rebinds — close first, then start.
-/// The probe/shutdown handshake is shared with the CLI via `crate::server`.
+/// The probe/shutdown handshake lives in `loopback_client`, shared with the CLI.
 /// 端口被自家 CLI daemon 占用时:请求其退出并等待端口真正释放(探测不再是自家服务),再由调用方重绑 —— 先关后开。
-/// 探测/关闭握手与 CLI 共用 `crate::server`。
+/// 探测/关闭握手住在 `loopback_client`,与 CLI 共用。
 async fn try_yield_to_cli_daemon(port: i32) -> bool {
-    use crate::server::{self, ProbeOutcome, ReleaseOutcome};
+    use crate::server::loopback_client::{
+        probe, request_shutdown, wait_until_released, ProbeOutcome, ReleaseOutcome,
+    };
 
     // Only our own daemon yields; the GUI process or another holder does not
-    if server::probe(port).await != ProbeOutcome::Mine {
+    if probe(port).await != ProbeOutcome::Mine {
         return false;
     }
-    let _ = server::request_shutdown(port).await;
+    let _ = request_shutdown(port).await;
 
     // The daemon's graceful shutdown is bounded at 10s (in-flight responses); allow 12s before declaring it stuck
-    match server::wait_until_released(port, Duration::from_secs(12)).await {
+    match wait_until_released(port, Duration::from_secs(12)).await {
         ReleaseOutcome::Released => {
             log::info!("CLI daemon on port {} has yielded", port);
             true

@@ -1,6 +1,7 @@
-//! Daemon periodic self-monitoring tasks (idle exit)
-//! daemon 周期自监控任务(空闲退出)
+//! Daemon periodic self-monitoring tasks (idle exit; skipped while the cluster is enabled — the daemon then serves remote devices)
+//! daemon 周期自监控任务(空闲退出;集群开启时跳过——daemon 届时应答远程设备)
 
+use mango_finder_lib::cluster;
 use mango_finder_lib::server::http_server;
 use std::time::Duration;
 
@@ -19,12 +20,17 @@ pub async fn run() -> ! {
     loop {
         tokio::time::sleep(Duration::from_secs(30)).await;
         let idle = http_server::cli_idle_secs().unwrap_or(0);
-        if idle >= idle_limit_secs() {
-            log::info!("mfd serve idle for {}s, exiting", idle);
-            http_server::stop_http_server().await;
-            // Graceful shutdown (same as /cli/shutdown): wait until in-flight responses are written before exiting.
-            http_server::wait_server_stopped().await;
-            std::process::exit(0);
+        if idle < idle_limit_secs() {
+            continue;
         }
+        // Cluster on: the daemon is a serving cluster node (remote devices reach the 0.0.0.0 bind), so staying resident is the configured intent — skip the idle exit
+        if cluster::is_cluster_enabled() {
+            continue;
+        }
+        log::info!("mfd serve idle for {}s, exiting", idle);
+        http_server::stop_http_server().await;
+        // Graceful shutdown (same as /cli/shutdown): wait until in-flight responses are written before exiting.
+        http_server::wait_server_stopped().await;
+        std::process::exit(0);
     }
 }

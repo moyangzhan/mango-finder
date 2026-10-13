@@ -5,7 +5,7 @@
 //! 任一步失败返回 None,由调用方回落进程内路径。
 
 use mango_finder_lib::cluster::api_types::{CliSearchData, CliSimilarData};
-use mango_finder_lib::server::{self, loopback_client, ProbeOutcome};
+use mango_finder_lib::server::loopback_client::{self, probe, ProbeOutcome};
 use mango_finder_lib::structs::search_result::SearchResult;
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -20,8 +20,11 @@ const DAEMON_READY_TIMEOUT_SECS: u64 = 10;
 /// 钳制到合法区间,避免超范围值经 `as u16` 截断后探测与绑定落不同端口。
 pub async fn server_port() -> i32 {
     let setting = mango_finder_lib::cluster::get_cluster_setting().await;
-    // Single clamp source: http_server::clamp_port
-    mango_finder_lib::server::http_server::clamp_port(setting.port)
+    // Single fallback source: http_server::DEFAULT_PORT
+    mango_finder_lib::utils::port_util::clamp_port(
+        setting.port,
+        mango_finder_lib::server::http_server::DEFAULT_PORT,
+    )
 }
 
 /// Detect the server (GUI-carried or daemon-carried); returns the port when it is ours
@@ -33,7 +36,7 @@ pub async fn detect() -> Option<i32> {
 /// Detect a specific port (for the server re-check after shutdown)
 /// 探测指定端口(供 shutdown 后的 server 复查)
 pub async fn detect_port(port: i32) -> Option<i32> {
-    matches!(server::probe(port).await, ProbeOutcome::Mine).then_some(port)
+    matches!(probe(port).await, ProbeOutcome::Mine).then_some(port)
 }
 
 /// Ensure the server is available: probe → spawn the daemon if absent → poll until ready.
@@ -48,7 +51,7 @@ pub async fn detect_port(port: i32) -> Option<i32> {
 /// `MANGO_FINDER_NO_DAEMON` 非空时跳过拉起(仅探测)。
 pub async fn ensure_server() -> Option<i32> {
     let port = server_port().await;
-    match server::probe(port).await {
+    match probe(port).await {
         ProbeOutcome::Mine => return Some(port),
         ProbeOutcome::Other => {
             log::warn!(
@@ -126,7 +129,7 @@ async fn spawn_daemon() -> Option<()> {
 async fn wait_ready(port: i32) -> Option<i32> {
     let deadline = Instant::now() + Duration::from_secs(DAEMON_READY_TIMEOUT_SECS);
     loop {
-        if matches!(server::probe(port).await, ProbeOutcome::Mine) {
+        if matches!(probe(port).await, ProbeOutcome::Mine) {
             log::info!("local daemon ready on port {}", port);
             return Some(port);
         }
@@ -168,8 +171,8 @@ pub async fn similars(file_id: i64, limit: usize, port: i32) -> Result<Vec<Searc
     Ok(data.results)
 }
 
-/// Ask the server to shut down (the daemon exits; a GUI-carried server ignores it); shared implementation in `server`.
-/// 请求 server 退出(daemon 退出;GUI 承载的 server 忽略);共享实现在 `server`。
+/// Ask the server to shut down (the daemon exits; a GUI-carried server ignores it); shared implementation in `loopback_client`.
+/// 请求 server 退出(daemon 退出;GUI 承载的 server 忽略);共享实现在 `loopback_client`。
 pub async fn request_shutdown(port: i32) -> Result<(), String> {
-    server::request_shutdown(port).await
+    loopback_client::request_shutdown(port).await
 }

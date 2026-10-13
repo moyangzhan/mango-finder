@@ -9,7 +9,7 @@ use crate::global::{
     TRAY_ID, VISION_MODEL_PATH, VISION_NAME, VISION_TOKENIZER_NAME, VISION_TOKENIZER_PATH,
     WHISPER_MODEL_NAME, WHISPER_MODEL_PATH,
 };
-use crate::server::{self, ProbeOutcome};
+use crate::server::loopback_client::{self, ProbeOutcome};
 use crate::utils::file_util;
 use crate::utils::task_util;
 use log::{error, info, warn};
@@ -212,10 +212,12 @@ pub async fn set_data_path(
     let _ = task_util::unlock_active_task();
 
     // Tell a running daemon to exit and respawn on the next CLI call: its path globals are OnceLocks fixed at startup (/cli/shutdown is a no-op when the server is GUI-carried)
-    let port =
-        crate::server::http_server::clamp_port(crate::cluster::get_cluster_setting().await.port);
-    if matches!(server::probe(port).await, ProbeOutcome::Mine) {
-        if let Err(e) = server::request_shutdown(port).await {
+    let port = crate::utils::port_util::clamp_port(
+        crate::cluster::get_cluster_setting().await.port,
+        crate::server::http_server::DEFAULT_PORT,
+    );
+    if matches!(loopback_client::probe(port).await, ProbeOutcome::Mine) {
+        if let Err(e) = loopback_client::request_shutdown(port).await {
             warn!("Failed to notify daemon of data path change: {}", e);
         }
     }

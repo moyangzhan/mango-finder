@@ -19,7 +19,7 @@ use mango_finder_lib::repositories::{
     indexing_task_repo,
 };
 use mango_finder_lib::searcher;
-use mango_finder_lib::server;
+use mango_finder_lib::server::loopback_client;
 use mango_finder_lib::similarity::similarity_service;
 use mango_finder_lib::structs::file_metadata::AudioType;
 use mango_finder_lib::utils::locale_util;
@@ -265,14 +265,18 @@ pub async fn handle_shutdown() {
     let _ = daemon_client::request_shutdown(port).await;
 
     // The daemon's graceful shutdown is bounded at 10s; allow 12s before declaring the server GUI-carried
-    let (status, message) =
-        match server::wait_until_released(port, std::time::Duration::from_secs(12)).await {
-            server::ReleaseOutcome::Released => ("stopped", "Local server (daemon) stopped"),
-            server::ReleaseOutcome::StillHeld => (
-                "running",
-                "Server is carried by the GUI; it stops when the GUI exits",
-            ),
-        };
+    let (status, message) = match loopback_client::wait_until_released(
+        port,
+        std::time::Duration::from_secs(12),
+    )
+    .await
+    {
+        loopback_client::ReleaseOutcome::Released => ("stopped", "Local server (daemon) stopped"),
+        loopback_client::ReleaseOutcome::StillHeld => (
+            "running",
+            "Server is carried by the GUI; it stops when the GUI exits",
+        ),
+    };
     let data = serde_json::json!({ "status": status, "message": message });
     output::print_success(OutputKind::Shutdown, &data);
 }
