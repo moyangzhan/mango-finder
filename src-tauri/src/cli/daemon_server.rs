@@ -6,10 +6,10 @@
 //! 只绑回环、单实例、空闲自动退出;模型懒加载,有索引时启动即预热。
 //! 前置条件:main 已完成 init_paths + initializer(process)。
 
-use mango_finder_lib::cluster::http_server;
 use mango_finder_lib::repositories::file_content_embedding_repo;
 use mango_finder_lib::searcher::path_search_engine;
 use mango_finder_lib::searcher::semantic_search_engine::warmup_embedding_service;
+use mango_finder_lib::server::http_server;
 
 use crate::timer;
 

@@ -1,11 +1,26 @@
-//! Local-server liveness probing and the exit handshake: probe / request exit / wait until released.
-//! Used by the CLI binary, the GUI's yield logic (making the daemon yield before the GUI binds) and `set_data_path` (daemon invalidation on data-dir switch).
+//! The server: the HTTP service answering /cli (and cluster) requests.
+//! Resident by design — carried by the GUI process when multi-device is enabled, otherwise by a daemon (`mfd serve`) — so the hot state behind the routes (path cache, embedding model) survives across commands; the exclusive bind guarantees at most one local instance at any time.
 //!
-//! 本机 server 的存活探测与退出握手:探测 / 请求退出 / 等待释放。
-//! CLI 二进制、GUI 让位逻辑(GUI 绑定前请 daemon 让位)与 `set_data_path`(数据目录切换时的失效通知)共用。
+//! Module layout:
+//! 1. this file — probe/shutdown handshake, shared by the CLI binary, the GUI's yield logic (making the daemon yield before the GUI binds) and `set_data_path` (daemon invalidation on data-dir switch)
+//! 2. `http_server` — the listener: bind/daemon flags/graceful stop
+//! 3. `handlers` — route families
+//! 4. `loopback_client` — client-side POST wrapper
+//!
+//! server:应答 /cli(与 cluster)请求的 HTTP 服务。
+//! 设计为常驻——多机互联开启时由 GUI 进程承载,否则由 daemon(`mfd serve`)承载——让路由背后的热状态(路径缓存、嵌入模型)跨命令保留,后续命令免于冷启动;端口独占绑定保证任一时刻本地至多一个实例。
+//!
+//! 模块布局:
+//! 1. 本文件 — 探测/退出握手,CLI 二进制、GUI 让位逻辑(GUI 绑定前请 daemon 让位)与 `set_data_path`(数据目录切换时的失效通知)共用
+//! 2. `http_server` — HTTP 监听器:绑定/daemon 标记/优雅停机
+//! 3. `handlers` — 路由族
+//! 4. `loopback_client` — 客户端 POST 封装
+
+pub mod handlers;
+pub mod http_server;
+pub mod loopback_client;
 
 use crate::cluster::api_types::CommonResponse;
-use crate::loopback_request::{client_id, post_common_response};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
@@ -37,10 +52,10 @@ pub enum ProbeOutcome {
     Unreachable,
 }
 
-/// Probe a port for our own local server.
-/// 探测端口上是否是本机 server。
+/// Probe a port for our own server.
+/// 探测端口上是否为自家 server。
 pub async fn probe(port: i32) -> ProbeOutcome {
-    let own = client_id();
+    let own = loopback_client::client_id();
     let url = format!("http://127.0.0.1:{}/ping", port);
     // Timeout means free: on some machines a free port also times out (dropped SYNs); classifying it as Other would break daemon spawning
     let Ok(resp) = PROBE_CLIENT
@@ -105,10 +120,14 @@ pub async fn wait_until_released(port: i32, timeout: Duration) -> ReleaseOutcome
     }
 }
 
-/// Ask the local server to shut down (the daemon exits; a GUI-carried server ignores it). Auth is the loopback + X-Device-ID middleware on /cli/*.
-/// 请求本机 server 退出(daemon 退出;GUI 承载的 server 忽略)。鉴权由 /cli/* 的回环 + X-Device-ID 中间件承担。
+/// Ask the server to shut down (the daemon exits; a GUI-carried server ignores it). Auth is the loopback + X-Device-ID middleware on /cli/*.
+/// 请求 server 退出(daemon 退出;GUI 承载的 server 忽略)。鉴权由 /cli/* 的回环 + X-Device-ID 中间件承担。
 pub async fn request_shutdown(port: i32) -> Result<(), String> {
-    post_common_response::<serde_json::Value>(port, "/cli/shutdown", serde_json::Value::Null)
-        .await
-        .map(|_| ())
+    loopback_client::post_common_response::<serde_json::Value>(
+        port,
+        "/cli/shutdown",
+        serde_json::Value::Null,
+    )
+    .await
+    .map(|_| ())
 }

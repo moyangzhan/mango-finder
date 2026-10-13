@@ -5,11 +5,11 @@ use crate::cluster::api_types::{
     CODE_DEVICE_NOT_PAIRED, CODE_INTERNAL_ERROR, CODE_MISSING_DEVICE_ID, CODE_NOT_FOUND,
     ChunksData, ChunksRequest, CommonResponse, FindSimilarsData, PingData, SearchData,
 };
-use crate::cluster::http_server::ServerState;
 use crate::enums::PairingStatus;
 use crate::global::STORAGE_PATH;
 use crate::repositories::{device_repo, file_content_embedding_repo, file_info_repo};
 use crate::searcher;
+use crate::server::http_server::ServerState;
 use crate::similarity::{local_similarity_service, remote_similarity_service};
 use crate::structs::cluster_config::{
     DeviceCapabilities, RemoteFindSimilarsRequest, RemoteSearchRequest,

@@ -1,5 +1,5 @@
-//! Loopback request helper for the local server (127.0.0.1 only): shared 60s client, X-Device-ID header, CommonResponse error ladder.
-//! 本机 server 的回环请求封装(仅 127.0.0.1):共享 60s 客户端、X-Device-ID 头、CommonResponse 错误阶梯。
+//! Loopback client for the server (127.0.0.1 only), the local counterpart of the remote-facing `cluster::http_client`: shared 60s reqwest client, X-Device-ID header, CommonResponse error ladder.
+//! server 的回环客户端(仅 127.0.0.1),与面向远程设备的 `cluster::http_client` 相对照:共享 60s reqwest 客户端、X-Device-ID 头、CommonResponse 错误阶梯。
 
 use crate::cluster::api_types::CommonResponse;
 use crate::global::CLIENT_ID;

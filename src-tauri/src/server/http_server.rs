@@ -1,5 +1,5 @@
-use crate::cluster::handlers::{cli, pairing, remote};
 use crate::global::{APP_HANDLE, CLIENT_ID};
+use crate::server::handlers::{cli, pairing, remote};
 use axum::{
     Router, middleware,
     routing::{get, post},
@@ -81,7 +81,7 @@ pub struct ServerState {
 /// Get the actual port the server is running on
 /// 从全局配置获取端口
 pub async fn get_actual_port() -> i32 {
-    super::get_cluster_setting().await.port
+    crate::cluster::get_cluster_setting().await.port
 }
 
 /// Check if a port is available for binding (with exclusive access)
@@ -196,7 +196,7 @@ pub async fn start_http_server() -> Result<(), String> {
     };
 
     // Update cluster port in database and global state (ensures consistency)
-    if let Err(e) = super::update_cluster_port(port).await {
+    if let Err(e) = crate::cluster::update_cluster_port(port).await {
         log::error!("Failed to update cluster port: {}", e);
     }
 
@@ -216,7 +216,7 @@ pub fn clamp_port(port: i32) -> i32 {
 /// Resolve the shared server identity: port (DB cluster_setting with the typed default) plus device_id/device_name for ServerState.
 /// 解析公共服务身份:端口(DB cluster_setting,类型默认值兜底)与 ServerState 所需的 device_id/device_name。
 async fn resolve_identity() -> (i32, String, String) {
-    let setting = super::get_cluster_setting().await;
+    let setting = crate::cluster::get_cluster_setting().await;
     let port = clamp_port(setting.port);
     let device_id = crate::read_lock!(CLIENT_ID).clone();
     let device_name = if setting.device_name.is_empty() {
@@ -311,7 +311,7 @@ async fn serve_on(
 
     let app = Router::new()
         .route("/ping", get(remote::handle_ping))
-        .nest(super::CLUSTER_PREFIX, cluster_routes)
+        .nest(crate::cluster::CLUSTER_PREFIX, cluster_routes)
         .merge(cli_routes)
         .with_state(state);
 

@@ -192,7 +192,7 @@ pub async fn handle_search(query: &str, search_type: &str, device: Option<String
         return;
     }
 
-    // Fast path: reuse the warm model of the local server (GUI-carried or an on-demand daemon); on failure silently fall back to the in-process search.
+    // Fast path: reuse the warm model of the server (GUI-carried or an on-demand daemon); on failure silently fall back to the in-process search.
     // Output structure is identical across both paths —both resolve (results, total) here and share one success tail.
     let (results, total) = if let Some(port) = daemon_client::ensure_server().await {
         match daemon_client::search(query, search_type, limit, port).await {
@@ -234,8 +234,8 @@ async fn in_process_search(
     (results.into_iter().take(limit).collect(), total)
 }
 
-/// Similarity query: prefer the local server (warm model), fall back to in-process; both paths call the same underlying function, so the output is identical.
-/// 相似查询:优先走本机 server(热模型),回落进程内;
+/// Similarity query: prefer the server (warm model), fall back to in-process; both paths call the same underlying function, so the output is identical.
+/// 相似查询:优先走 server(热模型),回落进程内;
 /// 两条路径底层调用相同函数,输出一致
 async fn find_similars(file_id: i64, limit: usize) -> Result<Vec<SearchResult>, String> {
     if let Some(port) = daemon_client::ensure_server().await {
@@ -945,12 +945,12 @@ pub async fn handle_check() {
     // server_port() already applies the valid-range clamp (single source)
     let port: u16 = daemon_client::server_port().await as u16;
 
-    // Port check: a port held by our own local server (GUI-carried/daemon) is a healthy state, not an occupancy problem.
+    // Port check: a port held by our own server (GUI-carried/daemon) is a healthy state, not an occupancy problem.
     let own_service = daemon_client::detect().await.is_some();
     let port_available = if own_service {
         true
     } else {
-        mango_finder_lib::cluster::http_server::is_port_available(port as i32).await
+        mango_finder_lib::server::http_server::is_port_available(port as i32).await
     };
 
     // Get network interfaces

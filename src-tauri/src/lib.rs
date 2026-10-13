@@ -7,7 +7,6 @@ pub mod enums;
 pub mod global;
 pub mod indexer_service;
 pub mod initializer;
-pub mod loopback_request;
 pub mod repositories;
 pub mod searcher;
 pub mod server;

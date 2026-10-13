@@ -2,11 +2,11 @@
 //! /cluster/pairing/* 端点:设备间的配对请求/应答握手与重置通知
 
 use crate::cluster::get_cluster_setting;
-use crate::cluster::http_server::ServerState;
 use crate::entities::{Device, PairingRequest};
 use crate::enums::{OnlineStatus, PairingRequestStatus, PairingResponseStatus, PairingStatus};
 use crate::global::APP_HANDLE;
 use crate::repositories::{device_repo, pairing_request_repo};
+use crate::server::http_server::ServerState;
 use crate::structs::cluster_config::{
     PairingRequestPayload, PairingResponsePayload, ResetNotifyPayload,
 };

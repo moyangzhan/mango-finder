@@ -213,7 +213,7 @@ pub async fn set_data_path(
 
     // Tell a running daemon to exit and respawn on the next CLI call: its path globals are OnceLocks fixed at startup (/cli/shutdown is a no-op when the server is GUI-carried)
     let port =
-        crate::cluster::http_server::clamp_port(crate::cluster::get_cluster_setting().await.port);
+        crate::server::http_server::clamp_port(crate::cluster::get_cluster_setting().await.port);
     if matches!(server::probe(port).await, ProbeOutcome::Mine) {
         if let Err(e) = server::request_shutdown(port).await {
             warn!("Failed to notify daemon of data path change: {}", e);

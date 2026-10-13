@@ -289,7 +289,7 @@ pub async fn remove_from_index(path: &str, is_file: bool) {
             (*paths).retain(|(_, item)| !item.starts_with(directory.as_str()));
         }
     }
-    // Local cache pruned; bump version for other resident hosts
+    // Local cache pruned; bump version for other resident processes
     notify_paths_removed();
 }
 

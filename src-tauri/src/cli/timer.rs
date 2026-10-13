@@ -1,7 +1,7 @@
 //! Daemon periodic self-monitoring tasks (idle exit)
 //! daemon 周期自监控任务(空闲退出)
 
-use mango_finder_lib::cluster::http_server;
+use mango_finder_lib::server::http_server;
 use std::time::Duration;
 
 /// Idle exit threshold (default 30 minutes, mirroring the model idle expiry; overridable via env var for testing)

@@ -5,11 +5,11 @@ use crate::cluster::api_types::{
     CODE_INTERNAL_ERROR, CliSearchData, CliSearchRequest, CliSimilarData, CliSimilarRequest,
     CommonResponse,
 };
-use crate::cluster::http_server::{
-    IS_DAEMON, stop_http_server, touch_cli_request, wait_server_stopped,
-};
 use crate::global::CLIENT_ID;
 use crate::searcher;
+use crate::server::http_server::{
+    stop_http_server, touch_cli_request, wait_server_stopped, IS_DAEMON,
+};
 use crate::similarity::similarity_service;
 use axum::{
     Json,
