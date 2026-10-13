@@ -2,12 +2,13 @@
 //! 宿主服务客户端:探测 → 按需拉起 daemon → 调用 /cli 端点
 //!
 //! The host is the same server code, running either inside the GUI process (when multi-device is enabled) or inside a daemon spawned by the CLI; the detection mechanism guarantees at most one host at any time.
-//! The probe/shutdown handshake lives in `cluster::host_client` (shared with the GUI's yield logic).
+//! The probe/shutdown handshake lives in `cluster::server` (shared with the GUI's yield logic).
 //! 宿主是同一段服务代码,跑在 GUI 进程(多机互联开启时)或 CLI 拉起的 daemon 进程里;探测机制保证任一时刻只有一个宿主。
-//! 探测/关闭握手在 `cluster::host_client`(与 GUI 让位逻辑共用)。
+//! 探测/关闭握手在 `cluster::server`(与 GUI 让位逻辑共用)。
 
 use mango_finder_lib::cluster::api_types::{CliSearchData, CliSimilarData};
-use mango_finder_lib::cluster::host_client::{self, ProbeOutcome};
+use mango_finder_lib::cluster::http_request_wrap;
+use mango_finder_lib::cluster::server::{self, ProbeOutcome};
 use mango_finder_lib::structs::search_result::SearchResult;
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -16,11 +17,11 @@ use std::time::{Duration, Instant};
 /// 拉起 daemon 后等待就绪的上限
 const DAEMON_READY_TIMEOUT_SECS: u64 = 10;
 
-/// Host service port: same source as the GUI (DB cluster_setting; the typed default applies when the row is missing).
+/// Server port: same source as the GUI (DB cluster_setting; the typed default applies when the row is missing).
 /// Clamped to the valid range so probing and the daemon's bind can never disagree via `as u16` truncation.
-/// 宿主服务端口:与 GUI 同源(DB cluster_setting;行缺失时走类型默认值)。
+/// server 端口:与 GUI 同源(DB cluster_setting;行缺失时走类型默认值)。
 /// 钳制到合法区间,避免超范围值经 `as u16` 截断后探测与绑定落不同端口。
-pub async fn host_port() -> i32 {
+pub async fn server_port() -> i32 {
     let setting = mango_finder_lib::cluster::get_cluster_setting().await;
     // The clamp is shared with the server (http_server::clamp_port)
     mango_finder_lib::cluster::http_server::clamp_port(setting.port)
@@ -29,13 +30,13 @@ pub async fn host_port() -> i32 {
 /// Detect the host service (GUI or daemon); returns the port when it is ours
 /// 探测宿主服务(GUI 或 daemon);是本机服务时返回端口
 pub async fn detect() -> Option<i32> {
-    detect_port(host_port().await).await
+    detect_port(server_port().await).await
 }
 
 /// Detect a specific port (for host re-check after shutdown)
 /// 探测指定端口(供 shutdown 后的宿主身份复查)
 pub async fn detect_port(port: i32) -> Option<i32> {
-    matches!(host_client::probe(port).await, ProbeOutcome::Mine).then_some(port)
+    matches!(server::probe(port).await, ProbeOutcome::Mine).then_some(port)
 }
 
 /// Ensure the host service is available: probe → spawn the daemon if absent → poll until ready.
@@ -50,8 +51,8 @@ pub async fn detect_port(port: i32) -> Option<i32> {
 /// 探测结果决定行为:自家服务直接用;端口被外部程序占用则快速失败(否则每条命令都白等就绪超时);无监听则拉起并等待。
 /// `MANGO_FINDER_NO_DAEMON` 非空时跳过拉起(仅探测)。
 pub async fn ensure_server() -> Option<i32> {
-    let port = host_port().await;
-    match host_client::probe(port).await {
+    let port = server_port().await;
+    match server::probe(port).await {
         ProbeOutcome::Mine => return Some(port),
         ProbeOutcome::Other => {
             log::warn!(
@@ -129,7 +130,7 @@ async fn spawn_daemon() -> Option<()> {
 async fn wait_ready(port: i32) -> Option<i32> {
     let deadline = Instant::now() + Duration::from_secs(DAEMON_READY_TIMEOUT_SECS);
     loop {
-        if matches!(host_client::probe(port).await, ProbeOutcome::Mine) {
+        if matches!(server::probe(port).await, ProbeOutcome::Mine) {
             log::info!("local daemon ready on port {}", port);
             return Some(port);
         }
@@ -142,16 +143,16 @@ async fn wait_ready(port: i32) -> Option<i32> {
 }
 
 /// Search; returns (results, full match count before applying limit).
-/// The POST plumbing lives in `cluster::host_client::post_and_get_data`.
+/// The POST plumbing lives in `cluster::http_request_wrap::post_and_get_data`.
 /// 搜索,返回 (结果, 应用 limit 前的完整匹配数)。POST 解析阶梯在
-/// `cluster::host_client::post_and_get_data`。
+/// `cluster::http_request_wrap::post_and_get_data`。
 pub async fn search(
     query: &str,
     search_type: &str,
     limit: usize,
     port: i32,
 ) -> Result<(Vec<SearchResult>, usize), String> {
-    let data: CliSearchData = host_client::post_and_get_data(
+    let data: CliSearchData = http_request_wrap::post_and_get_data(
         port,
         "/cli/search",
         json!({ "query": query, "search_type": search_type, "limit": limit }),
@@ -163,7 +164,7 @@ pub async fn search(
 /// Similarity query for an indexed file
 /// 已索引文件相似查询
 pub async fn similars(file_id: i64, limit: usize, port: i32) -> Result<Vec<SearchResult>, String> {
-    let data: CliSimilarData = host_client::post_and_get_data(
+    let data: CliSimilarData = http_request_wrap::post_and_get_data(
         port,
         &format!("/cli/similar/{}", file_id),
         json!({ "limit": limit }),
@@ -172,9 +173,9 @@ pub async fn similars(file_id: i64, limit: usize, port: i32) -> Result<Vec<Searc
     Ok(data.results)
 }
 
-/// Ask the host to shut down (daemon exits; a GUI host ignores it); shared implementation in `cluster::host_client`.
+/// Ask the host to shut down (daemon exits; a GUI host ignores it); shared implementation in `cluster::server`.
 /// 请求宿主退出(daemon 退出;GUI 宿主忽略);共享实现在
-/// `cluster::host_client`。
+/// `cluster::server`。
 pub async fn request_shutdown(port: i32) -> Result<(), String> {
-    host_client::request_shutdown(port).await
+    server::request_shutdown(port).await
 }

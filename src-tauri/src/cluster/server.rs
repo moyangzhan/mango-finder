@@ -1,9 +1,11 @@
-//! Client for the resident host process (GUI server or CLI daemon), always dialed over loopback; used by the CLI binary and the GUI's yield logic.
-//! 本机常驻宿主进程(GUI 服务或 CLI daemon)的客户端,一律走回环;
-//! CLI 二进制与 GUI 让位逻辑共用。
+//! Local-server liveness probing and the exit handshake: probe / request exit / wait until released.
+//! Used by the CLI binary, the GUI's yield logic (making the daemon yield before the GUI binds) and `set_data_path` (daemon invalidation on data-dir switch).
+//!
+//! 本机 server 的存活探测与退出握手:探测 / 请求退出 / 等待释放。
+//! CLI 二进制、GUI 让位逻辑(GUI 绑定前请 daemon 让位)与 `set_data_path`(数据目录切换时的失效通知)共用。
 
+use super::http_request_wrap::{client_id, post_common_response};
 use crate::cluster::api_types::CommonResponse;
-use crate::global::CLIENT_ID;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
@@ -20,16 +22,6 @@ static PROBE_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .expect("failed to build local probe client")
 });
 
-/// Shared request client (60s timeout: the first query may trigger a cold model load on the host side).
-/// 共享请求客户端(60s 超时:首次查询可能触发宿主侧模型冷加载)。
-static REQUEST_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(60))
-        .build()
-        .expect("failed to build local request client")
-});
-
 /// Probe outcome for a local port
 /// 本地端口探测结果
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,10 +35,6 @@ pub enum ProbeOutcome {
     /// Nothing answered (connection refused / timeout)
     /// 无应答(拒绝连接/超时)
     Unreachable,
-}
-
-fn client_id() -> String {
-    crate::read_lock!(CLIENT_ID).clone()
 }
 
 /// Probe a port for our own local service.
@@ -94,9 +82,9 @@ pub enum ReleaseOutcome {
 }
 
 /// Poll until the service on `port` stops answering as ours: two consecutive non-Mine probes (a single slow /ping is not misread as an exit) or the timeout, whichever comes first.
-/// Sleeps before the first probe so the just-notified host gets a chance to exit first.
+/// Sleeps before the first probe so the just-notified carrier process gets a chance to exit first.
 /// 轮询等待端口上的服务不再是自家:连续两次非 Mine(单次慢 /ping 不会误判为退出)或超时,先到为准。
-/// 首次探测前先睡眠,给刚收到通知的宿主一点退出时间。
+/// 首次探测前先睡眠,给刚收到通知的承载进程一点退出时间。
 pub async fn wait_until_released(port: i32, timeout: Duration) -> ReleaseOutcome {
     const POLL_INTERVAL_MS: u64 = 150;
     let deadline = Instant::now() + timeout;
@@ -117,49 +105,8 @@ pub async fn wait_until_released(port: i32, timeout: Duration) -> ReleaseOutcome
     }
 }
 
-/// POST to a /cli endpoint and return the parsed CommonResponse (shared error ladder; data may be empty).
-/// 向 /cli 端点 POST 并返回解析后的 CommonResponse(共享错误阶梯;data 可为空)。
-async fn post_common_response<T: serde::de::DeserializeOwned>(
-    port: i32,
-    path: &str,
-    body: serde_json::Value,
-) -> Result<CommonResponse<T>, String> {
-    let url = format!("http://127.0.0.1:{}{}", port, path);
-    let resp = REQUEST_CLIENT
-        .post(url)
-        .header("X-Device-ID", client_id())
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP error: {}", resp.status()));
-    }
-    let parsed: CommonResponse<T> = resp
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
-    if parsed.code != 0 {
-        return Err(format!("API error: code {} - {}", parsed.code, parsed.msg));
-    }
-    Ok(parsed)
-}
-
-/// POST to a /cli endpoint and extract non-empty data as T.
-/// 向 /cli 端点 POST 并取非空 data 解析为 T。
-pub async fn post_and_get_data<T: serde::de::DeserializeOwned>(
-    port: i32,
-    path: &str,
-    body: serde_json::Value,
-) -> Result<T, String> {
-    post_common_response(port, path, body)
-        .await?
-        .data
-        .ok_or_else(|| "No data in response".to_string())
-}
-
-/// Ask the local service host to shut down (the daemon exits; a GUI host ignores it). Auth is the loopback + X-Device-ID middleware on /cli/*.
-/// 请求本地宿主退出(daemon 退出;GUI 宿主忽略)。鉴权由 /cli/* 的回环 + X-Device-ID 中间件承担。
+/// Ask the local server to shut down (the daemon exits; a GUI-carried server ignores it). Auth is the loopback + X-Device-ID middleware on /cli/*.
+/// 请求本机 server 退出(daemon 退出;GUI 承载的 server 忽略)。鉴权由 /cli/* 的回环 + X-Device-ID 中间件承担。
 pub async fn request_shutdown(port: i32) -> Result<(), String> {
     post_common_response::<serde_json::Value>(port, "/cli/shutdown", serde_json::Value::Null)
         .await

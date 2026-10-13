@@ -1,8 +1,9 @@
 mod commands;
-mod daemon;
+mod daemon_client;
+mod daemon_server;
 mod output;
 mod render;
-mod serve;
+mod timer;
 
 use clap::CommandFactory;
 use clap::Parser;
@@ -167,7 +168,7 @@ fn main() {
                 commands::handle_shutdown().await;
             }
             commands::Commands::Serve => {
-                serve::run().await;
+                daemon_server::run().await;
             }
         }
     });

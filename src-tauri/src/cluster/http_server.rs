@@ -203,8 +203,8 @@ pub async fn start_http_server() -> Result<(), String> {
     serve_on(listener, device_id, device_name, port).await
 }
 
-/// Clamp to the valid port range (single source shared with the CLI's host_port): out-of-range values fall back to the default so `as u16` truncation can never make bind/probe/check disagree.
-/// 钳制到合法端口区间(与 CLI 的 host_port 共用的单一来源):超范围值统一回退默认端口,`as u16` 截断不会让绑定/探测/check 落在不同端口上。
+/// Clamp to the valid port range (single source shared with the CLI's server_port): out-of-range values fall back to the default so `as u16` truncation can never make bind/probe/check disagree.
+/// 钳制到合法端口区间(与 CLI 的 server_port 共用的单一来源):超范围值统一回退默认端口,`as u16` 截断不会让绑定/探测/check 落在不同端口上。
 pub fn clamp_port(port: i32) -> i32 {
     if (1..=65535).contains(&port) {
         port
@@ -244,7 +244,7 @@ pub async fn start_http_server_loopback() -> Result<(), String> {
     }
     let (port, device_id, device_name) = resolve_identity().await;
 
-    // The daemon never yields: a busy port means a host already exists (GUI or a concurrent daemon that won the bind race) — this process is the loser and exits (see serve::run).
+    // The daemon never yields: a busy port means a server already exists (GUI-carried, or a concurrent daemon that won the bind race) — this process is the loser and exits (see daemon_server::run).
     let addr = SocketAddr::from(([127, 0, 0, 1], port as u16));
     let listener = create_exclusive_socket_on(addr)
         .map_err(|e| format!("Port {} is already in use: {}", port, e))?;
@@ -347,20 +347,20 @@ async fn serve_on(
 }
 
 /// Port held by our own CLI daemon: ask it to exit and wait until it really does (probe no longer `Mine`) before the caller rebinds — close first, then start.
-/// The probe/shutdown handshake is shared with the CLI via `cluster::host_client`.
+/// The probe/shutdown handshake is shared with the CLI via `cluster::server`.
 /// 端口被自家 CLI daemon 占用时:请求其退出并等待端口真正释放(探测不再是自家服务),再由调用方重绑 —— 先关后开。
-/// 探测/关闭握手与 CLI 共用 `cluster::host_client`。
+/// 探测/关闭握手与 CLI 共用 `cluster::server`。
 async fn try_yield_to_cli_daemon(port: i32) -> bool {
-    use super::host_client::{self, ProbeOutcome, ReleaseOutcome};
+    use super::server::{self, ProbeOutcome, ReleaseOutcome};
 
     // Only our own daemon yields; a GUI host or another holder does not
-    if host_client::probe(port).await != ProbeOutcome::Mine {
+    if server::probe(port).await != ProbeOutcome::Mine {
         return false;
     }
-    let _ = host_client::request_shutdown(port).await;
+    let _ = server::request_shutdown(port).await;
 
     // The daemon's graceful shutdown is bounded at 10s (in-flight responses); allow 12s before declaring it stuck
-    match host_client::wait_until_released(port, Duration::from_secs(12)).await {
+    match server::wait_until_released(port, Duration::from_secs(12)).await {
         ReleaseOutcome::Released => {
             log::info!("CLI daemon on port {} has yielded", port);
             true

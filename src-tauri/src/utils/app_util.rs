@@ -1,3 +1,4 @@
+use crate::cluster::server::{self, ProbeOutcome};
 use crate::enums::{FileContentLanguage, TrayMenuItem};
 use crate::global::{
     APP_DATA_PATH, AUDIO_DECODER_NAME, AUDIO_DECODER_PATH, AUDIO_ENCODER_NAME, AUDIO_ENCODER_PATH,
@@ -209,6 +210,15 @@ pub async fn set_data_path(
     }
     *crate::write_lock!(APP_DATA_PATH) = new_data_path.to_string();
     let _ = task_util::unlock_active_task();
+
+    // Tell a running daemon to exit and respawn on the next CLI call: its path globals are OnceLocks fixed at startup (/cli/shutdown is a no-op when the server is GUI-carried)
+    let port =
+        crate::cluster::http_server::clamp_port(crate::cluster::get_cluster_setting().await.port);
+    if matches!(server::probe(port).await, ProbeOutcome::Mine) {
+        if let Err(e) = server::request_shutdown(port).await {
+            warn!("Failed to notify daemon of data path change: {}", e);
+        }
+    }
     Ok("success".to_string())
 }
 
@@ -624,12 +634,15 @@ pub fn get_default_file_content_language() -> FileContentLanguage {
 /// CLI 模式路径初始化(不依赖 Tauri):与 GUI 共用 core,仅替换数据目录与模型目录的解析来源;core 失败只记日志(GUI 契约),由末尾全局检查兜底
 /// CLI path init (Tauri-free): shares the GUI cores; only the data-dir and model-dir resolution differ.
 /// Core failures just log (GUI contract) — the trailing global check is the safety net.
-pub fn init_paths_standalone() -> Result<(), String> {
-    // Data dir: dirs::data_dir() matches Tauri's data_dir on all platforms
-    let data_base = dirs::data_dir()
+/// Standalone (no AppHandle) system data base dir: dirs::data_dir() matches Tauri's data_dir on all platforms
+fn standalone_data_base() -> PathBuf {
+    dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(env!("CARGO_PKG_NAME"));
-    init_paths_core(data_base);
+        .join(env!("CARGO_PKG_NAME"))
+}
+
+pub fn init_paths_standalone() -> Result<(), String> {
+    init_paths_core(standalone_data_base());
 
     // Model dir: prefer the executable directory, fall back to the current directory (dev flow running mfd from the source tree); plays the role of the GUI's resource_dir.
     let exe_dir = std::env::current_exe()

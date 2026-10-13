@@ -10,16 +10,8 @@ use mango_finder_lib::cluster::http_server;
 use mango_finder_lib::repositories::file_content_embedding_repo;
 use mango_finder_lib::searcher::path_search_engine;
 use mango_finder_lib::searcher::semantic_search_engine::warmup_embedding_service;
-use std::time::Duration;
 
-/// Idle exit threshold (default 30 minutes, mirroring the model idle expiry; overridable via env var for testing)
-/// 空闲退出上限(默认 30 分钟,镜像模型空闲过期时间;可用环境变量覆盖,便于测试)
-fn idle_limit_secs() -> u64 {
-    std::env::var("MANGO_FINDER_DAEMON_IDLE_SECS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(30 * 60)
-}
+use crate::timer;
 
 pub async fn run() -> ! {
     // The exclusive bind is the single-instance arbiter: concurrent daemons race to bind, and the losers exit here before paying any heavy init.
@@ -42,16 +34,6 @@ pub async fn run() -> ! {
         }
     }
 
-    // Idle loop: exit once no /cli request arrives within the threshold, leaving no resident process behind.
-    loop {
-        tokio::time::sleep(Duration::from_secs(30)).await;
-        let idle = http_server::cli_idle_secs().unwrap_or(0);
-        if idle >= idle_limit_secs() {
-            log::info!("mfd serve idle for {}s, exiting", idle);
-            http_server::stop_http_server().await;
-            // Graceful shutdown (same as /cli/shutdown): wait until in-flight responses are written before exiting.
-            http_server::wait_server_stopped().await;
-            std::process::exit(0);
-        }
-    }
+    // Periodic self-monitoring (idle exit) lives in timer.rs; never returns
+    timer::run().await
 }
