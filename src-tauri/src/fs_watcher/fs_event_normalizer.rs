@@ -13,10 +13,8 @@ use crate::utils::file_util;
 
 /// Time window for matching rename events (from/to pairs)
 ///
-/// When a file is renamed, the filesystem generates separate events
-/// for the source (from) and destination (to) paths. This constant
-/// defines the maximum time interval between these events for them
-/// to be considered as part of the same rename operation.
+/// When a file is renamed, the filesystem generates separate events for the source (from) and destination (to) paths.
+/// This constant defines the maximum time interval between these events for them to be considered as part of the same rename operation.
 const RENAME_TIME_WINDOW: Duration = Duration::from_millis(300);
 
 #[derive(Debug)]

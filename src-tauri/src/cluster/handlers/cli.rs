@@ -22,9 +22,9 @@ use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 
 /// /cli auth: loopback peer, X-Device-ID must be the local CLIENT_ID, and
-/// Host must be a loopback literal. The Host check blocks DNS-rebinding
-/// pages, which do connect from 127.0.0.1 and can read device_id from the
-/// open /ping. Local processes share the DB's trust domain, so this suffices.
+/// Host must be a loopback literal.
+/// The Host check blocks DNS-rebinding pages, which do connect from 127.0.0.1 and can read device_id from the open /ping.
+/// Local processes share the DB's trust domain, so this suffices.
 /// /cli 鉴权:回环连接、X-Device-ID 须为本机 CLIENT_ID、Host 须为回环字面量。
 /// Host 校验阻断 DNS rebinding(此类页面确实来自 127.0.0.1 且能从无鉴权
 /// /ping 读到 device_id);本机进程与数据库同信任域,该校验已足够。
@@ -64,8 +64,7 @@ fn is_loopback_host(host: &str) -> bool {
     name.eq_ignore_ascii_case("localhost") || name == "127.0.0.1"
 }
 
-/// Same searcher dispatch as the CLI's in-process path; output identical
-/// field by field.
+/// Same searcher dispatch as the CLI's in-process path; output identical field by field.
 /// 与 CLI 进程内路径同一分发,输出逐字段一致
 pub async fn cli_search(Json(req): Json<CliSearchRequest>) -> CommonResponse<CliSearchData> {
     let results = searcher::search_by_type(&req.query, req.search_type.as_deref()).await;
@@ -74,8 +73,7 @@ pub async fn cli_search(Json(req): Json<CliSearchRequest>) -> CommonResponse<Cli
     CommonResponse::success(CliSearchData { results, total })
 }
 
-/// Same similarity_service call as the CLI's in-process path (cross-device
-/// aggregation included when the cluster is enabled).
+/// Same similarity_service call as the CLI's in-process path (cross-device aggregation included when the cluster is enabled).
 /// 与 CLI 进程内路径同一调用(集群开启时含跨设备聚合)
 pub async fn cli_similar(
     Path(file_id): Path<i64>,
@@ -90,17 +88,16 @@ pub async fn cli_similar(
     }
 }
 
-/// Ask the daemon host to exit; a GUI host ignores it. Callers distinguish
-/// the host by pinging again after shutdown.
+/// Ask the daemon host to exit; a GUI host ignores it.
+/// Callers distinguish the host by pinging again after shutdown.
 /// 请求 daemon 宿主退出;GUI 宿主忽略。调用方靠 shutdown 后的二次 ping 判别宿主
 pub async fn cli_shutdown() -> CommonResponse<()> {
     if IS_DAEMON.load(Ordering::Relaxed) {
         tokio::spawn(async {
-            // Graceful shutdown instead of a fixed sleep: stop sends the signal,
-            // then we wait until the serve task actually finished (it clears
-            // SHUTDOWN_SENDER once all in-flight responses are written). This
-            // both flushes our own response and avoids killing other CLIs'
-            // in-flight queries. Bounded at 10s for safety.
+            // Graceful shutdown instead of a fixed sleep: stop sends the signal, then we wait until the serve task actually finished (it clears
+            // SHUTDOWN_SENDER once all in-flight responses are written).
+            // This both flushes our own response and avoids killing other CLIs' in-flight queries.
+            // Bounded at 10s for safety.
             stop_http_server().await;
             wait_server_stopped().await;
             log::info!("CLI daemon exiting on /cli/shutdown");

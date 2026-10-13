@@ -141,8 +141,7 @@ pub async fn search(query: &str, limit: usize) -> Result<Vec<FtsSearchResult>, R
         let final_score_f64 = coverage * 70.0 + rank_score * 30.0;
         let final_score = final_score_f64.clamp(0.0, 100.0) as usize;
 
-        // Vue will do this
-        // let snippet = make_snippet(&content, &keywords, 40);
+        // Vue will do this let snippet = make_snippet(&content, &keywords, 40);
         let entry = file_map.entry(file_id).or_insert_with(|| FtsSearchResult {
             file_id,
             chunk_ids: HashSet::new(),
@@ -225,8 +224,7 @@ pub fn make_snippet(text: &str, keywords: &[&str], radius: usize) -> String {
         if kw.is_empty() {
             continue;
         }
-        // SAFETY: regex::escape() always produces a valid regex pattern
-        // as it escapes all special regex metacharacters
+        // SAFETY: regex::escape() always produces a valid regex pattern as it escapes all special regex metacharacters
         let pattern = match Regex::new(&regex::escape(kw)) {
             Ok(p) => p,
             Err(_) => continue, // Skip invalid patterns (should not happen with escape)

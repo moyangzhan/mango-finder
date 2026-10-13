@@ -274,10 +274,8 @@ pub fn upsert(device: &Device) -> Result<Device, RepositoryError> {
             existing.ip_address = device.ip_address.clone();
             existing.port = device.port;
             existing.version = device.version.clone();
-            // Keep existing online_status - only status checker should update this
-            // existing.online_status = device.online_status;
-            // Keep existing pairing_status - only HTTP pairing endpoints or user operations should update this
-            // existing.pairing_status = device.pairing_status;
+            // Keep existing online_status - only status checker should update this existing.online_status = device.online_status;
+            // Keep existing pairing_status - only HTTP pairing endpoints or user operations should update this existing.pairing_status = device.pairing_status;
             existing.index_count = device.index_count;
             existing.capabilities = device.capabilities.clone();
             existing.last_seen = device.last_seen;

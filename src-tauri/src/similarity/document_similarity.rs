@@ -44,8 +44,7 @@ impl SimilarityDetector for DocumentSimilarityDetector {
 /// Search similar files with in-memory source chunk embeddings
 /// 使用内存中的源分块向量检索相似文件（已索引文件与外部现场计算文件共用）
 ///
-/// Scores aggregate by max per target file; results are filtered to `category`
-/// and exclude `exclude_file_id` (None for external files not present in the index).
+/// Scores aggregate by max per target file; results are filtered to `category` and exclude `exclude_file_id` (None for external files not present in the index).
 pub async fn find_similars_from_chunks(
     chunks: &[(Vec<f32>, SparseVector)],
     category: i64,
@@ -57,8 +56,7 @@ pub async fn find_similars_from_chunks(
         .into_iter()
         .collect();
 
-    // Aggregate scores from all chunks
-    // file_id -> max_score across all chunk searches
+    // Aggregate scores from all chunks file_id -> max_score across all chunk searches
     let mut file_scores: HashMap<i64, usize> = HashMap::new();
 
     // Search with each chunk embedding and aggregate results

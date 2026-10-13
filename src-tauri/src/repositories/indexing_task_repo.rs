@@ -104,10 +104,8 @@ pub fn update_status(id: i64, status: &str, remark: &str) -> Result<usize, Repos
     Ok(affected)
 }
 
-/// Mark all running rows cancelled; used by orphan-lock cleanup, where a
-/// live indexer would still hold the lock — running rows are crash leftovers.
-/// 将全部 running 行标记为 cancelled;孤儿锁清理时调用——活索引会持有锁,
-/// 仍 running 的行必为崩溃残留。
+/// Mark all running rows cancelled; used by orphan-lock cleanup, where a live indexer would still hold the lock — running rows are crash leftovers.
+/// 将全部 running 行标记为 cancelled;孤儿锁清理时调用——活索引会持有锁,仍 running 的行必为崩溃残留。
 pub fn interrupt_running() -> Result<usize, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(

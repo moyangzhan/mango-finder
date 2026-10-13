@@ -3,17 +3,12 @@ use log::info;
 use rusqlite::Connection;
 
 /// DB_VERSION = 5
-/// Enforce one row per file_info.path: dedup legacy duplicates (a valid row
-/// beats a smaller invalid id), then build the unique index.
-/// file_info.path 每 path 一行:去重存量重复行
-/// (valid 行优先于更小的 invalid id),再建唯一索引。
+/// Enforce one row per file_info.path: dedup legacy duplicates (a valid row beats a smaller invalid id), then build the unique index.
+/// file_info.path 每 path 一行:去重存量重复行(valid 行优先于更小的 invalid id),再建唯一索引。
 pub fn exec_ddl_with_conn(conn: &Connection) -> Result<()> {
     info!("dbv5.exec_ddl_with_conn");
 
-    // content_vec/content_data are cascaded by trg_delete_file_content_data;
-    // fts/metadata children and disk artifacts (parsed md/images) of loser
-    // ids are NOT covered — disk leftovers are bounded and cleared by
-    // `index clear`.
+    // content_vec/content_data are cascaded by trg_delete_file_content_data; fts/metadata children and disk artifacts (parsed md/images) of loser ids are NOT covered — disk leftovers are bounded and cleared by `index clear`.
     conn.execute_batch(
         r#"
         begin immediate;

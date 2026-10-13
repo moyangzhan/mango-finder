@@ -16,8 +16,7 @@ use crate::utils::app_util::get_vision_0_path;
 use anyhow::Result;
 use std::path::Path;
 
-/// Image parser chosen by `image_parser_mode`; shared by the indexing and
-/// external-file pipelines so both caption identically.
+/// Image parser chosen by `image_parser_mode`; shared by the indexing and external-file pipelines so both caption identically.
 /// 按 image_parser_mode 选出的图片解析器;索引与外部文件管线共用,保证同源打标。
 pub struct ImageParser {
     is_local: bool,

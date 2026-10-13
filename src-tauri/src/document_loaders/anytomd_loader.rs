@@ -117,8 +117,7 @@ impl AnyToMdLoader {
         let mut content = result.markdown;
 
         if !result.images.is_empty() {
-            // Dir folder name doubles as the markdown rel-path segment (bucket
-            // for indexed parses, per-query temp dir for external ones)
+            // Dir folder name doubles as the markdown rel-path segment (bucket for indexed parses, per-query temp dir for external ones)
             let bucket = images_dir
                 .file_name()
                 .and_then(|n| n.to_str())

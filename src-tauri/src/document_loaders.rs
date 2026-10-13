@@ -95,31 +95,27 @@ pub(crate) fn truncate_to_char_limit(content: &mut String, limit: usize) {
     }
 }
 
-/// Unique temp dir per external (file_id = 0) parse: images isolated per
-/// query (no cross-query name collisions), deleted afterwards.
+/// Unique temp dir per external (file_id = 0) parse: images isolated per query (no cross-query name collisions), deleted afterwards.
 /// 外部解析(file_id=0)每次查询独立临时目录:图片按查询隔离(无重名冲突),事后删除。
 pub(crate) fn temp_images_dir() -> PathBuf {
     let base = EXTRACTED_IMAGES_PATH.get().cloned().unwrap_or_default();
     PathBuf::from(base).join(format!("tmp_{}", uuid::Uuid::new_v4().simple()))
 }
 
-/// RAII guard: removes the whole dir on drop, covering every exit path
-/// (early error returns and panics included).
+/// RAII guard: removes the whole dir on drop, covering every exit path (early error returns and panics included).
 /// RAII 守卫:drop 时整目录删除,覆盖所有退出路径(含错误提前返回与 panic)。
 pub(crate) struct TempDirGuard(PathBuf);
 
 impl Drop for TempDirGuard {
     fn drop(&mut self) {
-        // NotFound is the expected race with the stale-dir sweep; other
-        // failures leave a dir the sweep will catch later
+        // NotFound is the expected race with the stale-dir sweep; other failures leave a dir the sweep will catch later
         if let Err(e) = std::fs::remove_dir_all(&self.0) {
             log::debug!("remove temp images dir {:?} failed: {}", self.0.display(), e);
         }
     }
 }
 
-/// Resolve the images dir for one parse: indexed parses (id > 0) use their
-/// persistent bucket; external parses get a temp dir guarded for auto-removal.
+/// Resolve the images dir for one parse: indexed parses (id > 0) use their persistent bucket; external parses get a temp dir guarded for auto-removal.
 /// 解析所用图片目录:索引解析(id>0)用持久桶;外部解析返回临时目录并附守卫。
 pub(crate) fn images_dir_for(file_id: i64) -> (PathBuf, Option<TempDirGuard>) {
     if file_id > 0 {
@@ -145,11 +141,10 @@ pub fn cleanup_stale_temp_images_dirs() {
     sweep_stale_temp_dirs_in(std::path::Path::new(&base), STALE_TEMP_DIR_AGE);
 }
 
-/// Core sweep: remove `tmp_*` dirs whose mtime is older than `max_age`;
-/// bucket dirs (`0000`-`9999`) are never touched. The age gate makes it safe
-/// next to a live query (its dir was just written).
-/// 清扫核心:删除 mtime 早于 max_age 的 tmp_* 目录;桶目录(`0000`-`9999`)
-/// 不受影响。时间阈值保证不会误删进行中查询的目录(其目录刚被写入)。
+/// Core sweep: remove `tmp_*` dirs whose mtime is older than `max_age`; bucket dirs (`0000`-`9999`) are never touched.
+/// The age gate makes it safe next to a live query (its dir was just written).
+/// 清扫核心:删除 mtime 早于 max_age 的 tmp_* 目录;桶目录(`0000`-`9999`)不受影响。
+/// 时间阈值保证不会误删进行中查询的目录(其目录刚被写入)。
 fn sweep_stale_temp_dirs_in(base: &Path, max_age: std::time::Duration) {
     let cutoff = std::time::SystemTime::now() - max_age;
     let Ok(entries) = std::fs::read_dir(base) else {

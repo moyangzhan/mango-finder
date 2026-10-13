@@ -13,8 +13,7 @@ use std::sync::OnceLock;
 use tauri::Emitter;
 use tokio::sync::RwLock as AsyncRwLock;
 
-/// URL prefix of the inter-device endpoints, shared by server routing
-/// (Router::nest) and client URL building
+/// URL prefix of the inter-device endpoints, shared by server routing (Router::nest) and client URL building
 pub const CLUSTER_PREFIX: &str = "/cluster";
 
 /// Global cluster setting
@@ -134,10 +133,8 @@ pub async fn save_cluster_setting(setting: &ClusterSetting) -> Result<(), String
             // Stop HTTP server
             http_server::stop_http_server().await;
 
-            // Wait until the server has actually stopped (graceful shutdown
-            // finishes the in-flight requests) instead of a fixed 500ms sleep:
-            // shutdown can outlive the sleep, after which start_http_server
-            // would short-circuit as "already running" and never rebind.
+            // Wait until the server has actually stopped (graceful shutdown finishes the in-flight requests) instead of a fixed 500ms sleep:
+            // shutdown can outlive the sleep, after which start_http_server would short-circuit as "already running" and never rebind.
             http_server::wait_server_stopped().await;
 
             // Start HTTP server with new port

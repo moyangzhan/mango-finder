@@ -1,7 +1,6 @@
 //! Similarity search service
 //!
-//! This module provides unified similarity search functionality that combines
-//! local and remote device searches.
+//! This module provides unified similarity search functionality that combines local and remote device searches.
 
 use crate::audio_parser::AudioParser;
 use crate::cluster::http_client;
@@ -25,8 +24,7 @@ use crate::utils::text_util;
 /// Find similar files for a local file
 /// 为本地文件查找相似文件
 ///
-/// Searches both local device and remote devices in parallel,
-/// then merges and sorts results by score.
+/// Searches both local device and remote devices in parallel, then merges and sorts results by score.
 pub async fn find_similars_for_local_file(
     file_id: i64,
     limit: usize,
@@ -144,8 +142,7 @@ pub async fn find_similars_for_remote_file(
 /// 未索引外部文件现场相似度查询的结果
 pub struct ExternalSimilarOutcome {
     pub results: Vec<SearchResult>,
-    /// Number of chunk embeddings computed on the fly
-    /// (documents / transcribed audio); 0 for images and music
+    /// Number of chunk embeddings computed on the fly (documents / transcribed audio); 0 for images and music
     pub chunk_count: usize,
     /// Detected audio subtype, present only for audio files
     pub audio_type: Option<AudioType>,
@@ -157,8 +154,7 @@ pub struct ExternalSimilarOutcome {
 /// Find similar indexed files for an external local file that is not indexed.
 /// 为未索引的外部本地文件查找相似文件
 ///
-/// The file is parsed / captioned / transcribed on the fly and its embeddings
-/// are computed in memory; nothing is written to the index.
+/// The file is parsed / captioned / transcribed on the fly and its embeddings are computed in memory; nothing is written to the index.
 pub async fn find_similars_for_external_file(
     path: &str,
     limit: usize,
@@ -249,9 +245,7 @@ async fn find_similars_for_external_image(
     path: &str,
     limit: usize,
 ) -> Result<ExternalSimilarOutcome, String> {
-    // Decoding and captioning are heavy sync work — off the async worker via
-    // spawn_blocking; run them separately so a captioning panic (JoinError)
-    // cannot discard the already-computed hash.
+    // Decoding and captioning are heavy sync work — off the async worker via spawn_blocking; run them separately so a captioning panic (JoinError) cannot discard the already-computed hash.
     let hash_path = path.to_string();
     let source_hash_bytes =
         tokio::task::spawn_blocking(move || image_similarity::calculate_image_hash(&hash_path))
@@ -261,8 +255,7 @@ async fn find_similars_for_external_image(
         source_hash_bytes.ok_or_else(|| format!("Failed to decode image: {}", path))?;
     let source_hash = image_similarity::bytes_to_image_hash(&source_hash_bytes);
 
-    // Parser init/analyze failure degrades to the visual-only fallback below
-    // (same path as an empty caption)
+    // Parser init/analyze failure degrades to the visual-only fallback below (same path as an empty caption)
     let content = match image_parser::ImageParser::new().await {
         Ok(parser) => match parser.analyze(path).await {
             Ok(c) => c,
@@ -277,10 +270,8 @@ async fn find_similars_for_external_image(
         }
     };
 
-    // With a semantic vector use ANN candidates; otherwise scan all image
-    // hashes for pure visual comparison. The three "no vector" cases (empty
-    // caption / no chunks / embed failure) collapse into a single fallback
-    // branch, so the fallback behavior is maintained in one place.
+    // With a semantic vector use ANN candidates; otherwise scan all image hashes for pure visual comparison.
+    // The three "no vector" cases (empty caption / no chunks / embed failure) collapse into a single fallback branch, so the fallback behavior is maintained in one place.
     let mut chunk_count = 0;
     let caption_chunks: Option<Vec<_>> = if content.trim().is_empty() {
         None
@@ -354,8 +345,7 @@ async fn find_similars_for_external_audio(
             })
         }
         AudioType::Speech | AudioType::Unknown => {
-            // Transcribe with the same parser mode as indexing; local reuses
-            // the decoded samples, remote reads the file
+            // Transcribe with the same parser mode as indexing; local reuses the decoded samples, remote reads the file
             let parser = AudioParser::new()
                 .await
                 .map_err(|e| format!("Failed to init audio parser: {}", e))?;
@@ -364,8 +354,7 @@ async fn find_similars_for_external_audio(
                 .await
                 .map_err(|e| format!("Failed to transcribe audio: {}", e))?;
 
-            // Feature Unknown: reclassify by transcript (same fallback as indexing);
-            // reclassified Music/Mixed goes through the fingerprint path (legacy behavior)
+            // Feature Unknown: reclassify by transcript (same fallback as indexing); reclassified Music/Mixed goes through the fingerprint path (legacy behavior)
             let audio_type = if audio_type == AudioType::Unknown {
                 audio_util::detect_audio_type_from_transcription(&transcription)
             } else {

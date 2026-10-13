@@ -315,8 +315,7 @@ async fn try_download_range(
         .open(local_path)
         .with_context(|| format!("Can not open file: {:?}", local_path))?;
 
-    // If server gave a full file (206 with content-range still contains partial),
-    // we should seek to start_pos and overwrite from there.
+    // If server gave a full file (206 with content-range still contains partial), we should seek to start_pos and overwrite from there.
     file.seek(SeekFrom::Start(start_pos))?;
 
     // Stream the response into the file

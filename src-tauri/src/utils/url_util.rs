@@ -4,8 +4,7 @@
 
 /// Encode a string for use in a URL path segment
 ///
-/// This function encodes characters that are not allowed in URL paths,
-/// following RFC 3986 guidelines with some practical adjustments for file paths.
+/// This function encodes characters that are not allowed in URL paths, following RFC 3986 guidelines with some practical adjustments for file paths.
 ///
 /// # Arguments
 /// * `s` - The string to encode
@@ -35,28 +34,23 @@ pub fn url_encode(s: &str) -> String {
     out
 }
 
-/// 保留字符:RFC 3986 unreserved + 为路径可读性保留的分隔符与盘符冒号
-/// ('\' 并非严格合法的 URL 路径字符,仅为 Windows 路径可读性保留)
-/// Kept raw: RFC 3986 unreserved + separators and drive colon for readable
-/// file paths ('\' is kept for Windows readability, not strict URL validity)
+/// 保留字符:RFC 3986 unreserved + 为路径可读性保留的分隔符与盘符冒号('\' 并非严格合法的 URL 路径字符,仅为 Windows 路径可读性保留)
+/// Kept raw: RFC 3986 unreserved + separators and drive colon for readable file paths ('\' is kept for Windows readability, not strict URL validity)
 fn is_kept_raw(b: u8) -> bool {
     matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b'\\' | b':')
 }
 
 /// Decode a URL-encoded string
 ///
-/// Strict RFC 3986: `+` stays a literal plus (form-style `+`-as-space is not
-/// applied, matching `url_encode` which emits `%20` for spaces).
+/// Strict RFC 3986: `+` stays a literal plus (form-style `+`-as-space is not applied, matching `url_encode` which emits `%20` for spaces).
 ///
 /// # Arguments
 /// * `s` - The URL-encoded string to decode
 ///
 /// # Returns
-/// The decoded string, or None if the encoding is invalid (bad escape or
-/// decoded bytes not forming valid UTF-8)
+/// The decoded string, or None if the encoding is invalid (bad escape or decoded bytes not forming valid UTF-8)
 pub fn url_decode(s: &str) -> Option<String> {
-    // Collect bytes and validate UTF-8 once at the end: assembling multi-byte
-    // sequences char-by-char would produce mojibake
+    // Collect bytes and validate UTF-8 once at the end: assembling multi-byte sequences char-by-char would produce mojibake
     let mut bytes: Vec<u8> = Vec::with_capacity(s.len());
     let mut chars = s.chars();
 

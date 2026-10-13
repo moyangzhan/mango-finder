@@ -104,8 +104,7 @@ pub async fn remote_find_similars_with_exclude(
     all_results
 }
 
-// ============================================
-// Helper functions
+// ============================================ Helper functions
 // ============================================
 
 /// Get list of searchable devices (paired and online)

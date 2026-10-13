@@ -36,8 +36,7 @@ pub fn insert(file_info: &FileInfo) -> Result<Option<FileInfo>, RepositoryError>
         ":file_update_time": datetime_util::micro_datetime_to_str(&file_info.file_update_time),
     })?;
     if affected == 0 {
-        // Lost a concurrent-insert race on path: return the winning row so
-        // the caller continues on it instead of erroring
+        // Lost a concurrent-insert race on path: return the winning row so the caller continues on it instead of erroring
         let mut query_stmt = conn.prepare("select * from file_info where path = ?1 limit 1")?;
         let existing = query_stmt
             .query_row([&file_info.path], |row| Ok(Some(build_file_info(row)?)))
@@ -113,10 +112,8 @@ pub fn update_content_only(
     Ok(())
 }
 
-/// Count all indexed files (content_index_status = Indexed) in one query;
-/// category-agnostic total matching the GUI's "indexed files" metric.
-/// 单条查询统计全部已索引文件(content_index_status = Indexed),
-/// 与 GUI 的 indexed_files 口径一致。
+/// Count all indexed files (content_index_status = Indexed) in one query; category-agnostic total matching the GUI's "indexed files" metric.
+/// 单条查询统计全部已索引文件(content_index_status = Indexed),与 GUI 的 indexed_files 口径一致。
 pub fn count_indexed() -> Result<i64, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;
     let count: i64 = conn.query_row(
@@ -239,11 +236,8 @@ pub fn count() -> Result<i64, RepositoryError> {
     Ok(count)
 }
 
-/// Returns (id, path) pairs so the path-search cache can carry the real DB id
-/// (the cache previously fabricated ids from its line number, which drifted
-/// after any deletion or incremental append).
-/// 返回 (id, path) 二元组,让路径搜索缓存携带真实 DB id
-/// (此前缓存用行号伪造 id,删除或增量追加后即错位)。
+/// Returns (id, path) pairs so the path-search cache can carry the real DB id (the cache previously fabricated ids from its line number, which drifted after any deletion or incremental append).
+/// 返回 (id, path) 二元组,让路径搜索缓存携带真实 DB id (此前缓存用行号伪造 id,删除或增量追加后即错位)。
 pub fn list_paths(page: i64, size: i64, asc: bool) -> Result<Vec<(i64, String)>, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;
     let order_direction = if asc { "asc" } else { "desc" };
@@ -616,10 +610,8 @@ pub fn list_by_name(name: &str) -> Result<Vec<FileInfo>, RepositoryError> {
 }
 
 /// List id + image_hash of all image files with a stored hash
-/// 列出所有已存储感知哈希的图片文件（供外部文件纯视觉比对使用）
-/// 视觉回退候选:经 SQLite UDF 在库内过滤汉明距离,只有匹配行跨越边界
-/// Visual fallback candidates: SQLite UDF filters hamming distance in-DB;
-/// only matching rows cross the boundary
+/// 列出所有已存储感知哈希的图片文件（供外部文件纯视觉比对使用）视觉回退候选:经 SQLite UDF 在库内过滤汉明距离,只有匹配行跨越边界
+/// Visual fallback candidates: SQLite UDF filters hamming distance in-DB; only matching rows cross the boundary
 pub fn find_visual_candidates_by_hash(
     source_hash: &[u8],
     max_distance: i64,

@@ -184,8 +184,7 @@ pub const IGNORE_HIDDEN_DIRS: bool = true;
 // Ignore dot-prefixed files, such as .gitignore, .env, etc.
 pub const IGNORE_HIDDEN_FILES: bool = true;
 
-// For user defined document types
-// pub async fn supported_doc_exts() -> Vec<String> {
+// For user defined document types pub async fn supported_doc_exts() -> Vec<String> {
 //     let guard = EXT_TO_DOC_LOADER.read().await;
 //     guard.keys().cloned().collect()
 // }
@@ -207,10 +206,8 @@ pub static UI_MOUNTED: AtomicBool = AtomicBool::new(false);
 ///
 pub static TEST_MODE_REMOTE_DEVICE: AtomicBool = AtomicBool::new(false);
 
-/// Path-search cache entries as (file_info.id, path): the real DB id travels
-/// with the path so search results never fabricate ids from line numbers
-/// 路径搜索缓存元素为 (file_info.id, path):真实 id 随路径入缓存,
-/// 搜索结果不再用行号伪造 id
+/// Path-search cache entries as (file_info.id, path): the real DB id travels with the path so search results never fabricate ids from line numbers
+/// 路径搜索缓存元素为 (file_info.id, path):真实 id 随路径入缓存,搜索结果不再用行号伪造 id
 pub static PATHS_CACHE: LazyLock<AsyncRwLock<Vec<(i64, String)>>> =
     LazyLock::new(|| AsyncRwLock::new(vec![]));
 pub static PATHS_CACHE_BUILD_TIME: LazyLock<AsyncRwLock<DateTime<Local>>> =

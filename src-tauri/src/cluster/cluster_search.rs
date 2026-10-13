@@ -201,8 +201,7 @@ async fn get_searchable_devices(device_ids: Option<Vec<String>>) -> Vec<Device> 
         .collect()
 }
 
-// ============================================
-// Mock cluster search for testing
+// ============================================ Mock cluster search for testing
 // ============================================
 
 /// Mock cluster search for testing

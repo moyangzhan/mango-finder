@@ -41,8 +41,7 @@ pub fn cluster_url(ip: &str, port: i32, path: &str) -> String {
     format!("http://{}:{}{}{}", ip, port, super::CLUSTER_PREFIX, path)
 }
 
-// ============================================
-// Internal helpers
+// ============================================ Internal helpers
 // ============================================
 
 /// 统一请求前置:带设备头发送 + 状态码校验,错误串全局一致
@@ -87,8 +86,7 @@ async fn call_and_get_data<T: serde::de::DeserializeOwned>(
     common.data.ok_or_else(|| "No data in response".to_string())
 }
 
-// ============================================
-// Search API
+// ============================================ Search API
 // ============================================
 
 /// Search on a remote device
@@ -108,15 +106,13 @@ pub async fn search(
     call_and_get_data(reqwest::Method::POST, &url, Some(&request)).await
 }
 
-// ============================================
-// Similarity Search API
+// ============================================ Similarity Search API
 // ============================================
 
 /// Find similar files on a remote device by file ID (with exclude list for loop prevention)
 /// 通过文件ID在远程设备上查找相似文件（带排除列表防止循环）
 ///
-/// This calls the /cluster/file/:file_id/similars endpoint which handles cross-device search
-/// on the remote device side, including forwarding to other devices.
+/// This calls the /cluster/file/:file_id/similars endpoint which handles cross-device search on the remote device side, including forwarding to other devices.
 ///
 /// # Arguments
 /// * `request_id` - Unique request ID for loop prevention. If None, generates a new UUID.
@@ -153,8 +149,7 @@ pub async fn find_similars(
     call_and_get_data(reqwest::Method::POST, &url, Some(&request)).await
 }
 
-// ============================================
-// File Fetch API
+// ============================================ File Fetch API
 // ============================================
 
 /// Fetch file data from a remote device
@@ -170,8 +165,7 @@ pub async fn fetch_file(file_id: i64, ip: &str, port: i32) -> Result<Vec<u8>, St
     Ok(data.to_vec())
 }
 
-// ============================================
-// Chunks API
+// ============================================ Chunks API
 // ============================================
 
 /// Fetch chunks from a remote device by IDs
@@ -187,8 +181,7 @@ pub async fn fetch_chunks(ids: &[u32], ip: &str, port: i32) -> Result<Vec<String
     .map(|d| d.chunks)
 }
 
-// ============================================
-// File Content API
+// ============================================ File Content API
 // ============================================
 
 /// Fetch file content from a remote device by file ID
@@ -202,8 +195,7 @@ pub async fn fetch_file_content(
     call_and_get_data(reqwest::Method::GET, &url, None::<&serde_json::Value>).await
 }
 
-// ============================================
-// Utility functions
+// ============================================ Utility functions
 // ============================================
 
 /// Get local IP address
@@ -215,8 +207,7 @@ pub fn get_local_ip() -> Result<String, String> {
         .map_err(|e| format!("Failed to get local IP: {}", e))
 }
 
-// ============================================
-// Device Ping API
+// ============================================ Device Ping API
 // ============================================
 
 /// Ping a remote device to check status
@@ -295,8 +286,7 @@ pub async fn ping_and_update_device_info(
     Ok(info)
 }
 
-// ============================================
-// Pairing API
+// ============================================ Pairing API
 // ============================================
 
 /// Send pairing request to a remote device

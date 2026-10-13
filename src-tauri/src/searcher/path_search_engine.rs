@@ -17,18 +17,14 @@ use std::time::{Duration, Instant};
 use tokio::sync::OnceCell;
 
 /// 缓存版本号(CONFIG_NAME_PATHS_CACHE_VERSION):任何进程删除索引行时递增;
-/// 持有缓存的宿主在计时器里发现版本不一致即全量重建,
-/// 使跨进程删除(如 CLI index clear)在 ≤10s 内对常驻缓存生效
-/// Cache version (CONFIG_NAME_PATHS_CACHE_VERSION): any process deleting index
-/// rows bumps it; resident hosts rebuild on mismatch at the next 10s tick.
+/// 持有缓存的宿主在计时器里发现版本不一致即全量重建,使跨进程删除(如 CLI index clear)在 ≤10s 内对常驻缓存生效
+/// Cache version (CONFIG_NAME_PATHS_CACHE_VERSION): any process deleting index rows bumps it; resident hosts rebuild on mismatch at the next 10s tick.
 static CACHE_VERSION: AtomicI64 = AtomicI64::new(i64::MIN);
-/// 全量重建互斥:timer 与 init 可能并发触发 build_index,不保护会互相
-/// clear/push 交错产生重复条目
+/// 全量重建互斥:timer 与 init 可能并发触发 build_index,不保护会互相 clear/push 交错产生重复条目
 /// Full-rebuild mutex: timer and init may trigger build_index concurrently
 static BUILDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// 共享的一次性初始化:首个调用方建缓存并启动计时器,并发/后续调用等待同一次构建
-/// Shared one-shot init: the first caller builds and starts the timer,
-/// concurrent/later callers await the same build
+/// Shared one-shot init: the first caller builds and starts the timer, concurrent/later callers await the same build
 static INIT: OnceCell<()> = OnceCell::const_new();
 
 fn read_db_version() -> Option<i64> {
@@ -41,9 +37,7 @@ fn read_db_version() -> Option<i64> {
 /// 通知其他进程:索引行有删除,持有缓存的宿主应重建(本进程本地版本同步跳过)
 /// Notify other processes that index rows were removed (resident hosts rebuild)
 pub fn notify_paths_removed() {
-    // Only bump the DB version; do NOT store the local version so the timer
-    // always detects the mismatch and rebuilds (storing it here would
-    // suppress the rebuild for callers that don't prune the local cache)
+    // Only bump the DB version; do NOT store the local version so the timer always detects the mismatch and rebuilds (storing it here would suppress the rebuild for callers that don't prune the local cache)
     if let Err(e) = config_repo::increment(CONFIG_NAME_PATHS_CACHE_VERSION) {
         log::warn!("Failed to bump paths cache version: {}", e);
     }
@@ -51,8 +45,7 @@ pub fn notify_paths_removed() {
 
 /// Keyword-based exact match search for file paths
 pub async fn search(query: &str) -> Vec<SearchResult> {
-    // Readers must never observe an unbuilt cache (e.g. racing the daemon's
-    // post-bind warm build)
+    // Readers must never observe an unbuilt cache (e.g. racing the daemon's post-bind warm build)
     init().await;
     let start = Instant::now();
     let keywords: Vec<&str> = query.split_whitespace().collect();
@@ -94,9 +87,7 @@ pub async fn search(query: &str) -> Vec<SearchResult> {
                     .collect();
                 let result = SearchResult {
                     file_info: FileInfo {
-                        // Real DB id carried by the cache entry — the old
-                        // line-number fabrication pointed follow-up commands
-                        // (file/similar by id) at the wrong rows.
+                        // Real DB id carried by the cache entry — the old line-number fabrication pointed follow-up commands (file/similar by id) at the wrong rows.
                         id: *file_id,
                         path: path.to_string(),
                         name: file_name,
@@ -127,8 +118,7 @@ pub async fn search(query: &str) -> Vec<SearchResult> {
     result
 }
 
-/// Build the path cache on first use and start the refresh timer; concurrent
-/// callers share the same build, later calls are no-ops.
+/// Build the path cache on first use and start the refresh timer; concurrent callers share the same build, later calls are no-ops.
 /// 首次调用构建路径缓存并启动刷新计时器;并发调用共享同一次构建,后续为空操作
 pub async fn init() {
     INIT.get_or_init(|| async {
@@ -142,14 +132,11 @@ async fn build_index() {
     if BUILDING.swap(true, AtomicOrdering::SeqCst) {
         return;
     }
-    // Record the pre-build version: a bump during the build makes the next
-    // tick mismatch and rebuild again (self-healing) instead of adopting a
-    // half-built state as current.
+    // Record the pre-build version: a bump during the build makes the next tick mismatch and rebuild again (self-healing) instead of adopting a half-built state as current.
     let version_before = read_db_version().unwrap_or(0);
     let mut build_complete = true;
     let size = 1000;
-    // Count before clearing: on count failure (e.g. SQLITE_BUSY → 0) keep the
-    // cache rather than clearing it to empty and exiting early
+    // Count before clearing: on count failure (e.g. SQLITE_BUSY → 0) keep the cache rather than clearing it to empty and exiting early
     let total = match file_info_repo::count() {
         Ok(n) => n,
         Err(e) => {
@@ -215,8 +202,7 @@ async fn paths_index_timer() {
     let mut interval = tokio::time::interval(Duration::from_secs(10));
     loop {
         interval.tick().await;
-        // A version mismatch means another process removed index rows,
-        // which the append-only push cannot see — rebuild in full.
+        // A version mismatch means another process removed index rows, which the append-only push cannot see — rebuild in full.
         if let Some(db_version) = read_db_version() {
             if db_version != CACHE_VERSION.load(AtomicOrdering::SeqCst) {
                 log::info!("paths cache version changed, rebuilding");
@@ -234,8 +220,7 @@ pub async fn push_to_index() {
     if total == 0 {
         return;
     }
-    // Gather changed rows without the lock, then reconcile in one write-guard
-    // pass via a path-to-slot map (O(1) per row)
+    // Gather changed rows without the lock, then reconcile in one write-guard pass via a path-to-slot map (O(1) per row)
     let page_size = 1000;
     let pages = (total as f64 / page_size as f64).ceil() as u32;
     let mut incoming: Vec<(i64, String)> = Vec::new();
@@ -252,8 +237,7 @@ pub async fn push_to_index() {
 
     if !incoming.is_empty() {
         let mut paths_guard = PATHS_CACHE.write().await;
-        // Locate via a path-to-slot map (cached entries refresh the id, new
-        // entries take sequential slots), then apply
+        // Locate via a path-to-slot map (cached entries refresh the id, new entries take sequential slots), then apply
         let ops: Vec<(usize, i64, String)> = {
             // Existing entries borrow &str from the guard; batch-new use owned keys
             let slot_of: HashMap<&str, usize> = paths_guard

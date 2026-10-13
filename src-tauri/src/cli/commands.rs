@@ -27,8 +27,7 @@ use crate::output::{self, OutputKind};
 use mango_finder_lib::structs::search_result::SearchResult;
 
 #[derive(Parser)]
-// Custom Help subcommand (supports [command] arg); clap's built-in help must stay
-// disabled or its debug_asserts panic on the duplicate subcommand name
+// Custom Help subcommand (supports [command] arg); clap's built-in help must stay disabled or its debug_asserts panic on the duplicate subcommand name
 #[command(
     name = "mfd",
     about = "Mango Finder Command Line Interface",
@@ -60,8 +59,7 @@ pub enum Commands {
         #[arg(required_unless_present = "help_doc")]
         query: Option<String>,
         /// Search type: semantic (default), keyword
-        // Value whitelist: a typo fails fast instead of silently running a
-        // semantic search
+        // Value whitelist: a typo fails fast instead of silently running a semantic search
         #[arg(long, default_value = "semantic", value_parser = ["semantic", "keyword"])]
         r#type: String,
         /// Remote device ID (optional)
@@ -148,8 +146,7 @@ pub enum Commands {
         value: Option<String>,
     },
 
-    /// Shut down the local resident service (only stops the CLI daemon;
-    /// a GUI-hosted service is left to the GUI)
+    /// Shut down the local resident service (only stops the CLI daemon; a GUI-hosted service is left to the GUI)
     Shutdown,
 
     /// Run as the local service host in foreground (spawned on demand by mfd itself)
@@ -192,10 +189,8 @@ pub async fn handle_search(query: &str, search_type: &str, device: Option<String
         return;
     }
 
-    // Fast path: reuse the warm model of the local resident service (the GUI
-    // or the on-demand daemon); on failure silently fall back to the
-    // in-process search. Output structure is identical across both paths —
-    // both resolve (results, total) here and share one success tail.
+    // Fast path: reuse the warm model of the local resident service (the GUI or the on-demand daemon); on failure silently fall back to the in-process search.
+    // Output structure is identical across both paths —both resolve (results, total) here and share one success tail.
     let (results, total) = if let Some(port) = host_api::ensure_server().await {
         match host_api::search(query, search_type, limit, port).await {
             Ok((results, total)) => {
@@ -224,8 +219,8 @@ pub async fn handle_search(query: &str, search_type: &str, device: Option<String
 
 /// In-process search: full match set then apply limit.
 /// The dispatch lives in `searcher::search_by_type` (shared with the server).
-/// 进程内搜索:取全量匹配再应用 limit。分发逻辑在
-/// `searcher::search_by_type`(与服务端共用)。
+/// 进程内搜索:取全量匹配再应用 limit。
+/// 分发逻辑在 `searcher::search_by_type`(与服务端共用)。
 async fn in_process_search(
     query: &str,
     search_type: &str,
@@ -236,9 +231,7 @@ async fn in_process_search(
     (results.into_iter().take(limit).collect(), total)
 }
 
-/// Similarity query: prefer the local resident service (warm model), fall
-/// back to in-process; both paths call the same underlying function, so the
-/// output is identical.
+/// Similarity query: prefer the local resident service (warm model), fall back to in-process; both paths call the same underlying function, so the output is identical.
 /// 相似查询:优先走本机常驻服务(热模型),回落进程内;
 /// 两条路径底层调用相同函数,输出一致
 async fn find_similars(file_id: i64, limit: usize) -> Result<Vec<SearchResult>, String> {
@@ -265,13 +258,10 @@ pub async fn handle_shutdown() {
     };
 
     // Ignore the request result and let the poll decide the final state:
-    // the daemon may exit between detect and POST (idle timeout / a
-    // concurrent yield), which surfaces as a transport error although the
-    // service actually stopped.
+    // the daemon may exit between detect and POST (idle timeout / a concurrent yield), which surfaces as a transport error although the service actually stopped.
     let _ = host_api::request_shutdown(port).await;
 
-    // The daemon's graceful shutdown is bounded at 10s; allow 12s before
-    // declaring a GUI host
+    // The daemon's graceful shutdown is bounded at 10s; allow 12s before declaring a GUI host
     let (status, message) =
         match host_client::wait_until_released(port, std::time::Duration::from_secs(12)).await {
             host_client::ReleaseOutcome::Released => ("stopped", "Local service (daemon) stopped"),
@@ -328,9 +318,7 @@ pub async fn handle_similar(file: &str, device: Option<String>, limit: usize, in
                             file.id,
                             file.path
                         ));
-                        // The list exists to retry with ANOTHER file; exclude
-                        // the chosen entry so it does not waste one of the 5
-                        // slots.
+                        // The list exists to retry with ANOTHER file; exclude the chosen entry so it does not waste one of the 5 slots.
                         data["matched_files"] = serde_json::json!(
                             same_name_matches
                                 .iter()
@@ -350,11 +338,9 @@ pub async fn handle_similar(file: &str, device: Option<String>, limit: usize, in
         SimilarTarget::External { path, name } => {
             warn_external_slowness(&path);
 
-            // --index: index the single file first (parse+embed once), then take the indexed
-            // fast path; on failure fall back to on-the-fly with a notice
+            // --index: index the single file first (parse+embed once), then take the indexed fast path; on failure fall back to on-the-fly with a notice
             if index {
-                // Canonicalize to absolute (Windows backslash) before insert so rows match the
-                // directory-scan format; watcher diffs and path compares are string-based
+                // Canonicalize to absolute (Windows backslash) before insert so rows match the directory-scan format; watcher diffs and path compares are string-based
                 let stored_path = normalize_store_path(&path);
                 let indexed_file = match indexer_service::index_file(&stored_path).await {
                     Ok(()) => file_info_repo::get_by_path(&stored_path).ok().flatten(),
@@ -364,10 +350,7 @@ pub async fn handle_similar(file: &str, device: Option<String>, limit: usize, in
                     }
                 };
                 if let Some(file) = indexed_file {
-                    // Video/Other categories only get a metadata row and are
-                    // never embedded (similarity is always empty); fail with
-                    // the same clear error as without --index instead of an
-                    // empty "indexed" success.
+                    // Video/Other categories only get a metadata row and are never embedded (similarity is always empty); fail with the same clear error as without --index instead of an empty "indexed" success.
                     if !matches!(
                         FileCategory::from_ext(&file.file_ext),
                         FileCategory::Document | FileCategory::Image | FileCategory::Audio
@@ -466,16 +449,11 @@ async fn build_indexed_notice(file: &FileInfo) -> String {
     notice
 }
 
-/// 规范化为存储路径格式：绝对路径，Windows 下分隔符统一为反斜杠，
-/// 与目录扫描写入 file_info 的行格式保持一致
-/// Canonicalize an existing path to its on-disk case. Windows paths are
-/// case-insensitive but the index matches paths with exact SQL comparisons,
-/// so a differently-cased input must be resolved to the indexed form first
-/// (both for lookup and before inserting via --index, which would otherwise
-/// create a duplicate row).
-/// 将存在的路径规范化为磁盘上的真实大小写。Windows 路径不区分大小写,但索引
-/// 按字符串精确匹配;大小写不同的输入必须先解析为索引中的形态
-/// (查找与 --index 入库两侧都需要,否则会插入重复行)。
+/// 规范化为存储路径格式：绝对路径，Windows 下分隔符统一为反斜杠，与目录扫描写入 file_info 的行格式保持一致
+/// Canonicalize an existing path to its on-disk case.
+/// Windows paths are case-insensitive but the index matches paths with exact SQL comparisons, so a differently-cased input must be resolved to the indexed form first (both for lookup and before inserting via --index, which would otherwise create a duplicate row).
+/// 将存在的路径规范化为磁盘上的真实大小写。
+/// Windows 路径不区分大小写,但索引按字符串精确匹配;大小写不同的输入必须先解析为索引中的形态(查找与 --index 入库两侧都需要,否则会插入重复行)。
 fn canonical_case_path(path: &str) -> Option<String> {
     let p = Path::new(path);
     if !p.exists() {
@@ -510,12 +488,10 @@ fn normalize_store_path(path: &str) -> String {
 }
 
 /// Prefix comparison that matches Windows path semantics: case-insensitive on
-/// Windows (full Unicode folding — watched dirs may contain non-ASCII),
-/// exact on Unix. Byte-slicing is guarded by is_char_boundary so CJK paths
-/// cannot panic.
-/// 前缀比较按各平台路径语义:Windows 不区分大小写(全 Unicode 折叠 —— 监听
-/// 目录可能含非 ASCII 字符),Unix 精确。字节切片先检查 char 边界,
-/// 中文等多字节路径不会 panic。
+/// Windows (full Unicode folding — watched dirs may contain non-ASCII), exact on Unix.
+/// Byte-slicing is guarded by is_char_boundary so CJK paths cannot panic.
+/// 前缀比较按各平台路径语义:Windows 不区分大小写(全 Unicode 折叠 —— 监听目录可能含非 ASCII 字符),Unix 精确。
+/// 字节切片先检查 char 边界,中文等多字节路径不会 panic。
 fn path_has_prefix(path: &str, prefix: &str) -> bool {
     #[cfg(windows)]
     {
@@ -529,8 +505,7 @@ fn path_has_prefix(path: &str, prefix: &str) -> bool {
     }
 }
 
-/// 判断路径是否位于任一监听目录之下（含目录本身；分隔符感知，避免同前缀兄弟目录误判；
-/// Windows 下大小写不敏感）
+/// 判断路径是否位于任一监听目录之下（含目录本身；分隔符感知，避免同前缀兄弟目录误判；Windows 下大小写不敏感）
 /// Path equality with platform semantics (case-insensitive on Windows).
 /// 按平台语义的路径相等比较(Windows 不区分大小写)。
 fn path_equals(a: &str, b: &str) -> bool {
@@ -544,8 +519,7 @@ fn path_equals(a: &str, b: &str) -> bool {
     }
 }
 
-/// Whether the path is under any watched directory (inclusive; separator-aware
-/// to avoid sibling-directory false positives; case-insensitive on Windows).
+/// Whether the path is under any watched directory (inclusive; separator-aware to avoid sibling-directory false positives; case-insensitive on Windows).
 async fn in_watched_directory(path: &str) -> bool {
     let Some(parent) = Path::new(path).parent().and_then(|p| p.to_str()) else {
         return false;
@@ -589,8 +563,7 @@ fn resolve_file_arg(arg: &str) -> Result<SimilarTarget, String> {
 
     if arg.contains('\\') || arg.contains('/') {
         // Windows paths are case-insensitive while the index matches exactly:
-        // resolve to the on-disk case first, then try the input as-is and
-        // the separator-flipped form (indexed paths use \, input often /).
+        // resolve to the on-disk case first, then try the input as-is and the separator-flipped form (indexed paths use \, input often /).
         let canonical = canonical_case_path(arg);
         let flipped: String = arg
             .chars()
@@ -716,12 +689,10 @@ pub async fn handle_index(action: IndexAction) {
         IndexAction::Status => {
             let total = file_info_repo::count().unwrap_or(0);
             // Same metric as the GUI: distinct files with content_index_status
-            // = Indexed, not the embedding-chunk row count (a 30-chunk PDF
-            // used to show indexed > total).
+            // = Indexed, not the embedding-chunk row count (a 30-chunk PDF used to show indexed > total).
             let indexed = count_indexed_files();
 
-            // Indexing task state lives in the DB (visible cross-process); in-process atomic
-            // states (INDEXING etc.) are meaningless for a one-shot CLI
+            // Indexing task state lives in the DB (visible cross-process); in-process atomic states (INDEXING etc.) are meaningless for a one-shot CLI
             let recent_tasks = indexing_task_repo::list(1, 5, "id", "desc").unwrap_or_default();
             let latest_task = recent_tasks.first();
 
@@ -739,9 +710,7 @@ pub async fn handle_index(action: IndexAction) {
                 return;
             }
 
-            // Normalize every input path to its absolute on-disk form —
-            // relative arguments would otherwise be stored relative and break
-            // every later path-based lookup/open.
+            // Normalize every input path to its absolute on-disk form —relative arguments would otherwise be stored relative and break every later path-based lookup/open.
             let paths: Vec<String> = paths.iter().map(|p| normalize_store_path(p)).collect();
             log::info!("Indexing started for paths: {:?}", paths);
             match indexer_service::start_indexing(paths.clone(), "cli").await {
@@ -767,9 +736,7 @@ pub async fn handle_index(action: IndexAction) {
             }
         }
         IndexAction::List { page, page_size } => {
-            // Clamp pagination: a negative page_size becomes SQLite's
-            // unbounded LIMIT (full-table dump); a non-positive page yields a
-            // negative OFFSET that SQLite treats as 0 (repeats page 1).
+            // Clamp pagination: a negative page_size becomes SQLite's unbounded LIMIT (full-table dump); a non-positive page yields a negative OFFSET that SQLite treats as 0 (repeats page 1).
             let page = page.clamp(1, 1_000_000); // also caps (page-1)*size overflow
             let page_size = page_size.clamp(1, 1000);
             match file_info_repo::list(page, page_size) {
@@ -809,9 +776,7 @@ pub async fn handle_file(id: i64, open: bool, device: Option<String>) {
 
     match file_info_repo::get_by_id(id) {
         Ok(Some(mut file)) => {
-            // Same as the GUI/cluster read paths: under file storage mode the
-            // content column is empty and the parsed text lives in the .md
-            // referenced by content_ref_path — read it back.
+            // Same as the GUI/cluster read paths: under file storage mode the content column is empty and the parsed text lives in the .md referenced by content_ref_path — read it back.
             if file.content.is_empty() {
                 if let (Some(rel), Some(storage)) =
                     (file.content_ref_path.as_deref(), STORAGE_PATH.get())
@@ -858,8 +823,7 @@ pub async fn handle_device(action: DeviceAction) {
     }
 }
 
-/// Count distinct indexed files (content_index_status = Indexed) across all
-/// categories, matching the GUI's metric.
+/// Count distinct indexed files (content_index_status = Indexed) across all categories, matching the GUI's metric.
 /// 按类别累计已索引文件数(content_index_status = Indexed),与 GUI 口径一致。
 fn count_indexed_files() -> i64 {
     file_info_repo::count_indexed().unwrap_or(0)
@@ -892,8 +856,7 @@ pub fn handle_version() {
 pub fn handle_locale(value: Option<String>) {
     match value {
         Some(locale) => {
-            // The core's empty→Ok(0) soft no-op exists for the GUI frontend;
-            // an explicit empty argument from the CLI is invalid input.
+            // The core's empty→Ok(0) soft no-op exists for the GUI frontend; an explicit empty argument from the CLI is invalid input.
             let result = if locale.is_empty() {
                 Err(String::new())
             } else {
@@ -940,15 +903,11 @@ pub async fn handle_check() {
         .map(|id| id.clone())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    // Same indexed-files metric as status/index status (content_index_status);
-    // otherwise check's no-indexed-files recommendation never fires for
-    // scanned-but-never-embedded libraries.
+    // Same indexed-files metric as status/index status (content_index_status); otherwise check's no-indexed-files recommendation never fires for scanned-but-never-embedded libraries.
     let indexed_files = count_indexed_files();
     let total_embeddings = file_content_embedding_repo::count().unwrap_or(0);
 
-    // Cluster setting: use the same typed source as the real service
-    // (same port origin/default); out-of-range values fall back instead of an
-    // `as u16` truncation probing the wrong port.
+    // Cluster setting: use the same typed source as the real service (same port origin/default); out-of-range values fall back instead of an `as u16` truncation probing the wrong port.
     let setting = mango_finder_lib::cluster::get_cluster_setting().await;
     let device_name = if setting.device_name.is_empty() {
         "unknown"
@@ -959,8 +918,7 @@ pub async fn handle_check() {
     // host_port() already applies the valid-range clamp (single source)
     let port: u16 = host_api::host_port().await as u16;
 
-    // Port check: a port held by our own local service (GUI/daemon) is a
-    // healthy state, not an occupancy problem.
+    // Port check: a port held by our own local service (GUI/daemon) is a healthy state, not an occupancy problem.
     let own_service = host_api::detect().await.is_some();
     let port_available = if own_service {
         true
@@ -1135,13 +1093,10 @@ fn get_recommendations(
 }
 
 /// Read active_locale without the heavy initializer (pre-init help path):
-/// a single direct config-row read; falls back to en-US when the DB/table/
-/// row is unavailable.
-/// 免重初始化读取 active_locale(help 预分发路径用):直连读一行 config,
-/// DB/表/行不可用时回落 en-US。
+/// a single direct config-row read; falls back to en-US when the DB/table/ row is unavailable.
+/// 免重初始化读取 active_locale(help 预分发路径用):直连读一行 config, DB/表/行不可用时回落 en-US。
 pub fn lightweight_locale() -> String {
-    // config_repo::get_val walks the shared open_db() (busy_timeout applies);
-    // empty string (row/db unavailable) falls back to en-US
+    // config_repo::get_val walks the shared open_db() (busy_timeout applies); empty string (row/db unavailable) falls back to en-US
     let val = mango_finder_lib::repositories::config_repo::get_val("active_locale");
     if val.is_empty() {
         "en-US".to_string()
@@ -1164,8 +1119,7 @@ pub fn handle_help(command: Option<&str>) {
         Some(cmd) => match extract_command_section(doc, cmd) {
             Some(section) => crate::outln!("{}", section),
             None => {
-                // The available-command list is also derived from the doc's
-                // section headings, so no extra list is maintained.
+                // The available-command list is also derived from the doc's section headings, so no extra list is maintained.
                 let available: Vec<&str> = doc
                     .lines()
                     .filter_map(|l| l.strip_prefix("### "))
@@ -1214,21 +1168,14 @@ fn extract_command_section(doc: &str, command: &str) -> Option<String> {
     Some(out.join("\n"))
 }
 
-/// Open a file with the OS default handler; stdio is nulled so the opened
-/// application does not inherit our pipe write ends and hang the caller.
-/// Spawn failures are reported to the caller (which fails the command)
-/// instead of silently printing success.
-/// 用系统默认程序打开文件;标准流置 null 避免被打开的程序继承本进程的
-/// 管道写端导致调用方挂起。spawn 失败如实上报(由调用方令命令失败),
-/// 而不是静默地打印成功。
+/// Open a file with the OS default handler; stdio is nulled so the opened application does not inherit our pipe write ends and hang the caller.
+/// Spawn failures are reported to the caller (which fails the command) instead of silently printing success.
+/// 用系统默认程序打开文件;标准流置 null 避免被打开的程序继承本进程的管道写端导致调用方挂起。
+/// spawn 失败如实上报(由调用方令命令失败),而不是静默地打印成功。
 fn open_with_system(path: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        // No cmd.exe in the chain: cmd phase-1 expands %VAR% even inside
-        // double quotes, so a filename containing a defined env-var name
-        // (e.g. %PATH%) gets rewritten and the open fails silently; explorer
-        // takes a plain Win32 argv (same route as the GUI's open_directory),
-        // so % and & are safe by construction.
+        // No cmd.exe in the chain: cmd phase-1 expands %VAR% even inside double quotes, so a filename containing a defined env-var name (e.g. %PATH%) gets rewritten and the open fails silently; explorer takes a plain Win32 argv (same route as the GUI's open_directory), so % and & are safe by construction.
         std::process::Command::new("explorer")
             .arg(path)
             .stdin(std::process::Stdio::null())

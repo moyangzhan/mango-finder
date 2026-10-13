@@ -276,8 +276,7 @@ pub fn init_data_with_conn(conn: &Connection) -> Result<()> {
         r#"{{"is_private":true,"parser_mode":"local","file_content_language":"{}","image_parser_mode":"local","audio_parser_mode":"local","ignore_dirs":["node_modules"],"ignore_path_prefixes":[],"ignore_exts":["tmp"],"ignore_files":[],"save_parsed_content": {{"document":false,"image":true,"audio":true,"video":true}}}}"#,
         default_file_content_language
     );
-    // is_private: Deprecated, kept for backward compatibility
-    // parser_mode: "local" | "selfhosted" | "remote" | "mixed"
+    // is_private: Deprecated, kept for backward compatibility parser_mode: "local" | "selfhosted" | "remote" | "mixed"
     conn.execute(
         "insert or ignore into config (name, value) VALUES ('indexer_setting', ?1)",
         (default_indexer_setting,),
@@ -292,8 +291,7 @@ pub fn init_data_with_conn(conn: &Connection) -> Result<()> {
         "#,
     )?;
 
-    // Model platform init
-    // https://api.siliconflow.com/v1 or https://api.siliconflow.cn/v1
+    // Model platform init https://api.siliconflow.com/v1 or https://api.siliconflow.cn/v1
     conn.execute_batch(
         r#"
         insert or ignore into model_platform (name, title, office_site_url, base_url, is_proxy_enable) values ('openai', 'OpenAI', 'https://openai.com/', 'https://api.openai.com/v1', false);

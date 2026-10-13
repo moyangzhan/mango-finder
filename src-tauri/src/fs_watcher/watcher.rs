@@ -130,8 +130,7 @@ async fn fs_event_loop(mut rx: Receiver<Event>, fs_event_normalizer: &mut FsEven
             maybe_ev = rx.recv() => {
                 match maybe_ev {
                     Some(ev) => {
-                        // Skip events inside the app's own data directory to prevent
-                        // infinite loops (DB write → fs event → re-index → DB write → …)
+                        // Skip events inside the app's own data directory to prevent infinite loops (DB write → fs event → re-index → DB write → …)
                         if is_app_data_event(&ev).await {
                             continue;
                         }
@@ -340,8 +339,7 @@ fn flush_pending(pending: &mut HashMap<PathBuf, FsEvent>) {
 }
 
 /// Check whether a file system event originated from inside the app's own data directory.
-/// Events from the data directory (database, parsed_documents, model files, etc.) must be
-/// ignored to prevent infinite feedback loops.
+/// Events from the data directory (database, parsed_documents, model files, etc.) must be ignored to prevent infinite feedback loops.
 async fn is_app_data_event(event: &Event) -> bool {
     let app_data = crate::read_lock!(APP_DATA_PATH).clone();
     if app_data.is_empty() {

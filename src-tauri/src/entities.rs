@@ -132,8 +132,7 @@ pub struct FileInfo {
     /// Audio type classification (only for audio category files)
     /// Values: 0=Unknown, 1=Speech, 2=Music, 3=Mixed
     pub audio_type: i32,
-    /// Perceptual hash for image similarity (only for image category files)
-    /// 8 bytes for 8x8 gradient hash
+    /// Perceptual hash for image similarity (only for image category files) 8 bytes for 8x8 gradient hash
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_hash: Option<Vec<u8>>,
     /// Audio fingerprint for music similarity (only for audio category files with music type)

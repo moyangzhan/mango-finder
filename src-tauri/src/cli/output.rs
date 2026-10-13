@@ -3,11 +3,8 @@ pub use crate::render::OutputKind;
 use serde_json::Value;
 use std::sync::OnceLock;
 
-/// println! for a pipe-oriented CLI: write errors (e.g. a closed pipe after
-/// `mfd ... | head`) are ignored instead of panicking, so the process exits
-/// cleanly like standard Unix tools.
-/// 面向管道场景的 println!:写失败(如 `mfd ... | head` 提前关闭管道)时
-/// 忽略而非 panic,进程像标准 Unix 工具一样干净退出。
+/// println! for a pipe-oriented CLI: write errors (e.g. a closed pipe after `mfd ... | head`) are ignored instead of panicking, so the process exits cleanly like standard Unix tools.
+/// 面向管道场景的 println!:写失败(如 `mfd ... | head` 提前关闭管道)时忽略而非 panic,进程像标准 Unix 工具一样干净退出。
 #[macro_export]
 macro_rules! outln {
     ($($arg:tt)*) => {{
@@ -28,8 +25,7 @@ macro_rules! outln_error {
     }};
 }
 
-/// print_error callers do not carry the format argument; the format parsed by
-/// main is recorded here in a global.
+/// print_error callers do not carry the format argument; the format parsed by main is recorded here in a global.
 /// print_error 的调用方不携带格式参数，用全局变量记录 main 解析出的输出格式
 static OUTPUT_FORMAT: OnceLock<String> = OnceLock::new();
 
@@ -43,8 +39,7 @@ fn is_table_mode() -> bool {
     OUTPUT_FORMAT.get().map(|f| f == "table").unwrap_or(false)
 }
 
-/// Print a success envelope; the output format comes from the global set by
-/// main, so handlers do not thread a format parameter (single source of truth).
+/// Print a success envelope; the output format comes from the global set by main, so handlers do not thread a format parameter (single source of truth).
 /// 输出成功信封;格式取自 main 设置的全局,handler 无需透传格式参数(单一来源)。
 pub fn print_success(kind: OutputKind, data: &Value) {
     match is_table_mode() {
@@ -54,8 +49,7 @@ pub fn print_success(kind: OutputKind, data: &Value) {
 }
 
 pub fn print_error(message: &str) {
-    // table mode: single-line error to stderr so stdout keeps only table
-    // content; JSON mode keeps the envelope structure.
+    // table mode: single-line error to stderr so stdout keeps only table content; JSON mode keeps the envelope structure.
     if is_table_mode() {
         outln_error!("{}: {}", t!("cli.table.error"), message);
     } else {

@@ -35,11 +35,10 @@ pub async fn semantic_search(query: &str) -> Vec<SearchResult> {
     semantic_search_engine::search(query).await
 }
 
-/// Dispatch by search type string ("keyword" → keyword search, anything else
-/// → semantic). Single source of this dispatch, used by the GUI command, the
-/// CLI in-process path and the /cli/search handler so all three behave alike.
-/// 按搜索类型字符串分发("keyword" → 关键词,其余 → 语义)。此分发只维护
-/// 一份,GUI 命令、CLI 进程内路径与 /cli/search handler 共用,行为一致。
+/// Dispatch by search type string ("keyword" → keyword search, anything else → semantic).
+/// Single source of this dispatch, used by the GUI command, the CLI in-process path and the /cli/search handler so all three behave alike.
+/// 按搜索类型字符串分发("keyword" → 关键词,其余 → 语义)。
+/// 此分发只维护一份,GUI 命令、CLI 进程内路径与 /cli/search handler 共用,行为一致。
 pub async fn search_by_type(query: &str, search_type: Option<&str>) -> Vec<SearchResult> {
     match search_type {
         Some("keyword") => keyword_search(query).await,

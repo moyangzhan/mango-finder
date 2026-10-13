@@ -78,8 +78,7 @@ impl PdfPlumberLoader {
         let mut image_texts = Vec::new();
         let mut failed_pages = Vec::new();
 
-        // Dir folder name doubles as the markdown rel-path segment (bucket for
-        // indexed parses, per-query temp dir for external ones)
+        // Dir folder name doubles as the markdown rel-path segment (bucket for indexed parses, per-query temp dir for external ones)
         let bucket = images_dir
             .file_name()
             .and_then(|n| n.to_str())
@@ -220,8 +219,7 @@ fn extract_images_from_page(
         }
     };
 
-    // Try to find XObject from the page's own resources dict,
-    // or fall back to traversing resource_ids (inherited from parent nodes)
+    // Try to find XObject from the page's own resources dict, or fall back to traversing resource_ids (inherited from parent nodes)
     let xobjects = resources_dict
         .and_then(|dict| find_xobject_dict(doc, dict).ok())
         .or_else(|| {
@@ -540,8 +538,7 @@ fn find_xobject_dict<'a>(
 /// Manually decompress zlib/deflate data when lopdf's built-in decompression fails.
 fn decompress_zlib(data: &[u8]) -> Option<Vec<u8>> {
     use std::io::Read;
-    // zlib header: 78 01 (low), 78 5E (default), 78 9C (default), 78 DA (best)
-    // raw deflate (no header): try anyway
+    // zlib header: 78 01 (low), 78 5E (default), 78 9C (default), 78 DA (best) raw deflate (no header): try anyway
     let result = if data.len() >= 2 && data[0] == 0x78 {
         let mut decoder = flate2::read::ZlibDecoder::new(data);
         let mut buf = Vec::with_capacity(data.len() * 4);

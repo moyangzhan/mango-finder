@@ -2,9 +2,8 @@ use comfy_table::{ContentArrangement, Table};
 use serde_json::Value;
 use std::io::IsTerminal;
 
-/// Identifies which command produced the data passed to print_success;
-/// table mode picks the dedicated renderer accordingly. JSON mode ignores
-/// this and keeps the output as-is.
+/// Identifies which command produced the data passed to print_success; table mode picks the dedicated renderer accordingly.
+/// JSON mode ignores this and keeps the output as-is.
 /// 标识 print_success 收到的数据来自哪个命令，table 模式据此选择专用渲染器。
 /// JSON 模式不使用该信息，输出保持原样。
 #[derive(Debug, Clone, Copy)]
@@ -25,11 +24,8 @@ pub enum OutputKind {
     Shutdown,
 }
 
-/// When piped/redirected (non-TTY) comfy-table cannot detect the terminal
-/// width and dynamic layout degrades to no truncation; fix a width so
-/// redirected output stays deterministic.
-/// 管道/重定向（非 TTY）时 comfy-table 检测不到终端宽度，动态排版会退化为不截断，
-/// 固定一个宽度保证重定向输出确定
+/// When piped/redirected (non-TTY) comfy-table cannot detect the terminal width and dynamic layout degrades to no truncation; fix a width so redirected output stays deterministic.
+/// 管道/重定向（非 TTY）时 comfy-table 检测不到终端宽度，动态排版会退化为不截断，固定一个宽度保证重定向输出确定
 const PIPE_TABLE_WIDTH: u16 = 120;
 
 pub fn render(kind: OutputKind, data: &Value) {
@@ -42,8 +38,7 @@ pub fn render(kind: OutputKind, data: &Value) {
         OutputKind::File => render_file(data),
         OutputKind::DeviceList => render_device_list(data),
         OutputKind::Check => render_check(data),
-        // Flat key-value payloads (index clear / status / version / locale / shutdown)
-        // use the generic renderer.
+        // Flat key-value payloads (index clear / status / version / locale / shutdown) use the generic renderer.
         OutputKind::IndexClear
         | OutputKind::Status
         | OutputKind::Version
@@ -323,8 +318,7 @@ fn render_check(data: &Value) {
     }
 }
 
-/// Generic key-value rendering: objects line by line, scalar arrays joined
-/// with commas, arrays of objects rendered as sub-tables.
+/// Generic key-value rendering: objects line by line, scalar arrays joined with commas, arrays of objects rendered as sub-tables.
 /// 通用 key-value 渲染：对象逐行，标量数组逗号连接，对象数组渲染为子表格
 fn render_kv(data: &Value) {
     render_value_block(data, 0);
@@ -425,8 +419,7 @@ fn new_table(headers: Vec<String>) -> Table {
     table
 }
 
-/// Translate a field name; falls back to the underscore-replaced original
-/// when no translation key exists.
+/// Translate a field name; falls back to the underscore-replaced original when no translation key exists.
 /// 字段名翻译，无对应 key 时回退为下划线替换的原始名
 fn label(key: &str) -> String {
     let k = format!("cli.table.field.{key}");
@@ -471,8 +464,7 @@ fn index_status_label(status: &Value, msg: &Value) -> String {
     let k = format!("cli.table.index_status.{key}");
     let mut label = t!(&k).to_string();
     if let Some(m) = msg.as_str() {
-        // "success" is the normal receipt of the status itself, not an error
-        // message; skip repeating it.
+        // "success" is the normal receipt of the status itself, not an error message; skip repeating it.
         if !m.is_empty() && m != "success" {
             label.push_str(&format!(" ({})", truncate_middle(m, 60)));
         }
@@ -499,8 +491,7 @@ fn yes_no(b: bool) -> String {
     }
 }
 
-/// Task timestamps serialize as ISO 8601 (with timezone); tables show a
-/// normalized date-time slice.
+/// Task timestamps serialize as ISO 8601 (with timezone); tables show a normalized date-time slice.
 /// 任务时间戳序列化为 ISO 8601（含时区），表格中截取日期时间部分统一展示
 fn format_datetime(s: Option<&str>) -> String {
     match s {
@@ -510,8 +501,7 @@ fn format_datetime(s: Option<&str>) -> String {
 }
 
 fn format_duration(secs: i64) -> String {
-    // IndexingTask.duration is in seconds (same source as the GUI's
-    // durationInSeconds column).
+    // IndexingTask.duration is in seconds (same source as the GUI's durationInSeconds column).
     if secs >= 60 {
         format!("{:.1}m", secs as f64 / 60.0)
     } else {

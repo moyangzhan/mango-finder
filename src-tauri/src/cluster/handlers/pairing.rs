@@ -1,5 +1,4 @@
-//! /cluster/pairing/* endpoints: pairing request/response handshake and
-//! reset notification between devices
+//! /cluster/pairing/* endpoints: pairing request/response handshake and reset notification between devices
 //! /cluster/pairing/* 端点:设备间的配对请求/应答握手与重置通知
 
 use crate::cluster::get_cluster_setting;
@@ -357,8 +356,7 @@ pub async fn handle_reset_notify(
 
     // Get local device record for this remote device
     if let Ok(Some(device)) = device_repo::get_by_device_id(&payload.from_device_id) {
-        // Reset pairing status to None with remark; is_manual=true because the
-        // reset was triggered by a user action on the remote device
+        // Reset pairing status to None with remark; is_manual=true because the reset was triggered by a user action on the remote device
         let remark = t!("pairing.remark.remote-reset").to_string();
         device_repo::update_pairing_status_with_remark(
             device.id,

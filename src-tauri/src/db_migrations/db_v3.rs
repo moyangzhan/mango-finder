@@ -8,8 +8,7 @@ use rusqlite::Connection;
 pub fn exec_ddl_with_conn(conn: &Connection) -> Result<()> {
     info!("dbv3.exec_ddl_with_conn");
 
-    // Add audio_fingerprint column to file_info table (for music similarity)
-    // audio_fingerprint contains: spectral_histogram (10 f32) + energy_bands (8 f32) + avg_zcr (f32) + tempo_estimate (f32)
+    // Add audio_fingerprint column to file_info table (for music similarity) audio_fingerprint contains: spectral_histogram (10 f32) + energy_bands (8 f32) + avg_zcr (f32) + tempo_estimate (f32)
     // Total: 20 f32 values = 80 bytes
     let _ = conn.execute_batch(
         r#"

@@ -15,8 +15,7 @@ use crate::repositories::{device_repo, file_info_repo};
 /// mDNS service type for MangoFinder
 const SERVICE_TYPE: &str = "_mangofinder._tcp.local.";
 
-// ============================================================================
-// Broadcast (Advertising)
+// ============================================================================ Broadcast (Advertising)
 // ============================================================================
 
 /// mDNS broadcast daemon instance
@@ -107,8 +106,7 @@ pub fn is_mdns_broadcast_running() -> bool {
     false
 }
 
-// ============================================================================
-// Browsing (Discovery)
+// ============================================================================ Browsing (Discovery)
 // ============================================================================
 
 /// mDNS browsing running flag
@@ -202,8 +200,7 @@ pub fn is_mdns_browsing_running() -> bool {
     MDNS_BROWSING.load(Ordering::SeqCst)
 }
 
-// ============================================================================
-// Legacy compatibility functions
+// ============================================================================ Legacy compatibility functions
 // ============================================================================
 
 /// Start mDNS service (broadcast + browsing) - for backward compatibility
@@ -221,8 +218,7 @@ pub async fn stop_mdns_service() {
     stop_mdns_broadcast().await;
 }
 
-// ============================================================================
-// Event handling
+// ============================================================================ Event handling
 // ============================================================================
 
 /// Handle mDNS discovery events
@@ -356,8 +352,7 @@ async fn handle_mdns_event(event: ServiceEvent) {
                 existing.last_seen = chrono::Local::now();
                 existing
             } else {
-                // New device, create with default values
-                // online_status defaults to Unknown, will be set by device_checker
+                // New device, create with default values online_status defaults to Unknown, will be set by device_checker
                 Device {
                     device_id: device_id.clone(),
                     name: device_name,

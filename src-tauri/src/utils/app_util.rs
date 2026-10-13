@@ -244,10 +244,9 @@ pub async fn init_paths(app: &AppHandle) {
     init_model_assets(&resource_dir);
 }
 
-/// App home directory: cwd in debug builds, the executable directory in
-/// releases. Single source for HOME_PATH and the resource-dir fallback.
-/// 应用主目录:debug 为工作目录,release 为可执行文件目录;HOME_PATH 与
-/// resource 目录回落的唯一来源。
+/// App home directory: cwd in debug builds, the executable directory in releases.
+/// Single source for HOME_PATH and the resource-dir fallback.
+/// 应用主目录:debug 为工作目录,release 为可执行文件目录;HOME_PATH 与 resource 目录回落的唯一来源。
 fn app_home_dir() -> String {
     #[cfg(debug_assertions)]
     {
@@ -271,11 +270,10 @@ fn app_home_dir() -> String {
     }
 }
 
-/// Core data-path init shared by the GUI and the CLI: .config override →
-/// APP_DATA_PATH → storage/db/tmp globals. Failures log and continue
-/// (GUI contract); callers that need fail-fast check the globals afterwards.
-/// GUI/CLI 共用数据路径 core:.config 覆盖 → APP_DATA_PATH → storage/db/tmp
-/// 全局。失败记日志继续(GUI 契约);需 fail-fast 的调用方事后检查全局。
+/// Core data-path init shared by the GUI and the CLI: .config override →APP_DATA_PATH → storage/db/tmp globals.
+/// Failures log and continue (GUI contract); callers that need fail-fast check the globals afterwards.
+/// GUI/CLI 共用数据路径 core:.config 覆盖 → APP_DATA_PATH → storage/db/tmp 全局。
+/// 失败记日志继续(GUI 契约);需 fail-fast 的调用方事后检查全局。
 pub fn init_paths_core(mut data_path: PathBuf) {
     let config_path = data_path.join(".config");
     info!("MangoFinder config file: {}", config_path.display());
@@ -362,11 +360,10 @@ pub fn init_paths_core(mut data_path: PathBuf) {
     );
 }
 
-/// Core model-asset init shared by the GUI and the CLI: HOME_PATH → 12 model
-/// paths under {resource_base}/assets/model → extracted_images. Failures log
-/// and continue (GUI contract).
-/// GUI/CLI 共用模型资产 core:HOME_PATH → {resource_base}/assets/model 下
-/// 12 个模型路径 → extracted_images。失败记日志继续(GUI 契约)。
+/// Core model-asset init shared by the GUI and the CLI: HOME_PATH → 12 model paths under {resource_base}/assets/model → extracted_images.
+/// Failures log and continue (GUI contract).
+/// GUI/CLI 共用模型资产 core:HOME_PATH → {resource_base}/assets/model 下 12 个模型路径 → extracted_images。
+/// 失败记日志继续(GUI 契约)。
 pub fn init_model_assets(resource_base: &Path) {
     let app_dir = app_home_dir();
     if HOME_PATH.set(app_dir.clone()).is_err() {
@@ -624,11 +621,9 @@ pub fn get_default_file_content_language() -> FileContentLanguage {
     }
 }
 
-/// CLI 模式路径初始化(不依赖 Tauri):与 GUI 共用 core,仅替换数据目录与
-/// 模型目录的解析来源;core 失败只记日志(GUI 契约),由末尾全局检查兜底
-/// CLI path init (Tauri-free): shares the GUI cores; only the data-dir and
-/// model-dir resolution differ. Core failures just log (GUI contract) — the
-/// trailing global check is the safety net.
+/// CLI 模式路径初始化(不依赖 Tauri):与 GUI 共用 core,仅替换数据目录与模型目录的解析来源;core 失败只记日志(GUI 契约),由末尾全局检查兜底
+/// CLI path init (Tauri-free): shares the GUI cores; only the data-dir and model-dir resolution differ.
+/// Core failures just log (GUI contract) — the trailing global check is the safety net.
 pub fn init_paths_standalone() -> Result<(), String> {
     // Data dir: dirs::data_dir() matches Tauri's data_dir on all platforms
     let data_base = dirs::data_dir()
@@ -636,9 +631,7 @@ pub fn init_paths_standalone() -> Result<(), String> {
         .join(env!("CARGO_PKG_NAME"));
     init_paths_core(data_base);
 
-    // Model dir: prefer the executable directory, fall back to the current
-    // directory (dev flow running mfd from the source tree); plays the role
-    // of the GUI's resource_dir.
+    // Model dir: prefer the executable directory, fall back to the current directory (dev flow running mfd from the source tree); plays the role of the GUI's resource_dir.
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))

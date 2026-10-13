@@ -89,8 +89,7 @@ fn extract_dense_vector(tensor_value: &Value) -> Result<Vec<f32>> {
         .as_slice()
     {
         &[1, seq_len, embed_dim] => {
-            // Shape [1, 128, 384]
-            // take the last sequence
+            // Shape [1, 128, 384] take the last sequence
             let start = ((seq_len - 1) * embed_dim) as usize;
             let end = (seq_len * embed_dim) as usize;
             Ok(data[start..end].to_vec())

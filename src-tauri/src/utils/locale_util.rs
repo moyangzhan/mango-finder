@@ -11,8 +11,8 @@ pub fn is_valid_locale(locale: &str) -> bool {
 }
 
 /// Apply a locale: rust_i18n → persist (best-effort) → global, in GUI order.
-/// Err means invalid input only; empty returns Ok(0), matching the GUI's
-/// soft no-op contract. Persist failure logs and continues (GUI semantics).
+/// Err means invalid input only; empty returns Ok(0), matching the GUI's soft no-op contract.
+/// Persist failure logs and continues (GUI semantics).
 /// 应用 locale:rust_i18n → 持久化(尽力而为) → 全局,GUI 顺序。
 /// Err 仅表示非法输入;空串返回 Ok(0)(GUI 软契约);持久化失败记日志继续。
 pub fn set_locale_core(locale: &str) -> Result<usize, String> {

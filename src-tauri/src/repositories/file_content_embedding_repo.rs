@@ -318,10 +318,8 @@ pub fn find_image_similarity_candidates(
     }
 }
 
-/// Same as `find_image_similarity_candidates`, but the query vector is provided
-/// directly instead of being loaded from a stored source file embedding.
-/// 与 `find_image_similarity_candidates` 相同，区别在于查询向量直接入参，
-/// 而不是从已存储的源文件嵌入中加载（供未索引外部文件使用）。
+/// Same as `find_image_similarity_candidates`, but the query vector is provided directly instead of being loaded from a stored source file embedding.
+/// 与 `find_image_similarity_candidates` 相同，区别在于查询向量直接入参，而不是从已存储的源文件嵌入中加载（供未索引外部文件使用）。
 pub fn find_image_similarity_candidates_by_vector(
     dense_embedding: &[f32],
     limit: usize,
@@ -335,13 +333,8 @@ pub fn find_image_similarity_candidates_by_vector(
     find_image_candidates_by_embedding_bytes(embedding_bytes, limit)
 }
 
-/// Single implementation of the image-candidate ANN query (previously
-/// duplicated between the by-file-id and by-vector variants — any tuning of
-/// the SQL or score formula must stay in one place so indexed-file and
-/// external-file similarity behave identically).
-/// 图片候选 ANN 查询的唯一实现(此前在 by-file-id 与 by-vector 两个变体间
-/// 重复 —— SQL 或评分公式的任何调整只落一处,保证已索引文件与外部文件的
-/// 相似行为一致)。
+/// Single implementation of the image-candidate ANN query (previously duplicated between the by-file-id and by-vector variants — any tuning of the SQL or score formula must stay in one place so indexed-file and external-file similarity behave identically).
+/// 图片候选 ANN 查询的唯一实现(此前在 by-file-id 与 by-vector 两个变体间重复 —— SQL 或评分公式的任何调整只落一处,保证已索引文件与外部文件的相似行为一致)。
 fn find_image_candidates_by_embedding_bytes(
     embedding_bytes: &[u8],
     limit: usize,

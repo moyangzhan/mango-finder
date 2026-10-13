@@ -96,8 +96,8 @@ pub fn upsert(config_name: &str, config_value: &str) -> Result<usize, Repository
     Ok(affected)
 }
 
-/// Atomically increment a numeric config value (creates it at 1); returns the
-/// new value. Used as a cache-generation counter shared across processes.
+/// Atomically increment a numeric config value (creates it at 1); returns the new value.
+/// Used as a cache-generation counter shared across processes.
 /// 原子递增数值型配置(首次创建为 1),返回新值。用作跨进程共享的缓存版本号。
 pub fn increment(config_name: &str) -> Result<i64, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;

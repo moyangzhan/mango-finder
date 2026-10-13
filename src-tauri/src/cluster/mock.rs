@@ -1,7 +1,6 @@
 //! Mock data generation for testing remote device functionality
 //!
-//! This module provides mock data generators for testing cross-device
-//! search and similarity features without requiring actual remote devices.
+//! This module provides mock data generators for testing cross-device search and similarity features without requiring actual remote devices.
 
 use crate::entities::FileInfo;
 use crate::enums::{FileCategory, HitType, SimilarityType};
@@ -14,8 +13,7 @@ pub const MOCK_DEVICE_ID: &str = "mock-remote-device-001";
 /// Mock device name
 pub const MOCK_DEVICE_NAME: &str = "模拟远程设备";
 
-// ============================================
-// Mock file data
+// ============================================ Mock file data
 // ============================================
 
 /// Mock document files for similarity testing
@@ -79,8 +77,7 @@ pub const MOCK_SEARCH_RESULTS: &[(&str, &str, &str, i64, usize)] = &[
     ("其他相关文件.pdf", "pdf", "/remote/Documents/", 1, 68),
 ];
 
-// ============================================
-// Mock data generators
+// ============================================ Mock data generators
 // ============================================
 
 /// Generate mock similar file results for testing
@@ -159,8 +156,7 @@ pub fn generate_mock_search_results(query: &str, limit: usize) -> Vec<SearchResu
         .collect()
 }
 
-// ============================================
-// Helper functions
+// ============================================ Helper functions
 // ============================================
 
 /// Get similarity type based on file category

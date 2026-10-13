@@ -1,6 +1,5 @@
 /// Truncate and normalize embedding vector to target dimension.
-/// Uses Matryoshka truncation: simply take the first N dimensions,
-/// then apply L2 normalization to ensure vector magnitude is 1.
+/// Uses Matryoshka truncation: simply take the first N dimensions, then apply L2 normalization to ensure vector magnitude is 1.
 ///
 /// 将嵌入向量截断并归一化到目标维度。
 /// 使用 Matryoshka 截断：直接取前 N 维，然后进行 L2 归一化确保向量模长为 1。

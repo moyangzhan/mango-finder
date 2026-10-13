@@ -9,8 +9,7 @@ use crate::model_platform_services::siliconflow::SiliconFlow;
 use crate::repositories::ai_model_repo;
 use crate::traits::audio_analyzer::AudioAnalyzer;
 
-/// Audio parser chosen by `audio_parser_mode`; shared by the indexing and
-/// external-file pipelines so both transcribe identically.
+/// Audio parser chosen by `audio_parser_mode`; shared by the indexing and external-file pipelines so both transcribe identically.
 /// 按 audio_parser_mode 选出的音频解析器;索引与外部文件管线共用,保证同源转写。
 pub struct AudioParser {
     local: Option<LocalAudioParser>,

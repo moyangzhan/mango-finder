@@ -190,12 +190,9 @@ impl<'a> std::ops::Deref for ConnectionGuard<'a> {
 // ==================== Helper Functions ====================
 
 /// Open a new DB connection with the per-connection busy_timeout applied.
-/// All repositories open their connections through this helper so that
-/// concurrent writers (CLI vs GUI/daemon under WAL) wait and retry instead
-/// of failing immediately with "database is locked".
-/// 打开新的 DB 连接并应用逐连接的 busy_timeout。所有 repo 统一经此打开
-/// 连接,使并发写入方(CLI 与 GUI/daemon,WAL 模式)等待重试而非立即
-/// 报 "database is locked"。
+/// All repositories open their connections through this helper so that concurrent writers (CLI vs GUI/daemon under WAL) wait and retry instead of failing immediately with "database is locked".
+/// 打开新的 DB 连接并应用逐连接的 busy_timeout。
+/// 所有 repo 统一经此打开连接,使并发写入方(CLI 与 GUI/daemon,WAL 模式)等待重试而非立即报 "database is locked"。
 pub fn open_db() -> Result<Connection, rusqlite::Error> {
     let conn = Connection::open(crate::utils::app_util::get_db_path())?;
     conn.busy_timeout(std::time::Duration::from_millis(5000))?;
@@ -227,9 +224,7 @@ fn register_hamming_udf(conn: &Connection) -> Result<(), rusqlite::Error> {
 fn try_open_connection(db_path: &PathBuf) -> Result<Connection, String> {
     let conn = Connection::open(db_path).map_err(|e| format!("Failed to open database: {}", e))?;
 
-    // busy_timeout: the CLI and the GUI/daemon are two writers of the same DB;
-    // under WAL a write conflict should wait and retry instead of failing
-    // immediately with "database is locked".
+    // busy_timeout: the CLI and the GUI/daemon are two writers of the same DB; under WAL a write conflict should wait and retry instead of failing immediately with "database is locked".
     conn.execute_batch(
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;",
     )

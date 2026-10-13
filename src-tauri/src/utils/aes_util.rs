@@ -1,9 +1,7 @@
 // AES-128-CBC encryption utilities.
-// Currently unused — in a fully offline desktop scenario there is no secure channel
-// to provision or rotate the encryption key. Embedding the key in the binary (or
-// deriving it from locally stored material) does not meaningfully prevent extraction
-// by a determined user on their own machine. This module is kept as a placeholder
-// until a practical key-management strategy is determined.
+// Currently unused — in a fully offline desktop scenario there is no secure channel to provision or rotate the encryption key.
+// Embedding the key in the binary (or deriving it from locally stored material) does not meaningfully prevent extraction by a determined user on their own machine.
+// This module is kept as a placeholder until a practical key-management strategy is determined.
 
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
 use cbc::{Decryptor, Encryptor};

@@ -106,9 +106,8 @@ pub fn get_pending_by_device_id(
 /// Get latest request by device ID and direction (any status)
 /// 获取指定方向的最新请求（不限状态）
 ///
-/// This returns the most recent request for a device in the specified direction,
-/// regardless of its status. Useful when you want to update the latest request
-/// even if older requests exist.
+/// This returns the most recent request for a device in the specified direction, regardless of its status.
+/// Useful when you want to update the latest request even if older requests exist.
 pub fn get_latest_by_device_id(
     device_id: &str,
     direction: &str,

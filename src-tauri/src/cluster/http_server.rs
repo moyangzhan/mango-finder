@@ -22,8 +22,7 @@ static SHUTDOWN_SENDER: RwLock<Option<watch::Sender<bool>>> = RwLock::new(None);
 /// 集群服务默认端口
 pub const DEFAULT_PORT: i32 = 15678;
 
-/// Whether this process runs as the CLI daemon host
-/// (decides whether /cli/shutdown actually exits)
+/// Whether this process runs as the CLI daemon host (decides whether /cli/shutdown actually exits)
 /// 当前进程是否以 CLI daemon 宿主身份运行(决定 /cli/shutdown 是否真正退出)
 pub static IS_DAEMON: AtomicBool = AtomicBool::new(false);
 
@@ -57,8 +56,8 @@ pub fn cli_idle_secs() -> Option<u64> {
 }
 
 /// Wait (bounded at 10s) until the serve task has actually stopped — i.e.
-/// all in-flight responses are written and the listener released. Callers
-/// use this after `stop_http_server` before exiting the process.
+/// all in-flight responses are written and the listener released.
+/// Callers use this after `stop_http_server` before exiting the process.
 /// 等待(上限 10s)serve 任务真正停止 —— 在途响应已写完、监听已释放。
 /// 调用方在 `stop_http_server` 之后、进程退出之前使用。
 pub async fn wait_server_stopped() {
@@ -166,11 +165,8 @@ pub async fn start_http_server() -> Result<(), String> {
 
     let (port, device_id, device_name) = resolve_identity().await;
 
-    // Bind with exclusive access; if the port is held by our own CLI daemon,
-    // ask it to yield first (close-then-start, so the daemon's model memory is
-    // released before this process warms up its own). Retry a few times: a
-    // concurrent CLI invocation may spawn a fresh daemon into the gap between
-    // the old daemon's exit and our rebind — yield it too instead of failing.
+    // Bind with exclusive access; if the port is held by our own CLI daemon, ask it to yield first (close-then-start, so the daemon's model memory is released before this process warms up its own).
+    // Retry a few times: a concurrent CLI invocation may spawn a fresh daemon into the gap between the old daemon's exit and our rebind — yield it too instead of failing.
     let listener = match create_exclusive_socket(port) {
         Ok(l) => l,
         Err(e) => {
@@ -207,11 +203,8 @@ pub async fn start_http_server() -> Result<(), String> {
     serve_on(listener, device_id, device_name, port).await
 }
 
-/// Clamp to the valid port range (single source shared with the CLI's
-/// host_port): out-of-range values fall back to the default so `as u16`
-/// truncation can never make bind/probe/check disagree.
-/// 钳制到合法端口区间(与 CLI 的 host_port 共用的单一来源):超范围值统一
-/// 回退默认端口,`as u16` 截断不会让绑定/探测/check 落在不同端口上。
+/// Clamp to the valid port range (single source shared with the CLI's host_port): out-of-range values fall back to the default so `as u16` truncation can never make bind/probe/check disagree.
+/// 钳制到合法端口区间(与 CLI 的 host_port 共用的单一来源):超范围值统一回退默认端口,`as u16` 截断不会让绑定/探测/check 落在不同端口上。
 pub fn clamp_port(port: i32) -> i32 {
     if (1..=65535).contains(&port) {
         port
@@ -220,10 +213,8 @@ pub fn clamp_port(port: i32) -> i32 {
     }
 }
 
-/// Resolve the shared server identity: port (DB cluster_setting with the
-/// typed default) plus device_id/device_name for ServerState.
-/// 解析公共服务身份:端口(DB cluster_setting,类型默认值兜底)与
-/// ServerState 所需的 device_id/device_name。
+/// Resolve the shared server identity: port (DB cluster_setting with the typed default) plus device_id/device_name for ServerState.
+/// 解析公共服务身份:端口(DB cluster_setting,类型默认值兜底)与 ServerState 所需的 device_id/device_name。
 async fn resolve_identity() -> (i32, String, String) {
     let setting = super::get_cluster_setting().await;
     let port = clamp_port(setting.port);
@@ -253,9 +244,7 @@ pub async fn start_http_server_loopback() -> Result<(), String> {
     }
     let (port, device_id, device_name) = resolve_identity().await;
 
-    // The daemon never yields: a busy port means a host already exists
-    // (GUI or a concurrent daemon that won the bind race) — this process
-    // is the loser and exits (see serve::run).
+    // The daemon never yields: a busy port means a host already exists (GUI or a concurrent daemon that won the bind race) — this process is the loser and exits (see serve::run).
     let addr = SocketAddr::from(([127, 0, 0, 1], port as u16));
     let listener = create_exclusive_socket_on(addr)
         .map_err(|e| format!("Port {} is already in use: {}", port, e))?;
@@ -305,8 +294,8 @@ async fn serve_on(
         .layer(middleware::from_fn(cli::verify_loopback));
 
     // Inter-device protocol gets a /cluster prefix, separated from the
-    // /cli (local) namespace. No legacy-path compatibility: devices are
-    // expected to upgrade together.
+    // /cli (local) namespace.
+    // No legacy-path compatibility: devices are expected to upgrade together.
     let cluster_routes = Router::new()
         .route("/search", post(remote::handle_search))
         .route("/chunks", post(remote::handle_chunks))
@@ -348,9 +337,7 @@ async fn serve_on(
         {
             log::error!("HTTP server error: {}", e);
         }
-        // The server has actually stopped: clear the sender so a later
-        // start_http_server (port change, disable→re-enable) can bind again
-        // instead of seeing a stale "already running" flag.
+        // The server has actually stopped: clear the sender so a later start_http_server (port change, disable→re-enable) can bind again instead of seeing a stale "already running" flag.
         if let Ok(mut guard) = SHUTDOWN_SENDER.write() {
             *guard = None;
         }
@@ -359,13 +346,10 @@ async fn serve_on(
     Ok(())
 }
 
-/// Port held by our own CLI daemon: ask it to exit and wait until it really
-/// does (probe no longer `Mine`) before the caller rebinds — close first,
-/// then start. The probe/shutdown handshake is shared with the CLI via
-/// `cluster::host_client`.
-/// 端口被自家 CLI daemon 占用时:请求其退出并等待端口真正释放
-/// (探测不再是自家服务),再由调用方重绑 —— 先关后开。探测/关闭握手与 CLI
-/// 共用 `cluster::host_client`。
+/// Port held by our own CLI daemon: ask it to exit and wait until it really does (probe no longer `Mine`) before the caller rebinds — close first, then start.
+/// The probe/shutdown handshake is shared with the CLI via `cluster::host_client`.
+/// 端口被自家 CLI daemon 占用时:请求其退出并等待端口真正释放(探测不再是自家服务),再由调用方重绑 —— 先关后开。
+/// 探测/关闭握手与 CLI 共用 `cluster::host_client`。
 async fn try_yield_to_cli_daemon(port: i32) -> bool {
     use super::host_client::{self, ProbeOutcome, ReleaseOutcome};
 
@@ -375,8 +359,7 @@ async fn try_yield_to_cli_daemon(port: i32) -> bool {
     }
     let _ = host_client::request_shutdown(port).await;
 
-    // The daemon's graceful shutdown is bounded at 10s (in-flight responses);
-    // allow 12s before declaring it stuck
+    // The daemon's graceful shutdown is bounded at 10s (in-flight responses); allow 12s before declaring it stuck
     match host_client::wait_until_released(port, Duration::from_secs(12)).await {
         ReleaseOutcome::Released => {
             log::info!("CLI daemon on port {} has yielded", port);

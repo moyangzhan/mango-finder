@@ -44,8 +44,7 @@ static EXPIRATION_CHECKER_SHUTDOWN: AtomicBool = AtomicBool::new(false);
 /// 过期检查间隔（1小时）
 const EXPIRATION_CHECK_INTERVAL_SECS: u64 = 60 * 60;
 
-// ============================================
-// Public API - Start/Stop all checkers
+// ============================================ Public API - Start/Stop all checkers
 // ============================================
 
 /// Start all device checkers
@@ -91,8 +90,7 @@ pub fn is_checker_running() -> bool {
         || EXPIRATION_CHECKER_RUNNING.load(Ordering::SeqCst)
 }
 
-// ============================================
-// Online Status Timer
+// ============================================ Online Status Timer
 // ============================================
 
 /// Start the online status timer (internal, RUNNING flag must be set by caller)
@@ -153,8 +151,7 @@ async fn stop_online_timer() {
     log::info!("Device online timer stop requested");
 }
 
-// ============================================
-// Expiration Timer
+// ============================================ Expiration Timer
 // ============================================
 
 /// Start the pairing request expiration timer (runs every hour)

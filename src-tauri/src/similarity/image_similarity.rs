@@ -96,8 +96,7 @@ pub fn score_image_candidates(
         // Use pre-computed semantic score from ANN search
         let semantic_score = candidate.semantic_score;
 
-        // Take maximum of visual and semantic scores via the shared helper,
-        // so the rule lives in exactly one place.
+        // Take maximum of visual and semantic scores via the shared helper, so the rule lives in exactly one place.
         let (final_score, similarity_type) = merge_hybrid_scores(visual_score, semantic_score);
 
         // Only include if similarity >= 30%
@@ -187,13 +186,11 @@ pub fn calculate_visual_score_from_stored(
     let distance = source_hash.dist(&candidate_hash);
 
     // Convert distance to score (0-100)
-    // Max distance for 8x8 hash is 64 bits
-    // distance 0 = 100, distance 10 = 0
+    // Max distance for 8x8 hash is 64 bits distance 0 = 100, distance 10 = 0
     if distance <= 10 {
         Some(((10 - distance) * 10) as usize)
     } else {
-        // For distances > 10, convert to a low score
-        // distance 11 = ~9, distance 64 = 0
+        // For distances > 10, convert to a low score distance 11 = ~9, distance 64 = 0
         let score = ((64 - distance) as f32 * 100.0 / 53.0) as usize;
         Some(score.min(29)) // Cap at 29 for distances > 10
     }

@@ -8,10 +8,9 @@ use std::sync::Mutex;
 
 /// Ensure the OCR dictionary has a CTC blank token (`#`) at index 0.
 ///
-/// The `kreuzberg-paddle-ocr` crate expects the dictionary to start with `#` (CTC blank),
-/// which is the case for PP-OCRv5 dictionaries. PP-OCRv4 dictionaries (`ppocr_keys_v1.txt`)
-/// do NOT include this token. This function detects the difference and creates a temporary
-/// file with `#` prepended when needed, so the original dictionary file stays unmodified.
+/// The `kreuzberg-paddle-ocr` crate expects the dictionary to start with `#` (CTC blank), which is the case for PP-OCRv5 dictionaries.
+/// PP-OCRv4 dictionaries (`ppocr_keys_v1.txt`) do NOT include this token.
+/// This function detects the difference and creates a temporary file with `#` prepended when needed, so the original dictionary file stays unmodified.
 fn ensure_dict_with_ctc_blank(dict_path: &str) -> String {
     let content = match std::fs::read_to_string(dict_path) {
         Ok(c) => c,

@@ -33,9 +33,7 @@ fn main() {
         return;
     }
 
-    // Dispatch lightweight commands before the heavy initializer: version
-    // needs no DB/model, avoiding the init cost (DB migration check, ONNX
-    // runtime probing) on every invocation.
+    // Dispatch lightweight commands before the heavy initializer: version needs no DB/model, avoiding the init cost (DB migration check, ONNX runtime probing) on every invocation.
     if matches!(cli.command, Some(commands::Commands::Version)) {
         commands::handle_version();
         return;
@@ -57,13 +55,11 @@ fn main() {
     }
 
     // Dispatch lightweight commands (help) before the heavy initializer too:
-    // they print a static document and need no DB migration/ONNX; the locale
-    // comes from a direct single-row read (see lightweight_locale).
+    // they print a static document and need no DB migration/ONNX; the locale comes from a direct single-row read (see lightweight_locale).
     if matches!(&cli.command, Some(commands::Commands::Help { .. })) {
         let locale = commands::lightweight_locale();
         rust_i18n::set_locale(locale.as_str());
-        // handle_help reads the ACTIVE_LOCALE global for its language choice;
-        // set it too so document prose and table headers cannot diverge.
+        // handle_help reads the ACTIVE_LOCALE global for its language choice; set it too so document prose and table headers cannot diverge.
         if let Ok(mut guard) = ACTIVE_LOCALE.write() {
             *guard = locale;
         }
@@ -73,8 +69,7 @@ fn main() {
         return;
     }
 
-    // Core service init (standalone=true: skips orphan task-lock cleanup,
-    // see the function comment)
+    // Core service init (standalone=true: skips orphan task-lock cleanup, see the function comment)
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         initializer::process().await;

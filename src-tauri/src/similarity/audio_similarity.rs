@@ -59,11 +59,9 @@ impl AudioSimilarityDetector {
     }
 
     /// Find similar audio files based on transcription text embeddings.
-    /// Uses all chunk embeddings with max-aggregation via the shared
-    /// `find_similars_from_chunks` helper (consistent with the external path).
+    /// Uses all chunk embeddings with max-aggregation via the shared `find_similars_from_chunks` helper (consistent with the external path).
     /// 基于转录文本嵌入查找相似音频文件。
-    /// 经共享的 `find_similars_from_chunks` 使用全部分块、最大分聚合
-    /// (与外部现场路径一致)。
+    /// 经共享的 `find_similars_from_chunks` 使用全部分块、最大分聚合(与外部现场路径一致)。
     async fn find_similars_by_transcription(
         &self,
         file_info: &FileInfo,
@@ -99,9 +97,7 @@ pub async fn find_similars_by_fingerprint_value(
     exclude_file_id: Option<i64>,
     limit: usize,
 ) -> Result<Vec<SearchResult>, AppError> {
-    // Candidates must include BOTH Music and Mixed: the detector routes both
-    // here and both store fingerprints at index time — querying Music only
-    // meant mixed (vocal) tracks could never match each other.
+    // Candidates must include BOTH Music and Mixed: the detector routes both here and both store fingerprints at index time — querying Music only meant mixed (vocal) tracks could never match each other.
     let mut music_file_ids =
         file_info_repo::list_ids_by_category_and_audio_type(3, AudioType::Music as i32)?;
     music_file_ids.extend(file_info_repo::list_ids_by_category_and_audio_type(
