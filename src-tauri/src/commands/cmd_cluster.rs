@@ -377,16 +377,6 @@ pub async fn update_cluster_setting(setting: ClusterSetting) -> Result<(), Strin
     cluster::save_cluster_setting(&setting).await
 }
 
-#[command]
-pub async fn toggle_cluster(start: bool) -> Result<(), String> {
-    if start {
-        cluster::start_cluster_service().await?;
-    } else {
-        cluster::stop_cluster_service().await?;
-    }
-    Ok(())
-}
-
 /// Check online status of existing devices only (lightweight, no mDNS restart)
 /// 仅检查现有设备的在线状态（轻量级，不重启 mDNS）
 #[command]

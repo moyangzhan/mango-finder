@@ -54,7 +54,7 @@ use crate::commands::{
     read_file_data, reject_device, remote_device_search, remove_watch_path, reset_data_path,
     reset_pairing_status, respond_pairing_request, retry_data_copy, revert_data_path,
     send_pairing_request, set_active_locale, set_active_platform, set_active_self_hosted_platform,
-    set_data_path, start_indexing, stop_indexing, toggle_cluster, toggle_test_mode, ui_mounted,
+    set_data_path, start_indexing, stop_indexing, toggle_test_mode, ui_mounted,
     unreject_device, update_ai_model, update_cluster_setting, update_config,
     update_indexer_setting, update_model_platform, update_proxy_info, update_self_hosted_platform,
 };
@@ -211,7 +211,6 @@ pub fn run() {
             update_config,
             update_cluster_setting,
             load_cluster_setting,
-            toggle_cluster,
             check_devices,
             check_devices_status,
             get_local_ip,

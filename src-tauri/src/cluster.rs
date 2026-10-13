@@ -297,17 +297,15 @@ pub async fn start_cluster_service() -> Result<(), String> {
     Ok(())
 }
 
-/// Stop cluster services
+/// Stop cluster services (idempotent — each stop is a no-op when not running; waits until the HTTP port is actually released)
+/// 停止集群服务(幂等——未运行时各停止操作均为空操作;等待 HTTP 端口真正释放)
 pub async fn stop_cluster_service() -> Result<(), String> {
-    if !is_cluster_enabled() {
-        return Ok(());
-    }
-
     // Stop device checker
     device_checker::stop_status_checker().await;
 
-    // Signal HTTP server to stop
+    // Stop the HTTP server and wait until the port is actually released: a quick disable→enable rebind must not see the stopping instance as "already running"
     http_server::stop_http_server().await;
+    http_server::wait_server_stopped().await;
 
     // Signal mDNS service to stop
     mdns_service::stop_mdns_service().await;

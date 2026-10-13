@@ -51,12 +51,22 @@ async function saveSetting() {
   }
 }
 
+// One toggle at a time: a concurrent second save could hit the stop drain window and skip the start
+const toggling = ref(false)
+
 async function toggleEnabled() {
-  setting.value.enabled = !setting.value.enabled
-  await saveSetting()
-  await invoke('toggle_cluster', { start: setting.value.enabled })
-  // Notify device management page to refresh
-  await emit('cluster-enabled-changed', { enabled: setting.value.enabled })
+  if (toggling.value)
+    return
+  toggling.value = true
+  try {
+    setting.value.enabled = !setting.value.enabled
+    // saveSetting's enable-flip branch starts/stops the cluster services
+    await saveSetting()
+    // Notify device management page to refresh
+    await emit('cluster-enabled-changed', { enabled: setting.value.enabled })
+  } finally {
+    toggling.value = false
+  }
 }
 
 function dismissPortError() {
@@ -90,7 +100,7 @@ onMounted(async () => {
               {{ t('cluster.enabledDesc') }}
             </div>
           </div>
-          <NSwitch :value="setting.enabled" @update:value="toggleEnabled" />
+          <NSwitch :value="setting.enabled" :loading="toggling" :disabled="toggling" @update:value="toggleEnabled" />
         </div>
 
         <!-- Settings when enabled -->
