@@ -647,8 +647,16 @@ pub fn init_paths_standalone() -> Result<(), String> {
     init_paths_core(standalone_data_base());
 
     // Model dir: prefer the executable directory, fall back to the current directory (dev flow running mfd from the source tree); plays the role of the GUI's resource_dir.
-    let exe_dir = std::env::current_exe()
+    // Unix only: resolve symlinks first (~/.local/bin/mfd, /usr/local/bin/mfd) so the model dir comes from the real binary location (macOS current_exe() returns the link path; Linux resolves via /proc). Windows has no symlink flow, and its canonicalize would add \\?\ verbatim prefixes to the model paths.
+    // 模型目录:优先取可执行文件所在目录,回落当前目录(开发流程在源码树运行 mfd 时);承担 GUI resource_dir 的角色。
+    // 仅 Unix:先解析软链(~/.local/bin/mfd、/usr/local/bin/mfd),模型目录取真实二进制位置(macOS 的 current_exe() 返回软链路径,Linux 经 /proc 已解析)。Windows 无软链流程,且其 canonicalize 会给模型路径引入 \\?\ 前缀。
+    #[cfg(unix)]
+    let current_exe = std::env::current_exe()
         .ok()
+        .and_then(|p| std::fs::canonicalize(&p).ok().or_else(|| Some(p)));
+    #[cfg(not(unix))]
+    let current_exe = std::env::current_exe().ok();
+    let exe_dir = current_exe
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."));
     let cwd = std::env::current_dir().unwrap_or_default();

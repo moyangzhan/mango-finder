@@ -73,12 +73,12 @@ jobs:
         shell: pwsh
 
       - name: Build Windows
-        run: pnpm tauri build --target x86_64-pc-windows-msvc
+        run: pnpm tauri build
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          path: src-tauri/target/release/bundle/msi/*.msi
 
   build-linux:
     runs-on: ubuntu-24.04
@@ -126,12 +126,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Build Linux
-        run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles deb
+        run: pnpm tauri build
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
-          path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/*/*
+          path: src-tauri/target/release/bundle/deb/*
 
   build-macos:
     runs-on: macos-14
@@ -180,8 +180,9 @@ jobs:
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
       - name: Build macOS (Apple Silicon)
-        run: pnpm tauri build --target aarch64-apple-darwin
+        run: pnpm tauri build
       # Intel Mac build disabled - uncomment if needed for Intel Mac users
+      # (re-enabling needs cross-compile care: --target x86_64-apple-darwin, and the mfd pre-build in beforeBuildCommand must match that triple)
       # - name: Build macOS (Intel)
       #   run: pnpm tauri build --target x86_64-apple-darwin
       - name: Upload Artifact
@@ -189,7 +190,7 @@ jobs:
         with:
           name: macos-build
           path: |
-            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/dmg/*.dmg
             # src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
 
   release:
@@ -270,7 +271,7 @@ jobs:
         with:
           files: |
             artifacts/windows-build/*.msi
-            artifacts/linux-build/deb/*.deb
+            artifacts/linux-build/*.deb
             # artifacts/linux-build/rpm/*.rpm
             # artifacts/linux-build/appimage/*.AppImage
             artifacts/macos-build/*.dmg

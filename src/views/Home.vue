@@ -491,7 +491,7 @@ onDeactivated(() => {
         </div>
       </div>
     </NModal>
-    <SimilarResultsModal ref="similarModalRef" :file-id="null" @open-file="openFile" @preview-file="(id, deviceId) => loadFileDetail(id, deviceId, true)" />
+    <SimilarResultsModal ref="similarModalRef" :file-id="null" @preview-file="(id, deviceId) => loadFileDetail(id, deviceId, true)" />
   </div>
 </template>
 

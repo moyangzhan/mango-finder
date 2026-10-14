@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm build && cd src-tauri && cargo build --release --bin mfd",
     "frontendDist": "../dist"
   },
   "app": {
@@ -36,17 +36,17 @@
     "macOS": {
       "minimumSystemVersion": "10.15"
     },
-    "resources": [
-      "assets/model/embedding.onnx",
-      "assets/model/embedding_tokenizer.json",
-      "assets/model/vision.onnx",
-      "assets/model/vision_tokenizer.json",
-      "assets/model/whisper-small-q8_0.bin",
-      "assets/model/ch_PP-OCRv4_det_infer.onnx",
-      "assets/model/ch_ppocr_mobile_v2.0_cls_infer.onnx",
-      "assets/model/ch_PP-OCRv4_rec_infer.onnx",
-      "assets/model/ppocr_keys_v1.txt"
-    ],
+    "resources": {
+      "assets/model/embedding.onnx": "assets/model/embedding.onnx",
+      "assets/model/embedding_tokenizer.json": "assets/model/embedding_tokenizer.json",
+      "assets/model/vision.onnx": "assets/model/vision.onnx",
+      "assets/model/vision_tokenizer.json": "assets/model/vision_tokenizer.json",
+      "assets/model/whisper-small-q8_0.bin": "assets/model/whisper-small-q8_0.bin",
+      "assets/model/ch_PP-OCRv4_det_infer.onnx": "assets/model/ch_PP-OCRv4_det_infer.onnx",
+      "assets/model/ch_ppocr_mobile_v2.0_cls_infer.onnx": "assets/model/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+      "assets/model/ch_PP-OCRv4_rec_infer.onnx": "assets/model/ch_PP-OCRv4_rec_infer.onnx",
+      "assets/model/ppocr_keys_v1.txt": "assets/model/ppocr_keys_v1.txt"
+    },
     "targets": "all",
     "icon": [
       "icons/32x32.png",

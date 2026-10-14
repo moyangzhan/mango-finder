@@ -41,7 +41,8 @@ mod types;
 use crate::commands::{
     add_device_manually, add_watch_path, change_content_storage, check_devices,
     check_devices_status, check_model_platform, check_path_type, check_self_hosted_platform,
-    clear_active_task, clear_index, clear_pairing_requests, count_files, count_indexed_files,
+    clear_active_task, clear_index, clear_pairing_requests, cli_path_install, cli_path_status,
+    cli_path_uninstall, count_files, count_indexed_files,
     count_indexing_tasks, count_pending_pairing_requests, delete_index_item, delete_index_items,
     delete_indexing_task, delete_pairing_request, delete_pairing_requests,
     download_multilingual_model, fetch_remote_file, find_similars_by_file_id, get_active_task,
@@ -241,6 +242,10 @@ pub fn run() {
             clear_active_task,
             retry_data_copy,
             revert_data_path,
+            // CLI PATH registration
+            cli_path_status,
+            cli_path_install,
+            cli_path_uninstall,
         ])
         .setup(|app| {
             APP_HANDLE.set(app.handle().clone()).unwrap_or_else(|_| {

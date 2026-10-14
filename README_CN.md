@@ -72,7 +72,7 @@ Mango Finder（原名 MangoDesk）是一款用自然语言搜索本地文件的�
 - 🤖 **AI Agent 友好**
 
   - 文档自动解析为结构化 Markdown 格式，可直接供 Claude Code、Cursor、OpenClaw 等 AI Agent 工具使用
-  - 命令行工具 *（即将推出）*
+  - 内置命令行工具 `mfd`，安装包自带，可在设置页一键加入 `PATH`
   
 ### 🏗️ 架构
 
@@ -99,224 +99,23 @@ Mango Finder（原名 MangoDesk）是一款用自然语言搜索本地文件的�
   - Rust
   - Tauri Core
 
-## 🚀 快速开始（开发环境）
+## 🚀 开发
 
-### 1. 前端环境准备
-
-#### Node
-
-``node` **v20 及以上版本**
-
-推荐使用 [nvm](https://github.com/nvm-sh/nvm) 来管理多个 `node` 版本。
-
-#### PNPM
-
-需要 `pnpm` **v9 及以上版本**
-
-如果你还没有安装 `pnpm`，可以使用以下命令安装：
-
-```shell
-npm install pnpm -g
-```
-
-#### 安装依赖
+环境搭建与构建：[docs/cn/build.md](./docs/cn/build.md)
 
 ```sh
-pnpm i
+pnpm i               # 安装前端依赖
+pnpm tauri dev       # 开发模式运行 GUI
+pnpm tauri build     # 构建安装包（GUI + CLI） -> src-tauri/target/release/bundle/
 ```
 
-### 2. 后端环境准备（Rust）
-
-需要`rust` v1.92.0 及以上
-
-建议使用官方工具安装：<https://www.rust-lang.org/tools/install>
-
-### 3. Tauri
-
-在运行项目前，请先根据你的操作系统安装 Tauri 所需依赖：
-
-<https://tauri.app/start/prerequisites/>
-
-### 4. 下载模型文件
-
-请从以下任一来源下载所需的模型文件：
-
-1. **GitHub Release**: [model.zip](https://github.com/moyangzhan/mango-finder/releases/download/v0.1.0/model.zip) - 包含所有必需文件
-2. **Hugging Face**: [moyangzhan/mango-finder](https://huggingface.co/moyangzhan/mango-finder/tree/main) - 需要手动下载以下文件：
-
-   - \*.onnx 模型文件
-   - \*\_tokenizer.json 分词器文件
-   - whisper-small-q8\_0.bin
-
-下载完成后，请将文件解压到 `src-tauri/assets/model` 目录中。
-
-**所需文件列表**：
-
-- embedding.onnx
-- embedding\_tokenizer.json
-- vision.onnx
-- vision\_tokenizer.json
-- whisper-small-q8\_0.bin
-
-### 5. Whisper.cpp 依赖
-
-音频转文字功能使用 [whisper.cpp](https://github.com/ggerganov/whisper.cpp)，不同操作系统需要安装不同的依赖。
-
-#### Windows
-
-在 Windows 上编译需要安装 **CMake** 和 **LLVM/Clang 18**（注意：LLVM 19/20/22 版本存在兼容性问题，请使用 LLVM 18）。
-
-1. **安装 CMake 4.3**
-
-   从 [cmake-4.3.0](https://github.com/Kitware/CMake/releases/tag/v4.3.0-rc2) 下载安装
-2. **下载并安装 LLVM 18**
-
-   - 访问 [LLVM 18.1.8 Release](https://github.com/llvm/llvm-project/releases/tag/llvmorg-18.1.8)
-   - 下载 `LLVM-18.1.8-win64.exe`
-   - 安装时勾选 **"Add LLVM to the system PATH for all users"**
-3. **验证安装**
-
-   ```sh
-   cmake --version
-   clang --version
-   ```
-
-   clang 版本应显示 `18.1.8`
-4. **设置环境变量（永久）**
-
-   - 按 `Win + R`，输入 `sysdm.cpl`，回车
-   - 点击 **"高级"** 选项卡 → **"环境变量"**
-   - 在 **"用户变量"** 区域点击 **"新建"**，添加：
-
-   | 变量名        | 值        |
-   | ---------- | -------- |
-   | `CXXFLAGS` | `/utf-8` |
-   | `CFLAGS`   | `/utf-8` |
-
-   - 点击确定，**重启终端** 使环境变量生效
-5. **编译项目（仅首次需要）**
-
-   打开 **"x64 Native Tools Command Prompt for VS 2022"**（从开始菜单搜索），然后编译：
-
-   ```cmd
-   cd your-project-path\src-tauri
-   cargo build
-   ```
-
-   > ⚠️ **重要提示**：
-   >
-   > - `/utf-8` 参数是必需的，用于解决中文编码问题
-   > - 如果之前编译失败，先运行 `cargo clean -p whisper-rs-sys` 清理缓存
-   > - whisper 编译成功后，后续可直接在任意终端使用 `pnpm tauri dev`
-   > - VSCode 的 rust-analyzer 插件会在启动时自动检查代码，由于没有 MSVC 环境，whisper-rs-sys 的构建会失败并以红色标识显示在 `target/debug/build` 目录中。如果你已在 "x64 Native Tools Command Prompt for VS 2022" 中构建成功，可以忽略此错误
-
-#### macOS
-
-1. **安装 Xcode Command Line Tools**（如果尚未安装）：
-
-   ```sh
-   xcode-select --install
-   ```
-2. **安装 CMake**：
-
-   ```sh
-   brew install cmake
-   ```
-3. **设置环境变量**（Apple Silicon 必需）：
-
-   对于 Apple Silicon Mac（M1/M2/M3），需要设置以下环境变量：
-
-   | 变量名                        | 值                             | 用途                          |
-   | -------------------------- | ----------------------------- | --------------------------- |
-   | `CFLAGS`                   | `-U__ARM_FEATURE_MATMUL_INT8` | 避免 whisper.cpp 在 ARM 上的编译问题 |
-   | `MACOSX_DEPLOYMENT_TARGET` | `10.15`                       | 设置最低支持的 macOS 版本（Catalina）  |
-
-   **临时设置（当前终端会话）：**
-
-   ```sh
-   export CFLAGS="-U__ARM_FEATURE_MATMUL_INT8"
-   export MACOSX_DEPLOYMENT_TARGET="10.15"
-   ```
-
-   **永久设置（添加到 shell 配置）：**
-
-   ```sh
-   # zsh（macOS 默认）
-   echo 'export CFLAGS="-U__ARM_FEATURE_MATMUL_INT8"' >> ~/.zshrc
-   echo 'export MACOSX_DEPLOYMENT_TARGET="10.15"' >> ~/.zshrc
-   source ~/.zshrc
-
-   # bash
-   echo 'export CFLAGS="-U__ARM_FEATURE_MATMUL_INT8"' >> ~/.bash_profile
-   echo 'export MACOSX_DEPLOYMENT_TARGET="10.15"' >> ~/.bash_profile
-   source ~/.bash_profile
-   ```
-4. **添加 Rust target**：
-
-   ```sh
-   rustup target add aarch64-apple-darwin
-   ```
-5. **构建**：
-
-   ```sh
-   pnpm tauri build
-   # 或显式指定 target
-   pnpm tauri build --target aarch64-apple-darwin
-   ```
-
-> **注意**：最低支持的 macOS 版本为 10.15（Catalina）。
-
-#### Linux
-
-大多数 Linux 发行版需要安装 C/C++ 编译工具：
-
-**Ubuntu/Debian:**
+CLI 与 GUI 同 crate，开发模式直接运行任意子命令：
 
 ```sh
-sudo apt update
-sudo apt install build-essential cmake
+cd src-tauri && cargo run --bin mfd -- search "机器学习" --type keyword
 ```
 
-**Fedora/RHEL:**
-
-```sh
-sudo dnf install gcc-c++ make cmake
-```
-
-**Arch Linux:**
-
-```sh
-sudo pacman -S base-devel cmake
-```
-
-## ▶️ 运行项目（开发模式）
-
-Tauri 应用至少包含两个进程（详见 [官方文档](https://tauri.app/concept/process-model/)）：
-
-- **Core Process** ：Rust 后端
-- **WebView Process** ：前端界面
-
-使用一条命令即可同时启动前后端：
-
-```sh
-pnpm tauri dev
-```
-
-## 📦 构建发布版本
-
-```sh
-pnpm tauri build
-```
-
-构建完成后，可执行文件通常位于：
-
-```sh
-src-tauri/target/release/
-```
-
-不同平台生成的安装包格式可能有所不同，如
-
-windows: `src-tauri/target/release/bundle/msi/Mango Finder_0.1.0_x64_en-US.msi`
+CLI 用法见 [docs/cn/cli.md](./docs/cn/cli.md)
 
 ## ❓ FAQ
 

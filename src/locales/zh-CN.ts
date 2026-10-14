@@ -220,6 +220,15 @@ export default {
     port: '端口',
     setting: '代理设置',
   },
+  cli: {
+    setting: '命令行工具',
+    pathDesc: '安装包已随 GUI 附带 CLI（mfd），加入 PATH 后可在任意终端直接使用',
+    install: '加入 PATH',
+    uninstall: '移出 PATH',
+    installSuccess: '已加入 PATH；若终端未识别，请重新打开终端',
+    uninstallSuccess: '已移出 PATH',
+    notFound: '未找到 mfd（开发模式不打包 CLI；请使用安装版，或单独构建后直接使用 target/release 产物）',
+  },
   model: {
     platform: '模型平台',
     platformInfo: '模型平台信息',

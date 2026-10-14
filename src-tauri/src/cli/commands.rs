@@ -1138,12 +1138,12 @@ pub fn lightweight_locale() -> String {
 
 pub fn handle_help(command: Option<&str>) {
     let is_zh = current_locale() == "zh-CN";
-    // docs/cli_cn.md / cli.md are the single source of truth for help:
+    // docs/{cn,en}/cli.md are the single source of truth for help:
     // full help = the whole document, per-command help = its section.
     let doc = if is_zh {
-        include_str!("../../../docs/cli_cn.md")
+        include_str!("../../../docs/cn/cli.md")
     } else {
-        include_str!("../../../docs/cli.md")
+        include_str!("../../../docs/en/cli.md")
     };
 
     match command {

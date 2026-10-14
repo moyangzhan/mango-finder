@@ -4,7 +4,16 @@ Mango Finder Command Line Interface for searching and managing documents.
 
 ## Installation
 
-CLI tool is built with Mango Finder, located at `src-tauri/target/release/mfd.exe`
+The Mango Finder installer ships the CLI: after installing, add `mfd` to `PATH` from the "Command Line Tool" card in the GUI settings page, then use it in any terminal. Building the installer is covered in [build.md](./build.md).
+
+To build the CLI alone from source (same crate as the GUI, no extra prerequisites):
+
+```sh
+cd src-tauri
+cargo build --release --bin mfd
+```
+
+The build script copies the model files to `target/<profile>/assets/model`, and `mfd` looks for them next to its own executable first (symlink invocations resolve to the real path) — no extra setup. The binary ends up at `src-tauri/target/release/mfd.exe` (Windows) or `src-tauri/target/release/mfd` (macOS/Linux). To use it from anywhere, either add `src-tauri/target/release/` to your `PATH`, or copy the binary **together with the `assets` folder** to a directory already on your `PATH` (copying the binary alone leaves the models behind).
 
 ## Getting Help
 

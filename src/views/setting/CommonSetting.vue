@@ -15,6 +15,33 @@ const activeTab = ref('openai')
 const proxy = ref<ProxyInfo>(emptyProxyInfo())
 const needRestart = ref(false)
 const dataCopying = ref(false)
+const cliStatus = ref<{ mfd_path: string, exists: boolean, installed: boolean }>({ mfd_path: '', exists: false, installed: false })
+const cliBusy = ref(false)
+
+async function loadCliStatus() {
+  try {
+    cliStatus.value = await invoke('cli_path_status')
+  }
+  catch (err) {
+    console.error('cli_path_status error', err)
+  }
+}
+
+async function toggleCliPath() {
+  cliBusy.value = true
+  try {
+    const wasInstalled = cliStatus.value.installed
+    await invoke(wasInstalled ? 'cli_path_uninstall' : 'cli_path_install')
+    window.$message.success(wasInstalled ? t('cli.uninstallSuccess') : t('cli.installSuccess'))
+    await loadCliStatus()
+  }
+  catch (err: any) {
+    window.$message.error(typeof err === 'string' ? err : t('common.operationFailed'))
+  }
+  finally {
+    cliBusy.value = false
+  }
+}
 
 function handleLanguageChanged(newLang: string) {
   console.log('languageChange', newLang)
@@ -176,6 +203,7 @@ onMounted(async () => {
   proxy.value = proxyInfo as ProxyInfo
   const userDataPath = await invoke<string>('get_data_path')
   dataPath.value = userDataPath
+  await loadCliStatus()
 })
 </script>
 
@@ -231,6 +259,26 @@ onMounted(async () => {
             {{ t('common.open') }}
           </NButton>
         </div>
+      </div>
+    </NCard>
+    <NCard :title="t('cli.setting')" class="mb-4" size="small" :bordered="true">
+      <div class="flex flex-col space-y-2">
+        <template v-if="cliStatus.exists">
+          <div>{{ cliStatus.mfd_path }}</div>
+          <div class="text-xs text-gray-400">
+            {{ t('cli.pathDesc') }}
+          </div>
+          <div>
+            <NButton ghost :disabled="cliBusy" :loading="cliBusy" @click="toggleCliPath">
+              {{ cliStatus.installed ? t('cli.uninstall') : t('cli.install') }}
+            </NButton>
+          </div>
+        </template>
+        <template v-else>
+          <div class="text-xs text-gray-400">
+            {{ t('cli.notFound') }}
+          </div>
+        </template>
       </div>
     </NCard>
     <NCard :title="t('proxy.setting')" class="mb-4" size="small" :bordered="true">

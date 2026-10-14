@@ -6,7 +6,6 @@ import { useI18n } from 'vue-i18n'
 import SvgIcon from './SvgIcon.vue'
 
 const emit = defineEmits<{
-  'openFile': [path: string]
   'previewFile': [fileId: number, deviceId?: string]
 }>()
 
@@ -133,14 +132,6 @@ async function findSimilars(fileInfo: FileInfo, sourceDeviceId?: string) {
   } finally {
     loading.value = false
   }
-}
-
-/**
- * Open file in system
- * 在系统中打开文件
- */
-function openFile(path: string) {
-  emit('openFile', path)
 }
 
 function previewFile(fileId: number, deviceId?: string) {

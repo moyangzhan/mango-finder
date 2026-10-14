@@ -72,7 +72,7 @@ Intelligent search for documents, images, and audio files across multi-device en
 - 🤖 **AI Agent Friendly**
 
   - Documents are automatically parsed into structured Markdown — ready for tools like Claude Code, Cursor, and OpenClaw
-  - CLI *(coming soon)*
+  - Built-in CLI (`mfd`) — bundled with the installer, one click in settings to add it to `PATH`
   
 ### 🏗️ Architecture
 
@@ -99,219 +99,23 @@ Supports three processing modes: **Local** (fully offline), **Self-Hosted** (Oll
   - Rust
   - Tauri Core
 
-## 🚀 Setting Up
+## 🚀 Development
 
-### 1. Frontend
-
-#### Node
-
-`node` v20+ required
-
-It is recommended to use [nvm](https://github.com/nvm-sh/nvm) to manage multiple `node` versions.
-
-#### PNPM
-
-`pnpm` v9+ required
-
-If you haven't installed `pnpm`, you can install it with the following command:
-
-```shell
-npm install pnpm -g
-```
-
-#### Install dependencies
+Environment setup & build: [docs/en/build.md](./docs/en/build.md)
 
 ```sh
-pnpm i
+pnpm i               # install frontend dependencies
+pnpm tauri dev       # run the GUI in dev mode
+pnpm tauri build     # build the installer (GUI + CLI) -> src-tauri/target/release/bundle/
 ```
 
-### 2. Backend(Rust)
-
-`rust` v1.94.0+ required
-
-Install tools: <https://www.rust-lang.org/tools/install>
-
-### 3. Tauri
-
-Install Tauri Prerequisites:
-<https://tauri.app/start/prerequisites/>
-
-### 4. Download Model Files
-
-Download the required model files from one of the following sources:
-
-1. **GitHub Release**: [model.zip](https://github.com/moyangzhan/mango-finder/releases/download/v0.1.0/model.zip) - Contains all required files
-2. **Hugging Face**: [moyangzhan/mango-finder](https://huggingface.co/moyangzhan/mango-finder/tree/main) - Manually download the following files:
-
-   - \*.onnx model files
-   - \*\_tokenizer.json tokenizer files
-   - whisper-small-q8\_0.bin
-
-After downloading, extract the files to the `src-tauri/assets/model` directory.
-
-**Required Files**:
-
-- embedding.onnx
-- embedding\_tokenizer.json
-- vision.onnx
-- vision\_tokenizer.json
-- whisper-small-q8\_0.bin
-
-### 5. Whisper.cpp Dependencies
-
-The audio transcription feature uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Different operating systems require different dependencies.
-
-#### Windows
-
-Compiling on Windows requires **CMake** and **LLVM/Clang 18** (Note: LLVM 19/20/22 have compatibility issues, please use LLVM 18).
-
-1. **Install CMake 4.3**
-
-   Download from [cmake-4.3.0](https://github.com/Kitware/CMake/releases/tag/v4.3.0-rc2)
-2. **Download and Install LLVM 18**
-
-   - Visit [LLVM 18.1.8 Release](https://github.com/llvm/llvm-project/releases/tag/llvmorg-18.1.8)
-   - Download `LLVM-18.1.8-win64.exe`
-   - Check **"Add LLVM to the system PATH for all users"** during installation
-3. **Verify installation**
-
-   ```sh
-   cmake --version
-   clang --version
-   ```
-
-   The clang version should show `18.1.8`
-4. **Set environment variables (permanent)**
-
-   - Press `Win + R`, type `sysdm.cpl`, press Enter
-   - Click **"Advanced"** tab → **"Environment Variables"**
-   - Under **"User variables"**, click **"New"** and add:
-
-   | Variable name | Value    |
-   | ------------- | -------- |
-   | `CXXFLAGS`    | `/utf-8` |
-   | `CFLAGS`      | `/utf-8` |
-
-   - Click OK and **restart your terminal** for changes to take effect
-5. **Build the project (first time only)**
-
-   Open **"x64 Native Tools Command Prompt for VS 2022"** (search from Start Menu), then build:
-
-   ```cmd
-   cd your-project-path\src-tauri
-   cargo build
-   ```
-
-   > ⚠️ **Important Notes**:
-   >
-   > - The `/utf-8` flag is required to resolve encoding issues
-   > - If previous build failed, run `cargo clean -p whisper-rs-sys` to clear cache first
-   > - After whisper is compiled successfully, subsequent builds can use `pnpm tauri dev` directly in any terminal
-   > - VSCode's rust-analyzer plugin auto-checks code on startup. Without MSVC environment, whisper-rs-sys build will fail and show as red in `target/debug/build` directory. If you've successfully built in "x64 Native Tools Command Prompt for VS 2022", you can ignore this error
-
-#### macOS
-
-1. **Install Xcode Command Line Tools** (if not already installed):
-
-   ```sh
-   xcode-select --install
-   ```
-2. **Install CMake**:
-
-   ```sh
-   brew install cmake
-   ```
-3. **Set environment variables** (required for Apple Silicon):
-
-   For Apple Silicon Macs (M1/M2/M3), you need to set the following environment variables:
-
-   | Variable                   | Value                         | Purpose                                        |
-   | -------------------------- | ----------------------------- | ---------------------------------------------- |
-   | `CFLAGS`                   | `-U__ARM_FEATURE_MATMUL_INT8` | Avoid whisper.cpp compilation issues on ARM    |
-   | `MACOSX_DEPLOYMENT_TARGET` | `10.15`                       | Set minimum supported macOS version (Catalina) |
-
-   **Temporary (current terminal session):**
-
-   ```sh
-   export CFLAGS="-U__ARM_FEATURE_MATMUL_INT8"
-   export MACOSX_DEPLOYMENT_TARGET="10.15"
-   ```
-
-   **Permanent (add to your shell config):**
-
-   ```sh
-   # For zsh (default on macOS)
-   echo 'export CFLAGS="-U__ARM_FEATURE_MATMUL_INT8"' >> ~/.zshrc
-   echo 'export MACOSX_DEPLOYMENT_TARGET="10.15"' >> ~/.zshrc
-   source ~/.zshrc
-
-   # For bash
-   echo 'export CFLAGS="-U__ARM_FEATURE_MATMUL_INT8"' >> ~/.bash_profile
-   echo 'export MACOSX_DEPLOYMENT_TARGET="10.15"' >> ~/.bash_profile
-   source ~/.bash_profile
-   ```
-4. **Add Rust target**:
-
-   ```sh
-   rustup target add aarch64-apple-darwin
-   ```
-5. **Build**:
-
-   ```sh
-   pnpm tauri build
-   # Or explicitly specify target
-   pnpm tauri build --target aarch64-apple-darwin
-   ```
-
-> **Note**: The minimum supported macOS version is 10.15 (Catalina).
-
-#### Linux
-
-Most Linux distributions require C/C++ build tools:
-
-**Ubuntu/Debian:**
+The CLI builds from the same crate — run any subcommand directly in dev mode:
 
 ```sh
-sudo apt update
-sudo apt install build-essential cmake
+cd src-tauri && cargo run --bin mfd -- search "machine learning" --type keyword
 ```
 
-**Fedora/RHEL:**
-
-```sh
-sudo dnf install gcc-c++ make cmake
-```
-
-**Arch Linux:**
-
-```sh
-sudo pacman -S base-devel cmake
-```
-
-## 🚀 Getting Started
-
-## ▶️ Development Run
-
-A Tauri app has at least [two processes](https://tauri.app/concept/process-model/):
-
-- the Core Process (`backend`)
-- the WebView process (`frontend`)
-
-Both backend and frontend start with a single command:
-
-```sh
-pnpm tauri dev
-```
-
-## 📦 Building
-
-```sh
-pnpm tauri build
-```
-
-After building, the executable file is usually located in `src-tauri/target/release/`.
-
-windows: `src-tauri/target/release/bundle/msi/Mango Finder_0.1.0_x64_en-US.msi`
+CLI usage: [docs/en/cli.md](./docs/en/cli.md)
 
 ## ❓ FAQ
 

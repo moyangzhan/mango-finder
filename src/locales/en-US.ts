@@ -220,6 +220,15 @@ export default {
     port: 'Port',
     setting: 'Proxy Setting',
   },
+  cli: {
+    setting: 'Command Line Tool',
+    pathDesc: 'The installer ships the CLI (mfd) with the GUI; adding it to PATH makes mfd available in any terminal',
+    install: 'Add to PATH',
+    uninstall: 'Remove from PATH',
+    installSuccess: 'Added to PATH; reopen the terminal if mfd is not found',
+    uninstallSuccess: 'Removed from PATH',
+    notFound: 'mfd binary not found (dev mode does not bundle the CLI; use the installed app, or the standalone build under target/release)',
+  },
   model: {
     platform: 'Model Platform',
     platformInfo: 'Model Platform Info',
