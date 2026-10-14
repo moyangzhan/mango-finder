@@ -112,7 +112,8 @@ pnpm tauri build     # build the installer (GUI + CLI) -> src-tauri/target/relea
 The CLI builds from the same crate — run any subcommand directly in dev mode:
 
 ```sh
-cd src-tauri && cargo run --bin mfd -- search "machine learning" --type keyword
+cd src-tauri
+cargo run --bin mfd -- search "machine learning" --type keyword
 ```
 
 CLI usage: [docs/en/cli.md](./docs/en/cli.md)
@@ -155,23 +156,10 @@ A: The codebase includes multiple models serving different purposes:
 
 #### 3. Remote Models (Optional)
 
-- `gpt-5-mini` and `gpt-4o-mini-transcribe`
+- `gpt-5.6-terra` and `gpt-4o-mini-transcribe`
 - Designed for image and audio parsing
 - Disabled by default, can be enabled if needed
 - Note: We plan to replace these with local alternatives when available
-
-#### 3. Reserved Models (Future Features)
-
-- `qwen-turbo`, `deepseek-chat`, and `deepseek-reasoner`
-
-- Prepared for upcoming features like:
-
-  - Knowledge graph generation
-  - Advanced document analysis
-
-- Also serves as a foundation for developers who want to customize with these models
-
-- Maintains flexibility for future feature expansion
 
 ### Q: Why can't I discover other devices on my local network when using the multi-device feature?
 

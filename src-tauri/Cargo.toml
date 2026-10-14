@@ -1,6 +1,6 @@
 [package]
 name = "mango-finder"
-version = "0.12.0"
+version = "0.13.0"
 edition = "2024"
 # `cargo run` (and Tauri's dev command) needs an explicit pick now that the crate has two binaries (GUI + mfd)
 default-run = "mango-finder"

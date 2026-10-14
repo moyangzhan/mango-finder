@@ -295,8 +295,6 @@ pub fn init_data_with_conn(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
         insert or ignore into model_platform (name, title, office_site_url, base_url, is_proxy_enable) values ('openai', 'OpenAI', 'https://openai.com/', 'https://api.openai.com/v1', false);
-        insert or ignore into model_platform (name, title, office_site_url, base_url, is_proxy_enable) values ('deepseek', 'DeepSeek', 'https://www.deepseek.com/', 'https://api.deepseek.com/v1', false);
-        insert or ignore into model_platform (name, title, office_site_url, base_url, is_proxy_enable) values ('dashscope', 'DashScope', 'https://www.aliyun.com/product/bailian', 'https://dashscope.aliyuncs.com/api/v1', false);
         insert or ignore into model_platform (name, title, office_site_url, base_url, is_proxy_enable) values ('siliconflow', 'SiliconFlow-硅基流动', 'https://www.siliconflow.cn/', 'https://api.siliconflow.cn/v1', false);
         "#,
     )?;
@@ -305,27 +303,12 @@ pub fn init_data_with_conn(conn: &Connection) -> Result<()> {
     conn.execute_batch(r#"
     begin transaction;
 
-    -- Text model
-    insert or ignore into ai_model (name, title, model_types, platform, context_window, max_input_tokens, max_output_tokens, remark, is_enable)
-    values ('deepseek-chat', 'deepseek-v3', 'text', 'deepseek', 131072, 126976, 8192, 'Non-thinking Model', true);
-
-    insert or ignore into ai_model (name, title, model_types, platform, context_window, max_input_tokens, max_output_tokens, is_reasoner, is_thinking_closable, remark, is_enable)
-    values ('deepseek-reasoner', 'deepseek-r1', 'text', 'deepseek', 131072, 65536, 65536, true, false, 'Thinking Model', true);
-
+    -- Vision model (remote image parsing)
     insert or ignore into ai_model (name, title, model_types, platform, input_types, context_window, max_input_tokens, max_output_tokens, remark, properties, is_enable)
-    values ('gpt-5-mini', 'gpt-5-mini', 'text,vision', 'openai', 'text,image', 400000, 272000, 128000, 'GPT-5 mini is a faster, more cost-efficient version of GPT-5. It''s great for well-defined tasks and precise prompts.', '{"supported_file_exts:["png","jpeg","jpg","webp","gif"],"total_size_limits":52428800,image_limits:500"}', true);
-
-    insert or ignore into ai_model (name, title, model_types, platform, context_window, max_input_tokens, max_output_tokens, is_reasoner, is_thinking_closable, is_enable)
-    values ('qwen-turbo', '通义千问turbo', 'text', 'dashscope', 131072, 98304, 16384, true, true, true);
-
-    insert or ignore into ai_model (name, title, model_types, platform, remark, is_free, is_enable)
-    values ('thudm/glm-z1-9b-0414', 'glm-z1-9b', 'text', 'siliconflow', 'GLM-Z1-9B-0414 是 GLM 系列的小型模型，仅有 90 亿参数，但保持了开源传统的同时展现出惊人的能力。| GLM-Z1-9B-0414 is a compact model in the GLM series, featuring only 9 billion parameters while maintaining the open-source tradition and demonstrating remarkable capabilities.', true, true);
+    values ('gpt-5.6-terra', 'gpt-5.6-terra', 'text,vision', 'openai', 'text,image', 1100000, 972000, 128000, 'GPT-5.6 Terra is the mid-tier model of the GPT-5.6 family and the successor of gpt-5-mini. It''s great for well-defined tasks and precise prompts.', '{"supported_file_exts:["png","jpeg","jpg","webp","gif"],"total_size_limits":52428800,image_limits:500"}', true);
     
-    insert or ignore into ai_model (name, title, model_types, platform, input_types, is_enable)
-    values ('qwen2-vl-7b-instruct', 'vl-7b-instruct', 'vision', 'dashscope', 'text,image', true);
-
     insert or ignore into ai_model (name, title, model_types, platform, input_types, remark, is_free, is_enable)
-    values ('THUDM/GLM-4.1V-9B-Thinking', 'GLM-4.1V-9B-Thinking', 'vision', 'siliconflow', 'text,image', 'GLM-4.1V-9B-Thinking 是由智谱 AI 和清华大学 KEG 实验室联合发布的一款开源视觉语言模型（VLM），专为处理复杂的多模态认知任务而设计。该模型基于 GLM-4-9B-0414 基础模型，通过引入“思维链”（Chain-of-Thought）推理机制和采用强化学习策略，显著提升了其跨模态的推理能力和稳定性。作为一个 9B 参数规模的轻量级模型，它在部署效率和性能之间取得了平衡，在 28 项权威评测基准中，有 18 项的表现持平甚至超越了 72B 参数规模的 Qwen-2.5-VL-72B。该模型不仅在图文理解、数学科学推理、视频理解等任务上表现卓越，还支持高达 4K 分辨率的图像和任意宽高比输入 | GLM-4.1V-9B-Thinking is an open-source Vision Language Model (VLM) jointly released by Zhipu AI and Tsinghua University''s KEG Laboratory, specifically designed for handling complex multimodal cognitive tasks. Based on the GLM-4-9B-0414 foundation model, it significantly enhances its cross-modal reasoning capabilities and stability through the introduction of Chain-of-Thought reasoning mechanisms and reinforcement learning strategies. As a lightweight model with 9B parameters, it strikes a balance between deployment efficiency and performance. Among 28 authoritative evaluation benchmarks, it has achieved performance equal to or surpassing that of the 72B-parameter Qwen-2.5-VL-72B in 18 of them. The model not only excels in tasks such as image-text understanding, mathematical and scientific reasoning, and video comprehension, but also supports images up to 4K resolution and arbitrary aspect ratios.', true, true);
+    values ('Qwen/Qwen3-VL-32B-Instruct', 'Qwen3-VL-32B-Instruct', 'vision', 'siliconflow', 'text,image', 'Qwen3-VL 是通义千问新一代视觉语言模型系列，此为 32B Instruct dense 版本。在视觉理解、32 种语言 OCR、视频理解、GUI 定位与图表推理等任务上表现卓越，适用于图像内容描述与图文理解 | Qwen3-VL is the latest vision-language model family from Alibaba Tongyi; this is the 32B Instruct dense variant. It excels at visual understanding, OCR in 32 languages, video comprehension, GUI grounding and chart reasoning — great for image captioning and image-text understanding.', false, true);
 
     -- Speech-to-text
     insert or ignore into ai_model (name, title, model_types, platform, input_types, context_window, max_input_tokens, max_output_tokens, remark, is_enable)

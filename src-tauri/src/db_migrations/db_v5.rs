@@ -11,6 +11,8 @@ pub fn exec_ddl_with_conn(conn: &Connection) -> Result<()> {
     // content_vec/content_data are cascaded by trg_delete_file_content_data; fts/metadata children and disk artifacts (parsed md/images) of loser ids are NOT covered — disk leftovers are bounded and cleared by `index clear`.
     conn.execute_batch(
         r#"
+        -- This DDL clears legacy duplicate file_info.path rows (one row per path) before the unique index enforces it.
+        -- 本段 DDL 清理存量重复 path(每 path 一行),随后用唯一索引固化该约束。
         begin immediate;
 
         -- Losers: same path but not the kept row (valid rows win, then min id)
@@ -50,8 +52,38 @@ pub fn exec_ddl_with_conn(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn init_data_with_conn(_conn: &Connection) -> Result<()> {
+pub fn init_data_with_conn(conn: &Connection) -> Result<()> {
     info!("dbv5.init_data_with_conn");
+    // gpt-5-mini is retired by OpenAI (API shutdown 2026-12-11); rename existing catalog rows to its successor.
+    // `or ignore` skips when a manual gpt-5.6-terra row already exists, instead of failing startup on unique(name, platform).
+    // gpt-5-mini 将被 OpenAI 下线(API 关停 2026-12-11);存量目录行改为继任模型。
+    // `or ignore` 在用户已自建 gpt-5.6-terra 行时跳过,避免 unique(name, platform) 约束卡死启动迁移。
+    conn.execute_batch(
+        r#"
+        update or ignore ai_model
+        set name = 'gpt-5.6-terra',
+            title = 'gpt-5.6-terra',
+            context_window = 1100000,
+            max_input_tokens = 972000,
+            max_output_tokens = 128000,
+            remark = 'GPT-5.6 Terra is the mid-tier model of the GPT-5.6 family and the successor of gpt-5-mini. It''s great for well-defined tasks and precise prompts.'
+        where name = 'gpt-5-mini' and platform = 'openai';
+        "#,
+    )?;
+
+    // THUDM/GLM-4.1V-9B-Thinking was shut down by SiliconFlow on 2026-02-08; rename existing catalog rows to the in-service Qwen3-VL-32B-Instruct.
+    // Same `or ignore` guard: skip instead of failing startup when the user already added a Qwen3-VL row manually.
+    // THUDM/GLM-4.1V-9B-Thinking 已被硅基流动于 2026-02-08 下线;存量目录行改为在售的 Qwen3-VL-32B-Instruct。
+    // 同样用 `or ignore` 兜底:用户已自建 Qwen3-VL 行时跳过,而非卡死启动迁移。
+    conn.execute_batch(
+        r#"
+        update or ignore ai_model
+        set name = 'Qwen/Qwen3-VL-32B-Instruct',
+            title = 'Qwen3-VL-32B-Instruct',
+            is_free = false
+        where name = 'THUDM/GLM-4.1V-9B-Thinking' and platform = 'siliconflow';
+        "#,
+    )?;
     Ok(())
 }
 

@@ -112,7 +112,8 @@ pnpm tauri build     # 构建安装包（GUI + CLI） -> src-tauri/target/releas
 CLI 与 GUI 同 crate，开发模式直接运行任意子命令：
 
 ```sh
-cd src-tauri && cargo run --bin mfd -- search "机器学习" --type keyword
+cd src-tauri
+cargo run --bin mfd -- search "机器学习" --type keyword
 ```
 
 CLI 用法见 [docs/cn/cli.md](./docs/cn/cli.md)
@@ -155,23 +156,10 @@ A: 代码库包含多个模型，各自服务于不同目的：
 
 #### 3. 远程模型（可选）
 
-- `gpt-5-mini` 和 `gpt-4o-mini-transcribe`
+- `gpt-5.6-terra` 和 `gpt-4o-mini-transcribe`
 - 用于图片和音频解析
 - 默认禁用，可根据需要启用
 - 注意：后续如有本地替代方案，则优先使用本地方案
-
-#### 3. 预留模型（未来功能）
-
-- `qwen-turbo`、`deepseek-chat` 和 `deepseek-reasoner`
-
-- 为即将推出的功能准备，例如：
-
-  - 知识图谱生成
-  - 高级文档分析
-
-- 同时也为想要使用这些模型进行自定义开发的开发者提供基础
-
-- 保持对未来功能扩展的灵活性
 
 ### Q: 使用多机互联功能时，为什么发现不了局域网中的其他设备？
 
