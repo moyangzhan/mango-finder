@@ -1,7 +1,9 @@
 use crate::repositories::{config_repo, indexing_task_repo};
 use serde::{Deserialize, Serialize};
 
-const CONFIG_NAME_ACTIVE_TASK: &str = "active_task";
+/// Persistent cross-process lock for storage-domain tasks (indexing / storage-mode change / data-dir copy); key is named after the protected resource domain, not the task — a second mutex domain gets its own key.
+/// 存储域任务(索引/存储模式切换/数据目录复制)的跨进程持久锁;key 按受保护资源域命名而非任务——将来第二个互斥域另起 key。
+const CONFIG_NAME_STORAGE_LOCK: &str = "storage_lock";
 
 /// Age fallback of the orphan rule; also bounds PID-reuse misjudgment (a dead owner's pid reassigned to a live process looks alive for at most this long).
 /// Same value as the pre-PID heuristic.
@@ -15,8 +17,8 @@ pub struct ActiveTask {
     pub new_mode: Option<String>, // target storage mode (e.g. "file"), only for content_storage_change
     pub old_path: Option<String>, // only for data_copying
     pub started_at: i64,          // unix timestamp
-    /// Owner process id; 0 = legacy lock JSON written before this field
-    /// 持有进程 id;0 = 加该字段之前写入的旧锁
+    /// Owner process id; 0 = missing pid in lock JSON (serde defensive default)
+    /// 持有进程 id;0 = 锁 JSON 缺失 pid 时的兜底值(防御性默认)
     #[serde(default)]
     pub pid: u32,
 }
@@ -36,11 +38,11 @@ impl ActiveTask {
     }
 }
 
-pub fn lock_active_task(task: &ActiveTask) -> Result<(), String> {
-    if let Some(existing) = get_active_task()? {
+pub fn lock_storage_task(task: &ActiveTask) -> Result<(), String> {
+    if let Some(existing) = get_storage_task()? {
         if !is_orphan(&existing) {
             return Err(format!(
-                "Task already in progress: {} (pid {}, {}s)",
+                "Storage task already in progress: {} (pid {}, {}s)",
                 existing.task_type,
                 existing.pid,
                 task_age_secs(&existing)
@@ -49,32 +51,32 @@ pub fn lock_active_task(task: &ActiveTask) -> Result<(), String> {
         clear_orphan(&existing);
     }
     let json = serde_json::to_string(task).map_err(|e| e.to_string())?;
-    config_repo::upsert(CONFIG_NAME_ACTIVE_TASK, &json).map_err(|e| e.to_string())?;
+    config_repo::upsert(CONFIG_NAME_STORAGE_LOCK, &json).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-pub fn unlock_active_task() -> Result<(), String> {
-    config_repo::update_by_name(CONFIG_NAME_ACTIVE_TASK, "").map_err(|e| e.to_string())?;
+pub fn unlock_storage_task() -> Result<(), String> {
+    config_repo::update_by_name(CONFIG_NAME_STORAGE_LOCK, "").map_err(|e| e.to_string())?;
     Ok(())
 }
 
-pub fn get_active_task() -> Result<Option<ActiveTask>, String> {
-    let val = config_repo::get_val(CONFIG_NAME_ACTIVE_TASK);
+pub fn get_storage_task() -> Result<Option<ActiveTask>, String> {
+    let val = config_repo::get_val(CONFIG_NAME_STORAGE_LOCK);
     if val.is_empty() {
         return Ok(None);
     }
     match serde_json::from_str::<ActiveTask>(&val) {
         Ok(task) => Ok(Some(task)),
         Err(e) => {
-            log::warn!("Corrupt active_task value, clearing: {}", e);
-            let _ = unlock_active_task();
+            log::warn!("Corrupt storage_lock value, clearing: {}", e);
+            let _ = unlock_storage_task();
             Ok(None)
         }
     }
 }
 
-pub fn clear_active_task() -> Result<(), String> {
-    unlock_active_task()
+pub fn clear_storage_task() -> Result<(), String> {
+    unlock_storage_task()
 }
 
 /// Orphan = owner process dead, or age over threshold; pid=0 (legacy) is age-only.
@@ -96,7 +98,7 @@ fn clear_orphan(task: &ActiveTask) {
         task.pid,
         task_age_secs(task)
     );
-    let _ = unlock_active_task();
+    let _ = unlock_storage_task();
     let _ = indexing_task_repo::interrupt_running();
 }
 
@@ -137,14 +139,14 @@ fn pid_is_alive_impl(pid: u32) -> bool {
 
 /// Check for and remove orphaned task locks left by a previous crash.
 /// Should be called once at startup.
-pub fn cleanup_orphan_task() {
-    match get_active_task() {
+pub fn cleanup_orphan_storage_task() {
+    match get_storage_task() {
         Ok(Some(task)) => {
             if is_orphan(&task) {
                 clear_orphan(&task);
             } else {
                 log::info!(
-                    "Active task found (not orphan, age={}s): type={}",
+                    "Storage task found (not orphan, age={}s): type={}",
                     task_age_secs(&task),
                     task.task_type
                 );
@@ -152,7 +154,7 @@ pub fn cleanup_orphan_task() {
         }
         Ok(None) => {}
         Err(e) => {
-            log::error!("Failed to check active_task on startup: {}", e);
+            log::error!("Failed to check storage lock on startup: {}", e);
         }
     }
 }

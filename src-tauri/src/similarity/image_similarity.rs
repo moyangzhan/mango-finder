@@ -33,9 +33,10 @@ impl SimilarityDetector for ImageSimilarityDetector {
         file_info: &FileInfo,
         limit: usize,
     ) -> Result<Vec<SearchResult>, AppError> {
-        // Get source hash: use stored hash if available, otherwise calculate from file
-        let source_hash = match &file_info.image_hash {
-            Some(hash_bytes) => bytes_to_image_hash(hash_bytes),
+        // Get source hash: use stored hash if valid, otherwise (missing or corrupt) calculate from file
+        // 源哈希:存储值有效则用;缺失或损坏则从文件现算
+        let source_hash = match file_info.image_hash.as_deref().and_then(bytes_to_image_hash) {
+            Some(hash) => hash,
             None => {
                 let source_path = Path::new(&file_info.path);
                 if !source_path.exists() {
@@ -161,13 +162,10 @@ pub fn image_hash_to_bytes(hash: &ImageHash) -> Vec<u8> {
     hash.as_bytes().to_vec()
 }
 
-/// Convert bytes back to ImageHash
-/// 将字节转换回 ImageHash
-pub fn bytes_to_image_hash(bytes: &[u8]) -> ImageHash {
-    ImageHash::from_bytes(bytes).unwrap_or_else(|_| {
-        // Return a zero hash if conversion fails
-        ImageHash::from_bytes(&[0u8; 8]).unwrap()
-    })
+/// Convert bytes back to ImageHash; corrupt bytes yield None so callers skip/recalculate instead of scoring against a fake zero hash.
+/// 将字节转换回 ImageHash;损坏字节返回 None,调用方跳过或重算,而非用假零哈希打分。
+pub fn bytes_to_image_hash(bytes: &[u8]) -> Option<ImageHash> {
+    ImageHash::from_bytes(bytes).ok()
 }
 
 /// Calculate visual similarity score using stored hash bytes
@@ -176,11 +174,11 @@ pub fn calculate_visual_score_from_stored(
     source_hash: &ImageHash,
     candidate_hash_bytes: &Option<Vec<u8>>,
 ) -> Option<usize> {
-    // Use stored hash if available
-    let candidate_hash = match candidate_hash_bytes {
-        Some(hash_bytes) => bytes_to_image_hash(hash_bytes),
-        None => return None, // No hash available, skip this candidate
-    };
+    // Use stored hash if valid; corrupt bytes skip the candidate like a missing one
+    // 存储哈希有效才用;损坏字节与缺失同等对待,跳过该候选
+    let candidate_hash = candidate_hash_bytes
+        .as_deref()
+        .and_then(bytes_to_image_hash)?;
 
     // Calculate hamming distance (lower = more similar)
     let distance = source_hash.dist(&candidate_hash);
@@ -193,21 +191,6 @@ pub fn calculate_visual_score_from_stored(
         // For distances > 10, convert to a low score distance 11 = ~9, distance 64 = 0
         let score = ((64 - distance) as f32 * 100.0 / 53.0) as usize;
         Some(score.min(29)) // Cap at 29 for distances > 10
-    }
-}
-
-/// Calculate visual similarity score from hash bytes directly
-/// 直接从哈希字节计算视觉相似度分数
-pub fn calculate_visual_score(source_hash: &ImageHash, candidate_hash_bytes: &[u8]) -> usize {
-    let candidate_hash = bytes_to_image_hash(candidate_hash_bytes);
-    let distance = source_hash.dist(&candidate_hash);
-
-    // Convert distance to score (0-100)
-    if distance <= 10 {
-        ((10 - distance) * 10) as usize
-    } else {
-        let score = ((64 - distance) as f32 * 100.0 / 53.0) as usize;
-        score.min(29)
     }
 }
 

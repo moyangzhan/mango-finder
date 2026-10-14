@@ -11,7 +11,7 @@ import router from '@/router'
 import { useAppStore } from '@/stores/app'
 import { setLocale, t } from '@/locales'
 
-interface ActiveTask {
+interface StorageTask {
   task_type: string
   category?: string
   new_mode?: string
@@ -22,7 +22,7 @@ interface ActiveTask {
 const appStore = useAppStore()
 const activeMenu = ref<string>('menu-home')
 const showRecoveryDialog = ref(false)
-const recoveryTask = ref<ActiveTask | null>(null)
+const recoveryTask = ref<StorageTask | null>(null)
 
 // Pending pairing request count for badge
 const pendingPairingCount = ref(0)
@@ -183,7 +183,7 @@ onMounted(() => {
   // Check for unfinished tasks after startup stabilizes
   setTimeout(async () => {
     try {
-      const task = await invoke<ActiveTask | null>('get_active_task')
+      const task = await invoke<StorageTask | null>('get_storage_task')
       if (task) {
         // Skip if task started very recently — likely the current session's offline sync
         const ageSeconds = Math.floor(Date.now() / 1000) - task.started_at
@@ -194,12 +194,12 @@ onMounted(() => {
         showRecoveryDialog.value = true
       }
     } catch (e) {
-      console.error('Failed to check active task:', e)
+      console.error('Failed to check storage task:', e)
     }
   }, 3000)
 })
 
-function getTaskDescription(task: ActiveTask): string {
+function getTaskDescription(task: StorageTask): string {
   switch (task.task_type) {
     case 'indexing':
       return t('common.taskRecovery.taskType.indexing')
@@ -220,17 +220,17 @@ async function recoveryAction(action: 'resume' | 'skip' | 'retryCopy' | 'revertP
   try {
     switch (action) {
       case 'skip':
-        await invoke('clear_active_task')
+        await invoke('clear_storage_task')
         break
       case 'resume':
         if (recoveryTask.value.task_type === 'indexing') {
-          await invoke('clear_active_task')
+          await invoke('clear_storage_task')
           window.$message.info(t('common.operationSuccess'))
         } else if (recoveryTask.value.task_type === 'content_storage_change') {
           // Re-trigger storage change using the target mode stored in the task
           const category = recoveryTask.value.category || 'document'
           const targetMode = recoveryTask.value.new_mode || 'database'
-          await invoke('clear_active_task')
+          await invoke('clear_storage_task')
           await invoke('change_content_storage', { category, newMode: targetMode })
         }
         break

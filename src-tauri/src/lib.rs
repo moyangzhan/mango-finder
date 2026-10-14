@@ -41,11 +41,11 @@ mod types;
 use crate::commands::{
     add_device_manually, add_watch_path, change_content_storage, check_devices,
     check_devices_status, check_model_platform, check_path_type, check_self_hosted_platform,
-    clear_active_task, clear_index, clear_pairing_requests, cli_path_install, cli_path_status,
+    clear_storage_task, clear_index, clear_pairing_requests, cli_path_install, cli_path_status,
     cli_path_uninstall, count_files, count_indexed_files,
     count_indexing_tasks, count_pending_pairing_requests, delete_index_item, delete_index_items,
     delete_indexing_task, delete_pairing_request, delete_pairing_requests,
-    download_multilingual_model, fetch_remote_file, find_similars_by_file_id, get_active_task,
+    download_multilingual_model, fetch_remote_file, find_similars_by_file_id, get_storage_task,
     get_client_id, get_data_path, get_local_ip, get_test_mode, indexing_watch_paths,
     is_embedding_model_changed, list_online_devices, load_active_locale, load_active_platform,
     load_active_self_hosted_platform, load_chunks, load_cluster_setting, load_config_value,
@@ -237,9 +237,9 @@ pub fn run() {
             // Test mode commands
             toggle_test_mode,
             get_test_mode,
-            // Active task commands
-            get_active_task,
-            clear_active_task,
+            // Storage-domain task lock commands
+            get_storage_task,
+            clear_storage_task,
             retry_data_copy,
             revert_data_path,
             // CLI PATH registration

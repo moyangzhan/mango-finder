@@ -118,13 +118,13 @@ pub async fn open_directory(path: &str) -> Result<(), String> {
 }
 
 #[command]
-pub async fn get_active_task() -> Result<Option<task_util::ActiveTask>, String> {
-    task_util::get_active_task()
+pub async fn get_storage_task() -> Result<Option<task_util::ActiveTask>, String> {
+    task_util::get_storage_task()
 }
 
 #[command]
-pub async fn clear_active_task() -> Result<(), String> {
-    task_util::clear_active_task()
+pub async fn clear_storage_task() -> Result<(), String> {
+    task_util::clear_storage_task()
 }
 
 /// Retry data copy from old path after crash recovery
@@ -132,8 +132,8 @@ pub async fn clear_active_task() -> Result<(), String> {
 pub async fn retry_data_copy(old_path: String, _app: AppHandle) -> Result<String, String> {
     let new_data_path = crate::read_lock!(APP_DATA_PATH).clone();
 
-    // Lock active task
-    task_util::lock_active_task(&task_util::ActiveTask {
+    // Lock the storage-domain task
+    task_util::lock_storage_task(&task_util::ActiveTask {
         old_path: Some(old_path.clone()),
         ..task_util::ActiveTask::new("data_copying")
     })
@@ -141,7 +141,7 @@ pub async fn retry_data_copy(old_path: String, _app: AppHandle) -> Result<String
 
     let old_path_buf = Path::new(&old_path);
     if !old_path_buf.exists() {
-        let _ = task_util::unlock_active_task();
+        let _ = task_util::unlock_storage_task();
         return Err(format!("Old data path no longer exists: {}", old_path));
     }
     let old_storage = old_path_buf.join("storage");
@@ -155,7 +155,7 @@ pub async fn retry_data_copy(old_path: String, _app: AppHandle) -> Result<String
         if old_db.exists() {
             let new_db = new_storage.join("mango-finder.db");
             if let Err(e) = crate::utils::file_util::copy_file(&old_db, &new_db) {
-                let _ = task_util::unlock_active_task();
+                let _ = task_util::unlock_storage_task();
                 return Err(format!("Failed to copy db file: {}", e));
             }
         }
@@ -171,7 +171,7 @@ pub async fn retry_data_copy(old_path: String, _app: AppHandle) -> Result<String
         }
     }
 
-    let _ = task_util::unlock_active_task();
+    let _ = task_util::unlock_storage_task();
     if copy_errors.is_empty() {
         Ok("success".to_string())
     } else {
@@ -197,6 +197,6 @@ pub async fn revert_data_path(old_path: String, app: AppHandle) -> Result<(), St
 
     *crate::write_lock!(APP_DATA_PATH) = old_path;
 
-    let _ = task_util::clear_active_task();
+    let _ = task_util::clear_storage_task();
     Ok(())
 }

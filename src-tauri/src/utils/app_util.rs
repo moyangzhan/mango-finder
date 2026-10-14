@@ -129,7 +129,7 @@ pub async fn set_data_path(
 
     // DB persistent lock
     let old_data_path_val = crate::read_lock!(APP_DATA_PATH).clone();
-    task_util::lock_active_task(&task_util::ActiveTask {
+    task_util::lock_storage_task(&task_util::ActiveTask {
         old_path: Some(old_data_path_val.clone()),
         ..task_util::ActiveTask::new("data_copying")
     })
@@ -141,7 +141,7 @@ pub async fn set_data_path(
     {
         let storage_dir = ndp.join("storage");
         if let Err(e) = std::fs::create_dir_all(&storage_dir) {
-            let _ = task_util::unlock_active_task();
+            let _ = task_util::unlock_storage_task();
             return Err(format!(
                 "Cannot write to directory '{}': {}. The directory may require administrator privileges.",
                 ndp.display(),
@@ -151,7 +151,7 @@ pub async fn set_data_path(
         // Probe write permission by creating and removing a temp file
         let probe = storage_dir.join(".mango_write_probe");
         if let Err(e) = std::fs::write(&probe, "probe") {
-            let _ = task_util::unlock_active_task();
+            let _ = task_util::unlock_storage_task();
             return Err(format!(
                 "Cannot write to directory '{}': {}. The directory may require administrator privileges.",
                 ndp.display(),
@@ -167,7 +167,7 @@ pub async fn set_data_path(
             exist_files.push_str("mango-finder.db, ");
         }
         if !exist_files.is_empty() {
-            let _ = task_util::unlock_active_task();
+            let _ = task_util::unlock_storage_task();
             return Ok("exist:".to_string() + &exist_files);
         }
     }
@@ -193,7 +193,7 @@ pub async fn set_data_path(
         if old_db.exists() {
             let new_db = new_storage.join("mango-finder.db");
             if let Err(e) = file_util::copy_file(&old_db, &new_db) {
-                let _ = task_util::unlock_active_task();
+                let _ = task_util::unlock_storage_task();
                 return Err(format!("Failed to copy db file: {}", e));
             }
         }
@@ -209,7 +209,7 @@ pub async fn set_data_path(
         }
     }
     *crate::write_lock!(APP_DATA_PATH) = new_data_path.to_string();
-    let _ = task_util::unlock_active_task();
+    let _ = task_util::unlock_storage_task();
 
     // Tell a running daemon to exit and respawn on the next CLI call: its path globals are OnceLocks fixed at startup (/cli/shutdown is a no-op when the server is GUI-carried)
     let port = crate::utils::port_util::clamp_port(

@@ -337,10 +337,8 @@ fn render_value_block(v: &Value, indent: usize) {
                 crate::outln!("{pad}{}:", label(k));
                 let headers: Vec<String> = arr[0]
                     .as_object()
-                    .unwrap()
-                    .keys()
-                    .map(|h| label(h))
-                    .collect();
+                    .map(|o| o.keys().map(|h| label(h)).collect())
+                    .unwrap_or_default();
                 let mut table = new_table(headers);
                 for item in arr {
                     if let Some(o) = item.as_object() {

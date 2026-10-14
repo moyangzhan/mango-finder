@@ -58,7 +58,15 @@ pub fn print_error(message: &str) {
             "data": null,
             "error": message
         });
-        outln!("{}", serde_json::to_string_pretty(&error_response).unwrap());
+        // Serialize failure degrades to empty output with a stderr trace; the error path must never panic.
+        // 序列化失败降级为空输出并在 stderr 留痕;错误路径绝不 panic。
+        outln!(
+            "{}",
+            serde_json::to_string_pretty(&error_response).unwrap_or_else(|e| {
+                crate::outln_error!("json serialize failed: {e}");
+                String::new()
+            })
+        );
     }
     std::process::exit(1);
 }
@@ -69,5 +77,11 @@ fn print_json(data: &Value) {
         "data": data,
         "error": null
     });
-    outln!("{}", serde_json::to_string_pretty(&response).unwrap());
+    outln!(
+        "{}",
+        serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
+            crate::outln_error!("json serialize failed: {e}");
+            String::new()
+        })
+    );
 }

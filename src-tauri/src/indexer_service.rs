@@ -55,7 +55,7 @@ pub async fn start_content_storage_change(category: &str, new_mode: &str) -> Res
     }
 
     // DB persistent lock
-    task_util::lock_active_task(&task_util::ActiveTask {
+    task_util::lock_storage_task(&task_util::ActiveTask {
         category: Some(category.to_string()),
         new_mode: Some(new_mode.to_string()),
         ..task_util::ActiveTask::new("content_storage_change")
@@ -64,7 +64,7 @@ pub async fn start_content_storage_change(category: &str, new_mode: &str) -> Res
 
     // Validate mode value
     if new_mode != "database" && new_mode != "file" && new_mode != "none" {
-        let _ = task_util::unlock_active_task();
+        let _ = task_util::unlock_storage_task();
         return Err(format!("Invalid storage mode: {}", new_mode));
     }
 
@@ -73,7 +73,7 @@ pub async fn start_content_storage_change(category: &str, new_mode: &str) -> Res
         "image" => FileCategory::Image,
         "audio" => FileCategory::Audio,
         _ => {
-            let _ = task_util::unlock_active_task();
+            let _ = task_util::unlock_storage_task();
             return Err(format!("Unknown category: {}", category));
         }
     };
@@ -87,7 +87,7 @@ pub async fn start_content_storage_change(category: &str, new_mode: &str) -> Res
     };
 
     if old_mode == new_mode {
-        let _ = task_util::unlock_active_task();
+        let _ = task_util::unlock_storage_task();
         return Ok(());
     }
 
@@ -157,7 +157,7 @@ pub async fn start_content_storage_change(category: &str, new_mode: &str) -> Res
         });
 
         CONTENT_STORAGE_CHANGING.store(false, Ordering::SeqCst);
-        let _ = task_util::unlock_active_task();
+        let _ = task_util::unlock_storage_task();
 
         match result {
             Ok(()) => {
@@ -531,7 +531,7 @@ pub async fn start_indexing(paths: Vec<String>, from: &str) -> Result<bool, Stri
     }
 
     // DB persistent lock
-    task_util::lock_active_task(&task_util::ActiveTask::new("indexing"))
+    task_util::lock_storage_task(&task_util::ActiveTask::new("indexing"))
         .map_err(|e| e.to_string())?;
 
     STOP_INDEX_SIGNAL.store(false, Ordering::SeqCst);
@@ -539,7 +539,7 @@ pub async fn start_indexing(paths: Vec<String>, from: &str) -> Result<bool, Stri
     let task = match indexing_task_util::task_new(&paths.to_vec(), embedding_model).await {
         Ok(t) => t,
         Err(e) => {
-            let _ = task_util::unlock_active_task();
+            let _ = task_util::unlock_storage_task();
             return Err(e.to_string());
         }
     };
@@ -894,7 +894,7 @@ async fn indexing_finish(task_id: i64, msg: &str, from: &str) -> Result<(), Stri
     INDEXING.store(false, Ordering::SeqCst);
     SCANNING_TOTAL.store(0, Ordering::SeqCst);
     STOP_INDEX_SIGNAL.store(false, Ordering::SeqCst);
-    let _ = task_util::unlock_active_task();
+    let _ = task_util::unlock_storage_task();
 
     // Notify frontend first so UI always unblocks
     frontend_util::send_event(

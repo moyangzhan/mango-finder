@@ -826,7 +826,11 @@ pub async fn handle_file(id: i64, open: bool, device: Option<String>) {
                     return;
                 }
             }
-            output::print_success(OutputKind::File, &serde_json::to_value(&file).unwrap());
+            let file_json = serde_json::to_value(&file).unwrap_or_else(|e| {
+                crate::outln_error!("json serialize failed: {e}");
+                serde_json::Value::Null
+            });
+            output::print_success(OutputKind::File, &file_json);
         }
         Ok(None) => {
             output::print_error(&format!("File not found: {}", id));

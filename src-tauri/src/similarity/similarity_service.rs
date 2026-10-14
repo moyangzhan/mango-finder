@@ -253,7 +253,8 @@ async fn find_similars_for_external_image(
             .unwrap_or(None);
     let source_hash_bytes =
         source_hash_bytes.ok_or_else(|| format!("Failed to decode image: {}", path))?;
-    let source_hash = image_similarity::bytes_to_image_hash(&source_hash_bytes);
+    let source_hash = image_similarity::bytes_to_image_hash(&source_hash_bytes)
+        .ok_or_else(|| format!("Corrupt image hash bytes: {}", path))?;
 
     // Parser init/analyze failure degrades to the visual-only fallback below (same path as an empty caption)
     let content = match image_parser::ImageParser::new().await {
