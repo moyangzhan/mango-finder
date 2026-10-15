@@ -245,7 +245,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BODY=$(gh release view "${{ github.ref_name }}" --json body -q '.body' 2>/dev/null || echo "")
-          echo "found_body=${BODY}" >> "$GITHUB_OUTPUT"
+          # multi-line output needs a heredoc delimiter; bare echo breaks the runner
+          DELIMITER=$(openssl rand -hex 8)
+          printf "found_body<<%s\n%s\n%s\n" "$DELIMITER" "$BODY" "$DELIMITER" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Build release body
