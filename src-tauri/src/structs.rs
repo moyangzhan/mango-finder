@@ -1,6 +1,7 @@
 pub mod cluster_config;
 pub mod command_result;
 pub mod embed_result;
+pub mod embedding_identity;
 pub mod embedding_progress;
 pub mod file_metadata;
 pub mod fs_watcher_setting;

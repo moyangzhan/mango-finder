@@ -16,7 +16,7 @@ use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 use tauri::AppHandle;
 use tokio::sync::RwLock as AsyncRwLock;
 
-pub const DB_VERSION: i32 = 5;
+pub const DB_VERSION: i32 = 6;
 pub const DEFAULT_PAGE_SIZE: usize = 20;
 pub const HUGGINFACE_WEBSITE: &str = "https://huggingface.co";
 pub const HUGGINFACE_MIRROR: &str = "https://hf-mirror.com";
@@ -79,6 +79,13 @@ pub const CONFIG_NAME_ACTIVE_LOCALE: &'static str = "active_locale";
 pub const CONFIG_NAME_DB_VERSION: &'static str = "db_version";
 pub const CONFIG_NAME_PATHS_CACHE_VERSION: &'static str = "paths_cache_version";
 pub const CONFIG_NAME_ACTIVE_SELF_HOSTED_PLATFORM: &'static str = "active_self_hosted_platform";
+/// Active embedding identity JSON (platform+model+dim+has_sparse), single key so a
+/// switch can never land in a half-switched state
+pub const CONFIG_NAME_ACTIVE_EMBEDDING: &'static str = "active_embedding";
+/// Identity whose collection currently holds a complete, searchable index
+pub const CONFIG_NAME_INDEXED_EMBEDDING: &'static str = "indexed_embedding";
+/// Resource existence snapshot of the last startup (missing-backend diagnostics)
+pub const CONFIG_NAME_RESOURCE_SNAPSHOT: &'static str = "local_resource_snapshot";
 
 pub static APP_DATA_PATH: RwLock<String> = RwLock::new(String::new());
 pub static ONNX_EXEC_PROVIDERS_INITIALIZED: OnceLock<bool> = OnceLock::new();

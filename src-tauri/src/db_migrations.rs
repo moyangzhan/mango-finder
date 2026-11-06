@@ -3,6 +3,7 @@ pub mod db_v2;
 pub mod db_v3;
 pub mod db_v4;
 pub mod db_v5;
+pub mod db_v6;
 
 use crate::global::{CONFIG_NAME_DB_VERSION, DB_VERSION};
 use anyhow::Result;
@@ -56,6 +57,9 @@ pub fn run_all_migrations(conn: &Connection) -> Result<()> {
 
     db_v5::exec_ddl_with_conn(conn)?;
     db_v5::init_data_with_conn(conn)?;
+
+    db_v6::exec_ddl_with_conn(conn)?;
+    db_v6::init_data_with_conn(conn)?;
 
     // Update version number
     conn.execute(
@@ -132,6 +136,10 @@ pub fn init_with_conn(conn: &Connection) -> Result<()> {
             5 => {
                 db_v5::exec_ddl_with_conn(conn)?;
                 db_v5::init_data_with_conn(conn)?;
+            }
+            6 => {
+                db_v6::exec_ddl_with_conn(conn)?;
+                db_v6::init_data_with_conn(conn)?;
             }
             _ => {}
         }

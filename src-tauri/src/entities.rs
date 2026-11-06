@@ -184,8 +184,8 @@ impl Default for FileInfo {
 pub struct FileMetaEmbedding {
     pub id: i64,
     pub file_id: i64,
-    #[serde(skip, default = "default_embedding")]
-    pub embedding: [f32; 256],
+    #[serde(skip)]
+    pub embedding: Vec<f32>,
     pub sparse_vec: SparseVector,
 
     pub distance: f32,     // for search result
@@ -199,8 +199,8 @@ pub struct FileContentEmbedding {
     pub file_id: i64,
     pub chunk_index: i64,
     pub chunk_text: String,
-    #[serde(skip, default = "default_embedding_1024")]
-    pub embedding: [f32; 1024],
+    #[serde(skip)]
+    pub embedding: Vec<f32>,
     pub sparse_vec: SparseVector,
 
     pub distance: f32,     // for search result
@@ -213,7 +213,7 @@ impl Default for FileContentEmbedding {
         Self {
             id: 0,
             file_id: 0,
-            embedding: default_embedding_1024(),
+            embedding: Vec::new(),
             chunk_index: 0,
             chunk_text: "".to_string(),
             sparse_vec: SparseVector::default(),
@@ -223,14 +223,6 @@ impl Default for FileContentEmbedding {
             score: 0,
         }
     }
-}
-
-fn default_embedding() -> [f32; 256] {
-    [0.0; 256]
-}
-
-fn default_embedding_1024() -> [f32; 1024] {
-    [0.0; 1024]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

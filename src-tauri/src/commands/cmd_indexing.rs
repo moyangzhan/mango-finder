@@ -8,8 +8,7 @@ use crate::global::{
 };
 use crate::indexer_service;
 use crate::repositories::{
-    file_content_embedding_repo, file_content_fts_repo, file_info_repo,
-    file_metadata_embedding_repo, indexing_task_repo,
+    embedding_collection_repo, file_content_embedding_repo, file_info_repo, indexing_task_repo,
 };
 use crate::searcher;
 use crate::structs::command_result::CommandResult;
@@ -166,9 +165,6 @@ pub fn delete_indexing_task(task_id: i64) -> Result<(), String> {
 
 #[command]
 pub async fn delete_index_item(file_id: i64) -> Result<(), String> {
-    file_content_fts_repo::delete_by_file_id(file_id)?;
-    file_content_embedding_repo::delete_by_file_id(file_id)?;
-    file_metadata_embedding_repo::delete_by_file_id(file_id)?;
     if let Some(file) = file_info_repo::get_by_id(file_id)? {
         let file_path = file.path;
         searcher::path_search_engine::remove_from_index(file_path.as_str(), true).await;
@@ -181,7 +177,8 @@ pub async fn delete_index_item(file_id: i64) -> Result<(), String> {
         }
         cleanup_extracted_images(file_id);
     }
-    file_info_repo::delete_by_id(file_id)?;
+    // Single transaction: file_info + FTS + every vector collection
+    embedding_collection_repo::delete_file_with_indexes(file_id)?;
     Ok(())
 }
 
@@ -189,23 +186,6 @@ pub async fn delete_index_item(file_id: i64) -> Result<(), String> {
 pub async fn delete_index_items(file_ids: Vec<i64>) -> Result<(), String> {
     for file_id in &file_ids {
         // Best-effort deletion: log failures but continue with remaining files
-        if let Err(e) = file_content_fts_repo::delete_by_file_id(*file_id) {
-            log::warn!("Failed to delete FTS for file {}: {}", file_id, e);
-        }
-        if let Err(e) = file_content_embedding_repo::delete_by_file_id(*file_id) {
-            log::warn!(
-                "Failed to delete content embedding for file {}: {}",
-                file_id,
-                e
-            );
-        }
-        if let Err(e) = file_metadata_embedding_repo::delete_by_file_id(*file_id) {
-            log::warn!(
-                "Failed to delete metadata embedding for file {}: {}",
-                file_id,
-                e
-            );
-        }
         if let Ok(Some(file)) = file_info_repo::get_by_id(*file_id) {
             searcher::path_search_engine::remove_from_index(&file.path, true).await;
             // Clean up associated .md file if content was stored on disk
@@ -217,8 +197,8 @@ pub async fn delete_index_items(file_ids: Vec<i64>) -> Result<(), String> {
             }
             cleanup_extracted_images(*file_id);
         }
-        if let Err(e) = file_info_repo::delete_by_id(*file_id) {
-            log::warn!("Failed to delete file info for file {}: {}", file_id, e);
+        if let Err(e) = embedding_collection_repo::delete_file_with_indexes(*file_id) {
+            log::warn!("Failed to delete index rows for file {}: {}", file_id, e);
         }
     }
     Ok(())

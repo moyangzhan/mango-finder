@@ -121,3 +121,12 @@ pub fn calculate_metadata_score(distance: f32, sparse_score: f32) -> usize {
 
     (hybrid_score * 100.0).round().clamp(0.0, 100.0) as usize
 }
+
+/// Dense-only score for backends without a sparse output (remote /v1/embeddings).
+/// Pure cosine similarity - no sparse component, no lexical noise filter.
+///
+/// 无 sparse 输出后端(远程 /v1/embeddings)的纯 dense 评分:仅余弦相似度。
+pub fn calculate_dense_only_score(distance: f32) -> usize {
+    let dense_sim = (1.0 - distance.min(1.0)).max(0.0).min(1.0);
+    (dense_sim * 100.0).round().clamp(0.0, 100.0) as usize
+}

@@ -1,5 +1,4 @@
 use crate::document_loaders::cleanup_extracted_images;
-use crate::embedding_service::EmbeddingService;
 use crate::entities::IndexingTask;
 use crate::enums::{ContentStorageChangeEvent, FileCategory, IndexingEvent};
 use crate::errors::AppError;
@@ -9,10 +8,7 @@ use crate::global::{
 };
 use crate::indexers;
 use crate::initializer;
-use crate::repositories::{
-    config_repo, file_content_embedding_repo, file_content_fts_repo, file_info_repo,
-    file_metadata_embedding_repo, indexing_task_repo,
-};
+use crate::repositories::{config_repo, embedding_collection_repo, file_info_repo};
 use crate::scanner;
 use crate::searcher;
 use crate::structs::indexer_setting::IndexerSetting;
@@ -477,30 +473,17 @@ async fn reparse_file(
     }
 }
 
-pub async fn is_embedding_model_changed() -> Result<bool, String> {
-    let tasks = indexing_task_repo::list(1, 1, "id", "desc");
-    if tasks.is_err() {
-        return Ok(false);
-    }
-    match tasks {
-        Ok(tasks) => {
-            if tasks.is_empty() {
-                return Ok(false);
-            }
-            let latest = tasks
-                .first()
-                .map(|item| item.embedding_model.clone())
-                .unwrap_or_default();
-            let embedding_name: &'static str = EmbeddingService::model_name().await;
-            if latest != embedding_name {
-                return Ok(true);
-            } else {
-                return Ok(false);
-            }
-        }
-        Err(_) => {
-            return Ok(false);
-        }
+/// Whether the active embedding identity differs from the identity whose
+/// collection currently holds a complete index (platform+model pair equality).
+/// Generalizes the old local-model-name check to any backend.
+///
+/// 激活嵌入身份与「已完成索引」身份是否不同(平台+模型判等),
+/// 将旧的本地模型名检测泛化到任意后端。
+pub fn is_embedding_model_changed() -> Result<bool, String> {
+    let active = embedding_collection_repo::active_identity();
+    match embedding_collection_repo::indexed_identity() {
+        Some(indexed) => Ok(!active.same_backend(&indexed)),
+        None => Ok(true),
     }
 }
 
@@ -535,8 +518,10 @@ pub async fn start_indexing(paths: Vec<String>, from: &str) -> Result<bool, Stri
         .map_err(|e| e.to_string())?;
 
     STOP_INDEX_SIGNAL.store(false, Ordering::SeqCst);
-    let embedding_model = EmbeddingService::model_name().await;
-    let task = match indexing_task_util::task_new(&paths.to_vec(), embedding_model).await {
+    // Record the active identity ("model · platform") on the task
+    let identity = embedding_collection_repo::active_identity();
+    let embedding_model = format!("{} · {}", identity.model, identity.platform);
+    let task = match indexing_task_util::task_new(&paths.to_vec(), &embedding_model).await {
         Ok(t) => t,
         Err(e) => {
             let _ = task_util::unlock_storage_task();
@@ -870,10 +855,8 @@ pub fn remove_file_index(path: &str) -> Result<(), String> {
             }
         }
         cleanup_extracted_images(file_info.id);
-        file_info_repo::delete_by_id(file_info.id)?;
-        file_content_fts_repo::delete_by_file_id(file_info.id)?;
-        file_content_embedding_repo::delete_by_file_id(file_info.id)?;
-        file_metadata_embedding_repo::delete_by_file_id(file_info.id)?;
+        // Single transaction across file_info + FTS + every vector collection
+        embedding_collection_repo::delete_file_with_indexes(file_info.id)?;
     }
     Ok(())
 }
@@ -882,10 +865,7 @@ pub fn remove_directory_index(path: &str) -> Result<(), String> {
     if path.is_empty() {
         return Ok(());
     }
-    file_content_fts_repo::delete_by_prefix_path(path)?;
-    file_content_embedding_repo::delete_by_file_prefix_path(path)?;
-    file_metadata_embedding_repo::delete_by_file_prefix_path(path)?;
-    file_info_repo::delete_by_prefix_path(path)?;
+    embedding_collection_repo::delete_files_with_prefix(path)?;
     Ok(())
 }
 
@@ -919,13 +899,10 @@ pub fn get_event_from(from: &str) -> &'static str {
     return crate::global::EVENT_WATCHER_INDEXING;
 }
 
-/// 清空全部索引:四张表 → 路径缓存 → 磁盘 parsed_documents/extracted_images
-/// Clear the whole index: four tables → path cache → on-disk parse leftovers
+/// 清空全部索引:单事务(全部向量库 + FTS + file_info)→ 路径缓存 → 磁盘 parsed_documents/extracted_images
+/// Clear the whole index: one transaction (every collection + FTS + file_info) → path cache → on-disk leftovers
 pub async fn clear_index() -> Result<(), String> {
-    file_content_fts_repo::clear()?;
-    file_content_embedding_repo::clear()?;
-    file_metadata_embedding_repo::clear()?;
-    file_info_repo::clear()?;
+    embedding_collection_repo::clear_all_collections()?;
     searcher::path_search_engine::clear().await;
     if let Some(storage) = STORAGE_PATH.get() {
         for dir in ["parsed_documents", "extracted_images"] {

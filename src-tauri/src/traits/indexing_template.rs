@@ -6,7 +6,7 @@ use crate::errors::{AppError, IndexingError};
 use crate::global::{INDEXER_SETTING, STOP_INDEX_SIGNAL, STORAGE_PATH};
 use crate::indexer_service;
 use crate::repositories::{
-    file_content_embedding_repo, file_content_fts_repo, file_info_repo,
+    embedding_collection_repo, file_content_embedding_repo, file_content_fts_repo, file_info_repo,
     file_metadata_embedding_repo,
 };
 use crate::similarity::image_similarity;
@@ -98,10 +98,8 @@ pub trait IndexingTemplate {
                         }
                     }
                     cleanup_extracted_images(file_info.id);
-                    file_info_repo::delete_by_id(file_info.id)?;
-                    file_content_fts_repo::delete_by_file_id(file_info.id)?;
-                    file_content_embedding_repo::delete_by_file_id(file_info.id)?;
-                    file_metadata_embedding_repo::delete_by_file_id(file_info.id)?;
+                    // One transaction: file_info + FTS + every vector collection
+                    embedding_collection_repo::delete_file_with_indexes(file_info.id)?;
                     removed_any = true;
                     continue;
                 }
@@ -203,10 +201,8 @@ pub trait IndexingTemplate {
             }
         }
 
-        //Remove old index
-        file_content_fts_repo::delete_by_file_id(file_id)?;
-        file_content_embedding_repo::delete_by_file_id(file_id)?;
-        file_metadata_embedding_repo::delete_by_file_id(file_id)?;
+        // Remove old index rows of this file from FTS + every vector collection
+        embedding_collection_repo::delete_index_rows_for_file(file_id)?;
 
         embedding_metadata(file_id, &file_meta).await?;
         if filtered_content.is_empty() {
@@ -247,6 +243,10 @@ pub async fn embedding_content(file_id: i64, content: &str) -> Result<(), Indexi
         text_util::split_text(&content, &embedding_service.tokenizer)
             .map_err(|op| AppError::DocumentSplitterError(op.to_string()))?
     };
+    // Guardrail: every vector written must match the active collection's dim,
+    // otherwise vec0 would reject (or worse, silently mismatch) - fail the file
+    // explicitly with a readable reason instead of the old zero-vector fallback.
+    let identity = embedding_collection_repo::active_identity();
     for (chunk_index, chunk_text) in chunks.into_iter().enumerate() {
         log::debug!(
             "Processing chunk {} with {} chars",
@@ -282,13 +282,29 @@ pub async fn embedding_content(file_id: i64, content: &str) -> Result<(), Indexi
             );
             keep_run = false;
         }
+        if chunk_embed_result.dense.len() != identity.dim {
+            let msg = format!(
+                "Embedding dim {} does not match active collection dim {} ({} · {})",
+                chunk_embed_result.dense.len(),
+                identity.dim,
+                identity.model,
+                identity.platform
+            );
+            log::warn!("{msg}");
+            let _ = file_info_repo::update_content_index_status(
+                file_id,
+                FileIndexStatus::IndexFailed.value(),
+                msg.as_str(),
+            );
+            keep_run = false;
+        }
         if !keep_run {
             continue;
         }
         let new_embedding_data = FileContentEmbedding {
             id: 0,
             file_id,
-            embedding: chunk_embed_result.dense.try_into().unwrap_or([0.0; 1024]),
+            embedding: chunk_embed_result.dense,
             chunk_index: chunk_index as i64,
             chunk_text,
             sparse_vec: chunk_embed_result.sparse,
@@ -338,12 +354,30 @@ pub async fn embedding_metadata(
             return Ok(());
         }
     };
-    let meta_array: [f32; 256] = meta_embed_result.dense.try_into().unwrap_or([0.0; 256]);
+    // Guardrail: dim must match the active collection (replaces the old silent
+    // zero-vector fallback that kept the metadata semantic index permanently dead)
+    let identity = embedding_collection_repo::active_identity();
+    if meta_embed_result.dense.len() != identity.dim {
+        let msg = format!(
+            "Metadata embedding dim {} does not match active collection dim {} ({} · {})",
+            meta_embed_result.dense.len(),
+            identity.dim,
+            identity.model,
+            identity.platform
+        );
+        log::warn!("{msg}");
+        file_info_repo::update_meta_index_status(
+            file_id,
+            FileIndexStatus::IndexFailed.value(),
+            msg.as_str(),
+        )?;
+        return Ok(());
+    }
     file_metadata_embedding_repo::insert(
         &(FileMetaEmbedding {
             id: 0,
             file_id,
-            embedding: meta_array,
+            embedding: meta_embed_result.dense,
             sparse_vec: meta_embed_result.sparse,
 
             distance: -0.1,

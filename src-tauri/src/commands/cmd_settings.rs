@@ -306,7 +306,7 @@ pub async fn update_indexer_setting(
 
 #[command]
 pub async fn is_embedding_model_changed() -> Result<bool, String> {
-    return indexer_service::is_embedding_model_changed().await;
+    return indexer_service::is_embedding_model_changed();
 }
 
 #[command]
