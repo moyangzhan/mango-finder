@@ -72,13 +72,33 @@ jobs:
           Remove-Item -Path "$env:LOCALAPPDATA\tauri\WixTools*" -Recurse -Force -ErrorAction SilentlyContinue
         shell: pwsh
 
-      - name: Build Windows
+      - name: Build Windows (Full)
         run: pnpm tauri build
+      - name: Collect Full artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          for f in src-tauri/target/release/bundle/msi/*.msi; do
+            cp "$f" "dist/$(basename "$f" .msi)_Full.msi"
+          done
+      # Lite = same runtime, no bundled model files (bundle.resources removed;
+      # --config deep-merge cannot delete declared keys, so edit in place)
+      - name: Strip model resources (Lite config)
+        run: python scripts/strip_bundle_resources.py
+      - name: Build Windows (Lite)
+        run: pnpm tauri build
+      - name: Collect Lite artifact and restore config
+        shell: bash
+        run: |
+          for f in src-tauri/target/release/bundle/msi/*.msi; do
+            cp "$f" "dist/$(basename "$f" .msi)_Lite.msi"
+          done
+          git checkout -- src-tauri/tauri.conf.json
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: src-tauri/target/release/bundle/msi/*.msi
+          path: dist/*
 
   build-linux:
     runs-on: ubuntu-24.04
@@ -125,13 +145,31 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-      - name: Build Linux
+      - name: Build Linux (Full)
         run: pnpm tauri build
+      - name: Collect Full artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          for f in src-tauri/target/release/bundle/deb/*.deb; do
+            cp "$f" "dist/$(basename "$f" .deb)_Full.deb"
+          done
+      - name: Strip model resources (Lite config)
+        run: python scripts/strip_bundle_resources.py
+      - name: Build Linux (Lite)
+        run: pnpm tauri build
+      - name: Collect Lite artifact and restore config
+        shell: bash
+        run: |
+          for f in src-tauri/target/release/bundle/deb/*.deb; do
+            cp "$f" "dist/$(basename "$f" .deb)_Lite.deb"
+          done
+          git checkout -- src-tauri/tauri.conf.json
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
-          path: src-tauri/target/release/bundle/deb/*
+          path: dist/*
 
   build-macos:
     runs-on: macos-14
@@ -179,8 +217,26 @@ jobs:
           "
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build macOS (Apple Silicon)
+      - name: Build macOS (Apple Silicon, Full)
         run: pnpm tauri build
+      - name: Collect Full artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          for f in src-tauri/target/release/bundle/dmg/*.dmg; do
+            cp "$f" "dist/$(basename "$f" .dmg)_Full.dmg"
+          done
+      - name: Strip model resources (Lite config)
+        run: python scripts/strip_bundle_resources.py
+      - name: Build macOS (Apple Silicon, Lite)
+        run: pnpm tauri build
+      - name: Collect Lite artifact and restore config
+        shell: bash
+        run: |
+          for f in src-tauri/target/release/bundle/dmg/*.dmg; do
+            cp "$f" "dist/$(basename "$f" .dmg)_Lite.dmg"
+          done
+          git checkout -- src-tauri/tauri.conf.json
       # Intel Mac build disabled - uncomment if needed for Intel Mac users
       # (re-enabling needs cross-compile care: --target x86_64-apple-darwin, and the mfd pre-build in beforeBuildCommand must match that triple)
       # - name: Build macOS (Intel)
@@ -189,9 +245,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-build
-          path: |
-            src-tauri/target/release/bundle/dmg/*.dmg
-            # src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+          path: dist/*
 
   release:
     needs: [build-windows, build-linux, build-macos]
