@@ -119,6 +119,38 @@ async function loadPendingPairingCount() {
   }
 }
 
+// Startup resource diagnostics: local model files that existed at the previous
+// startup but are gone now (install damage / antivirus quarantine / deletion)
+interface ResourceDiagnosticResult {
+  vanished: string[]
+  affected_categories: string[]
+}
+const resourceDiagnostic = ref<ResourceDiagnosticResult | null>(null)
+const showResourceDialog = ref(false)
+const resourceWarningVisible = ref(false)
+const modelDirPath = ref('')
+
+function categoryLabel(category: string) {
+  return t(`diagnostic.category.${category}`)
+}
+
+async function gotoSettingTab(tab: string) {
+  showResourceDialog.value = false
+  gotoSetting()
+  // setting store picks the tab from the route query (web history mode)
+  await router.push({ path: '/setting', query: { tab } })
+}
+
+async function openModelDir() {
+  if (!modelDirPath.value)
+    return
+  try {
+    await invoke('open_directory', { path: modelDirPath.value })
+  } catch (e) {
+    console.error('open model directory failed', e)
+  }
+}
+
 onMounted(() => {
   // Register event listeners first to avoid missing events
   // 优先注册事件监听器，避免错过事件
@@ -182,6 +214,24 @@ onMounted(() => {
 
   // Check for unfinished tasks after startup stabilizes
   setTimeout(async () => {
+    // Resource snapshot diff: "had local models → lost them" is the anomaly
+    // worth an explicit diagnostic (files never delete themselves)
+    try {
+      const diagnostic = await invoke<ResourceDiagnosticResult>('get_resource_diagnostic')
+      if (diagnostic && diagnostic.vanished.length > 0) {
+        resourceDiagnostic.value = diagnostic
+        showResourceDialog.value = true
+        resourceWarningVisible.value = true
+        try {
+          const dataPath = await invoke<string>('get_data_path')
+          const { join } = await import('@tauri-apps/api/path')
+          modelDirPath.value = await join(dataPath, 'model')
+        } catch { /* model dir button degrades silently */ }
+      }
+    } catch (e) {
+      console.error('Failed to check resource diagnostic:', e)
+    }
+
     try {
       const task = await invoke<StorageTask | null>('get_storage_task')
       if (task) {
@@ -281,6 +331,21 @@ async function recoveryAction(action: 'resume' | 'skip' | 'retryCopy' | 'revertP
           </div>
         </NLayoutSider>
         <NLayout>
+          <!-- Persistent degraded-mode banner while local model files are missing -->
+          <NAlert
+            v-if="resourceWarningVisible && !showResourceDialog"
+            type="warning"
+            class="mx-4 mt-2"
+            closable
+            @close="resourceWarningVisible = false"
+          >
+            <div class="flex items-center gap-2 text-xs">
+              <span>{{ t('diagnostic.warningBanner', { files: resourceDiagnostic?.vanished.join(', ') }) }}</span>
+              <NButton text type="primary" size="tiny" class="text-link" @click="showResourceDialog = true">
+                {{ t('diagnostic.openDetails') }}
+              </NButton>
+            </div>
+          </NAlert>
           <RouterView v-slot="{ Component }">
             <KeepAlive>
               <component :is="Component" />
@@ -288,6 +353,44 @@ async function recoveryAction(action: 'resume' | 'skip' | 'retryCopy' | 'revertP
           </RouterView>
         </NLayout>
       </NLayout>
+
+      <!-- Startup resource diagnostic dialog -->
+      <NModal
+        :show="showResourceDialog" preset="dialog" :title="t('diagnostic.title')"
+        :mask-closable="false" :close-on-esc="false" :closable="false"
+      >
+        <div v-if="resourceDiagnostic" class="text-xs space-y-2">
+          <p>{{ t('diagnostic.desc') }}</p>
+          <p class="font-semibold">
+            {{ t('diagnostic.missingFiles') }}
+          </p>
+          <ul class="list-disc pl-5">
+            <li v-for="file in resourceDiagnostic.vanished" :key="file">
+              {{ file }}
+            </li>
+          </ul>
+          <p>
+            {{ t('diagnostic.affectedCategories') }}
+            <span class="font-semibold">
+              {{ resourceDiagnostic.affected_categories.map(c => categoryLabel(c)).join(' / ') }}
+            </span>
+          </p>
+          <p class="text-gray-400">
+            {{ t('diagnostic.recoveryHint') }}
+          </p>
+        </div>
+        <template #action>
+          <NButton ghost @click="openModelDir">
+            {{ t('diagnostic.openModelDir') }}
+          </NButton>
+          <NButton type="primary" ghost @click="gotoSettingTab('indexer')">
+            {{ t('diagnostic.gotoSetting') }}
+          </NButton>
+          <NButton @click="showResourceDialog = false">
+            {{ t('common.later') }}
+          </NButton>
+        </template>
+      </NModal>
 
       <!-- Task recovery dialog -->
       <NModal v-model:show="showRecoveryDialog" preset="dialog" :title="t('common.taskRecovery.title')" :mask-closable="false" :close-on-esc="false" :closable="false">

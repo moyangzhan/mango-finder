@@ -16,6 +16,9 @@ export function useSearch() {
   const searchPhase = ref<'idle' | 'local' | 'cross-device'>('idle')
   const searchType = ref(SEMANTIC_SEARCH)
   const searchGeneration = ref(0)
+  // One-line degradation notice for semantic searches (backend unavailable /
+  // rebuild in progress); cleared on every new semantic search
+  const semanticNotice = ref<string | null>(null)
 
   // Cluster search state
   const searchDevices = ref<SearchDevice[]>([])
@@ -198,6 +201,7 @@ export function useSearch() {
     if (!query.value) {
       searchResults.value = []
       localResults.value = []
+      semanticNotice.value = null
       return
     }
 
@@ -229,6 +233,7 @@ export function useSearch() {
       }
 
       localResults.value = res.results
+      semanticNotice.value = search_type_str === 'semantic' ? (res.semantic_notice ?? null) : null
       processResults(localResults.value)
       filterResults()
 
@@ -351,8 +356,13 @@ export function useSearch() {
     }
 
     // Always search locally unless cluster is enabled and local device is explicitly deselected
-    if (!clusterEnabled.value || selectedLocalDevice.value)
+    if (!clusterEnabled.value || selectedLocalDevice.value) {
       debounceLocalSearch()
+    } else {
+      // Local leg skipped: a stale notice from the last local search must not
+      // linger over remote-only results
+      semanticNotice.value = null
+    }
     if (hasRemoteDevices.value)
       debounceRemoteDeviceSearch()
   }
@@ -373,6 +383,7 @@ export function useSearch() {
     remoteResults.value = []
     searchStatuses.value = []
     searchPhase.value = 'idle'
+    semanticNotice.value = null
   }
 
   // Load cluster setting
@@ -501,6 +512,7 @@ export function useSearch() {
     selectedDeviceIds,
     searchStatuses,
     clusterEnabled,
+    semanticNotice,
 
     // Computed
     hasRemoteDevices,

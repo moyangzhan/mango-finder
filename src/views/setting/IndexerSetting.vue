@@ -18,6 +18,7 @@ interface RowData {
 }
 
 type ParserMode = 'local' | 'selfhosted' | 'remote' | 'mixed'
+type BackendMode = 'local' | 'selfhosted' | 'remote'
 
 const indexerStore = useIndexerStore()
 const appStore = useAppStore()
@@ -28,6 +29,7 @@ const activeSelfHostedPlatform = ref('')
 const dataRef = ref<RowData[]>([])
 const imageParserDesc = ref('')
 const audioParserDesc = ref('')
+const vectorParserDesc = ref('')
 
 const modelPath = ref('')
 const dbPath = ref('')
@@ -35,14 +37,73 @@ const dbPath = ref('')
 // Parser mode state
 const parserMode = ref<ParserMode>('local')
 
+// Local backend availability (one detection source, shared by greying,
+// preset fallback and switch validation)
+const localBackends = ref<LocalBackendStatus | null>(null)
+
+// Active embedding identity: { platform, model, dim, has_sparse }
+const activeIdentity = ref<EmbeddingIdentity | null>(null)
+// Embedding model row of the CURRENT mode's platform (display + switch source)
+const activeEmbeddingModel = ref<AiModel | null>(null)
+
 // Self-hosted model state
 const selfHostedVisionModel = ref<AiModel | null>(null)
 const showModelEditModal = ref(false)
 const editingModel = ref<AiModel | null>(null)
+const editingModelOldName = ref('')
 const showSelfHostedModal = ref(false)
 const showCloudModal = ref(false)
 
+// Parser model change light notice (optional category re-index offer)
+const parserModelNotice = ref<{ category: 'image' | 'audio'; oldName: string; newName: string } | null>(null)
+const reindexingCategory = ref(false)
+
+// Embedding switch dialog state
+interface PendingSwitch {
+  mode: BackendMode
+  platform: string
+  model: string
+  modelTitle: string
+  existingCollection: boolean | null // null = unknown yet (probed at confirm)
+  pendingFiles: number
+}
+const pendingSwitch = ref<PendingSwitch | null>(null)
+const showSwitchDialog = ref(false)
+const switchRebuildChoice = ref<'fast' | 'full' | 'none'>('fast')
+const switchClearOthers = ref(false)
+const switchFastAvailable = ref(true)
+const switchingBackend = ref(false)
+
 initStatusData()
+
+function vectorAvailable() {
+  return localBackends.value ? localBackends.value.vector_missing.length === 0 : true
+}
+function visionAvailable() {
+  return localBackends.value ? localBackends.value.vision_missing.length === 0 : true
+}
+function audioAvailable() {
+  return localBackends.value ? localBackends.value.audio_missing.length === 0 : true
+}
+/** Only vLLM can serve self-hosted ASR (Ollama has no transcription endpoint) */
+function selfHostedAudioAvailable() {
+  return activeSelfHostedPlatform.value === 'vllm'
+}
+
+function missingFilesTooltip(missing: string[]) {
+  return t('indexer.missingLocalFiles', { files: missing.join(', ') })
+}
+
+/** Backend display name for an embedding identity: "model · backend" */
+function identityBackendTitle(platform: string) {
+  if (platform === 'local')
+    return t('common.local')
+  const selfHosted = selfHostedPlatformList.value.find(p => p.name === platform)
+  if (selfHosted)
+    return selfHosted.title
+  const cloud = modelPlatformList.value.find(p => p.name === platform)
+  return cloud?.title || platform
+}
 
 async function initStatusData() {
   // Detect parser mode based on image and audio parser modes
@@ -62,6 +123,7 @@ async function initStatusData() {
 
   imageParserDesc.value = t('common.local')
   audioParserDesc.value = t('common.local')
+  vectorParserDesc.value = '-'
 
   if (parserMode.value === 'remote' || imageMode === 'remote') {
     const platformInfo = modelPlatformList.value.find(
@@ -96,6 +158,10 @@ async function initStatusData() {
     }
   }
 
+  // Vector backend: display as "model · backend" from the active identity
+  if (activeIdentity.value)
+    vectorParserDesc.value = `${activeIdentity.value.model} · ${identityBackendTitle(activeIdentity.value.platform)}`
+
   dataRef.value = [
     {
       name: t('indexer.indexFileMetadata'),
@@ -121,6 +187,11 @@ async function initStatusData() {
           name: t('indexer.audioParser'),
           status: audioParserDesc.value,
           key: 'index-audio-parser',
+        },
+        {
+          name: t('indexer.vectorParser'),
+          status: vectorParserDesc.value,
+          key: 'index-vector-parser',
         },
       ],
     },
@@ -218,6 +289,7 @@ async function doActivePlatformChanged(selectedName: string) {
   } catch (error) {
     console.error('set active tab error', error)
   }
+  await loadEmbeddingModel()
   initStatusData()
 }
 
@@ -231,7 +303,27 @@ async function doActiveSelfHostedPlatformChanged(selectedName: string) {
   } catch (error) {
     console.error('set active self-hosted platform error', error)
   }
+  await loadEmbeddingModel()
   initStatusData()
+}
+
+/** Load the embedding ai_model row for the CURRENT embedding mode's platform */
+async function loadEmbeddingModel() {
+  const mode = indexerStore.indexerSetting.embedding_parser_mode
+  activeEmbeddingModel.value = null
+  if (mode === 'local')
+    return
+  const platform = mode === 'selfhosted' ? activeSelfHostedPlatform.value : activePlatform.value
+  if (!platform)
+    return
+  try {
+    activeEmbeddingModel.value = await invoke<AiModel>('load_model_by_type', {
+      platform,
+      oneType: 'embedding',
+    })
+  } catch (e) {
+    console.warn('Failed to load embedding model:', e)
+  }
 }
 
 // Storage change state
@@ -315,13 +407,14 @@ async function doParserModeChanged(mode: ParserMode) {
   indexerStore.indexerSetting.parser_mode = mode
 
   if (mode === 'local') {
-    // 本地模式：image 和 audio 都使用 local
-    indexerStore.indexerSetting.image_parser_mode = 'local'
-    indexerStore.indexerSetting.audio_parser_mode = 'local'
+    // 本地模式：image/audio/vector 尽量 local；本地模型文件缺失的类目回落 remote
+    indexerStore.indexerSetting.image_parser_mode = visionAvailable() ? 'local' : 'remote'
+    indexerStore.indexerSetting.audio_parser_mode = audioAvailable() ? 'local' : 'remote'
+    // Vector never silently falls back (identity change = rebuild); keep as-is
   } else if (mode === 'selfhosted') {
-    // 自托管模式：image 使用 selfhosted，audio 使用 local（自托管平台不支持 ASR）
+    // 自托管模式：image 使用 selfhosted，audio 仅 vLLM 可自托管
     indexerStore.indexerSetting.image_parser_mode = 'selfhosted'
-    indexerStore.indexerSetting.audio_parser_mode = 'local'
+    indexerStore.indexerSetting.audio_parser_mode = selfHostedAudioAvailable() ? 'selfhosted' : (audioAvailable() ? 'local' : 'remote')
   } else if (mode === 'remote') {
     // 云端模式：image 和 audio 都使用 remote
     indexerStore.indexerSetting.image_parser_mode = 'remote'
@@ -333,6 +426,10 @@ async function doParserModeChanged(mode: ParserMode) {
 
 // Handle image parser mode change
 function onImageParserModeChanged(mode: string) {
+  if (mode === 'local' && !visionAvailable()) {
+    window.$message.warning(missingFilesTooltip(localBackends.value?.vision_missing || []))
+    return
+  }
   indexerStore.indexerSetting.image_parser_mode = mode
   updateParserModeFromSettings()
   updateIndexerSetting()
@@ -340,9 +437,140 @@ function onImageParserModeChanged(mode: string) {
 
 // Handle audio parser mode change
 function onAudioParserModeChanged(mode: string) {
+  if (mode === 'local' && !audioAvailable()) {
+    window.$message.warning(missingFilesTooltip(localBackends.value?.audio_missing || []))
+    return
+  }
   indexerStore.indexerSetting.audio_parser_mode = mode
   updateParserModeFromSettings()
   updateIndexerSetting()
+}
+
+// ---------------------------------------------------------------------------
+// Embedding (vector) backend switching
+// 向量后端切换
+// ---------------------------------------------------------------------------
+
+/** Resolve the target platform+model for a vector backend mode */
+async function resolveEmbeddingTarget(mode: BackendMode): Promise<{ platform: string, model: string, modelTitle: string } | null> {
+  if (mode === 'local')
+    return { platform: 'local', model: 'bge-m3', modelTitle: 'BGE-M3' }
+  const platform = mode === 'selfhosted' ? activeSelfHostedPlatform.value : activePlatform.value
+  if (!platform) {
+    window.$message.warning(t('indexer.switchNeedPlatform'))
+    return null
+  }
+  try {
+    const model = await invoke<AiModel>('load_model_by_type', {
+      platform,
+      oneType: 'embedding',
+    })
+    if (!model || !model.name) {
+      window.$message.warning(t('indexer.switchNeedModel'))
+      return null
+    }
+    return { platform, model: model.name, modelTitle: model.title || model.name }
+  } catch (e) {
+    console.error('load embedding model failed', e)
+    window.$message.warning(t('indexer.switchNeedModel'))
+    return null
+  }
+}
+
+/** Vector backend radio change: validate, then open the switch confirmation */
+async function onEmbeddingModeChanged(mode: string) {
+  const target = mode as BackendMode
+  if (target === 'local' && !vectorAvailable()) {
+    window.$message.warning(missingFilesTooltip(localBackends.value?.vector_missing || []))
+    return
+  }
+  const resolved = await resolveEmbeddingTarget(target)
+  if (!resolved)
+    return
+
+  const identity = activeIdentity.value
+  const sameBackend = !!identity
+    && identity.platform === resolved.platform
+    && identity.model === resolved.model
+  // Same backend AND same mode = nothing to switch. A mode label that matches
+  // but resolves to a different platform (the active platform changed under
+  // remote/selfhosted) still opens the dialog.
+  if (sameBackend && target === indexerStore.indexerSetting.embedding_parser_mode)
+    return
+  if (sameBackend) {
+    // Same backend, mode realigned: just persist
+    indexerStore.indexerSetting.embedding_parser_mode = target
+    updateIndexerSetting()
+    return
+  }
+
+  // Count files for the rebuild estimate
+  let pendingFiles = 0
+  try {
+    pendingFiles = await invoke<number>('count_indexed_files', { category: 'document' })
+      + await invoke<number>('count_indexed_files', { category: 'image' })
+      + await invoke<number>('count_indexed_files', { category: 'audio' })
+  } catch { /* estimate only */ }
+
+  // Collection states: the target's existence, and the ACTIVE library's rows
+  // (its stored chunk_text is the fast re-embed channel's raw material)
+  let existing = false
+  let activeContentRows = 0
+  try {
+    const collections = await invoke<EmbeddingCollectionRow[]>('load_embedding_collections')
+    existing = collections.some(
+      c => c.platform === resolved.platform && c.model === resolved.model && (c.content_rows > 0 || c.meta_rows > 0),
+    )
+    if (identity) {
+      activeContentRows = collections.find(
+        c => c.platform === identity.platform && c.model === identity.model,
+      )?.content_rows ?? 0
+    }
+  } catch { /* unknown → assume new */ }
+
+  switchFastAvailable.value = activeContentRows > 0
+  switchRebuildChoice.value = existing ? 'none' : (switchFastAvailable.value ? 'fast' : 'full')
+  switchClearOthers.value = false
+  pendingSwitch.value = {
+    mode: target,
+    platform: resolved.platform,
+    model: resolved.model,
+    modelTitle: resolved.modelTitle,
+    existingCollection: existing,
+    pendingFiles,
+  }
+  showSwitchDialog.value = true
+}
+
+async function doConfirmSwitch() {
+  if (!pendingSwitch.value)
+    return
+  const target = pendingSwitch.value
+  switchingBackend.value = true
+  try {
+    const outcome = await invoke<{ identity: EmbeddingIdentity, existing_collection: boolean, rebuild_started: boolean }>('switch_embedding_backend', {
+      mode: target.mode,
+      platform: target.platform,
+      model: target.model,
+      rebuild: switchRebuildChoice.value,
+      clearOthers: switchClearOthers.value,
+    })
+    indexerStore.indexerSetting.embedding_parser_mode = target.mode
+    showSwitchDialog.value = false
+    window.$message.success(
+      outcome.rebuild_started
+        ? t('indexer.switchDoneRebuilding')
+        : t('indexer.switchDoneInstant'),
+    )
+    activeIdentity.value = await invoke<EmbeddingIdentity>('get_active_embedding_identity')
+    await loadEmbeddingModel()
+    initStatusData()
+  } catch (e) {
+    console.error('switch embedding backend failed', e)
+    window.$message.error(typeof e === 'string' ? e : t('common.operationFailed'))
+  } finally {
+    switchingBackend.value = false
+  }
 }
 
 // Update parserMode based on current settings
@@ -398,6 +626,7 @@ function onSelfHostedPlatformSaved(updatedPlatform: SelfHostedPlatform) {
 function openModelEditModal() {
   if (selfHostedVisionModel.value) {
     editingModel.value = { ...selfHostedVisionModel.value }
+    editingModelOldName.value = selfHostedVisionModel.value.name
     showModelEditModal.value = true
   }
 }
@@ -417,6 +646,15 @@ async function saveModel() {
       title: editingModel.value.title,
       remark: editingModel.value.remark,
     })
+    // Parser model changed → light notice: existing index & search unaffected,
+    // new files use the new model, optional category re-index offered
+    if (editingModelOldName.value && editingModelOldName.value !== modelName) {
+      parserModelNotice.value = {
+        category: 'image',
+        oldName: editingModelOldName.value,
+        newName: modelName,
+      }
+    }
     selfHostedVisionModel.value = { ...editingModel.value }
     showModelEditModal.value = false
     window.$message.success(t('common.saveSuccess'))
@@ -424,6 +662,27 @@ async function saveModel() {
   } catch (error) {
     console.error('save model error', error)
     window.$message.error(t('common.operationFailed'))
+  }
+}
+
+async function doReindexCategory() {
+  if (!parserModelNotice.value || reindexingCategory.value)
+    return
+  reindexingCategory.value = true
+  try {
+    const started = await invoke<boolean>('reindex_category', {
+      category: parserModelNotice.value.category,
+    })
+    if (started) {
+      window.$message.success(t('indexer.reindexStarted'))
+      parserModelNotice.value = null
+    } else {
+      window.$message.info(t('indexer.reindexNothing'))
+    }
+  } catch (e) {
+    window.$message.error(typeof e === 'string' ? e : t('common.operationFailed'))
+  } finally {
+    reindexingCategory.value = false
   }
 }
 
@@ -449,6 +708,11 @@ onMounted(async () => {
     activeSelfHostedPlatform.value = await invoke<string>(
       'load_active_self_hosted_platform',
     )
+
+    // Local backend detection runs once per settings-page open
+    localBackends.value = await invoke<LocalBackendStatus>('check_local_backends')
+    activeIdentity.value = await invoke<EmbeddingIdentity>('get_active_embedding_identity')
+    await loadEmbeddingModel()
 
     const userDataPath = await invoke<string>('get_data_path')
     console.log('userDataPath', userDataPath)
@@ -488,6 +752,17 @@ onMounted(async () => {
   } catch (e) {
     console.error('IndexerSetting onMounted error', e)
   }
+})
+
+// The settings page is KeepAlive'd: re-run detection on each visit so restored
+// model files light the local radios up without an app restart
+onActivated(async () => {
+  try {
+    localBackends.value = await invoke<LocalBackendStatus>('check_local_backends')
+    activeIdentity.value = await invoke<EmbeddingIdentity>('get_active_embedding_identity')
+    await loadEmbeddingModel()
+    initStatusData()
+  } catch { /* keep previous snapshot */ }
 })
 
 onUnmounted(() => {
@@ -576,9 +851,16 @@ onUnmounted(() => {
                   size="small"
                   @update:value="onImageParserModeChanged"
                 >
-                  <NRadio value="local">
-                    {{ t('common.local') }}
-                  </NRadio>
+                  <NTooltip>
+                    <template #trigger>
+                      <NRadio value="local" :disabled="!visionAvailable()">
+                        {{ t('common.local') }}
+                      </NRadio>
+                    </template>
+                    <template v-if="!visionAvailable()">
+                      {{ missingFilesTooltip(localBackends?.vision_missing || []) }}
+                    </template>
+                  </NTooltip>
                   <NRadio value="selfhosted">
                     {{ t('common.selfHosted') }}
                   </NRadio>
@@ -596,16 +878,25 @@ onUnmounted(() => {
                   size="small"
                   @update:value="onAudioParserModeChanged"
                 >
-                  <NRadio value="local">
-                    {{ t('common.local') }}
-                  </NRadio>
                   <NTooltip>
                     <template #trigger>
-                      <NRadio value="selfhosted" disabled>
+                      <NRadio value="local" :disabled="!audioAvailable()">
+                        {{ t('common.local') }}
+                      </NRadio>
+                    </template>
+                    <template v-if="!audioAvailable()">
+                      {{ missingFilesTooltip(localBackends?.audio_missing || []) }}
+                    </template>
+                  </NTooltip>
+                  <NTooltip>
+                    <template #trigger>
+                      <NRadio value="selfhosted" :disabled="!selfHostedAudioAvailable()">
                         {{ t('common.selfHosted') }}
                       </NRadio>
                     </template>
-                    {{ t('common.selfHostedNotSupportASR') }}
+                    <template v-if="!selfHostedAudioAvailable()">
+                      {{ t('common.selfHostedASRNeedVllm') }}
+                    </template>
                   </NTooltip>
                   <NRadio value="remote">
                     {{ t('common.cloud') }}
@@ -613,8 +904,59 @@ onUnmounted(() => {
                 </NRadioGroup>
               </td>
             </tr>
+            <tr>
+              <td>{{ t('indexer.vectorParser') }}</td>
+              <td>
+                <div class="flex items-center gap-2">
+                  <NRadioGroup
+                    :value="indexerStore.indexerSetting.embedding_parser_mode"
+                    size="small"
+                    @update:value="onEmbeddingModeChanged"
+                  >
+                    <NTooltip>
+                      <template #trigger>
+                        <NRadio value="local" :disabled="!vectorAvailable()">
+                          {{ t('common.local') }}
+                        </NRadio>
+                      </template>
+                      <template v-if="!vectorAvailable()">
+                        {{ missingFilesTooltip(localBackends?.vector_missing || []) }}
+                      </template>
+                    </NTooltip>
+                    <NRadio value="selfhosted">
+                      {{ t('common.selfHosted') }}
+                    </NRadio>
+                    <NRadio value="remote">
+                      {{ t('common.cloud') }}
+                    </NRadio>
+                  </NRadioGroup>
+                  <span
+                    v-if="activeEmbeddingModel && activeIdentity && activeIdentity.platform === (indexerStore.indexerSetting.embedding_parser_mode === 'selfhosted' ? activeSelfHostedPlatform : activePlatform)"
+                    class="text-xs text-gray-400"
+                  >{{ activeEmbeddingModel.title || activeEmbeddingModel.name }} · {{ activeIdentity.dim }}</span>
+                </div>
+              </td>
+            </tr>
           </tbody>
         </NTable>
+
+        <!-- Parser model change: light notice + optional category re-index -->
+        <NAlert v-if="parserModelNotice" type="info" :show-icon="false" class="text-xs mb-2" closable @close="parserModelNotice = null">
+          <div>
+            {{
+              t('indexer.parserModelChanged', {
+                category: t('indexer.imageParser'),
+                oldName: parserModelNotice.oldName,
+                newName: parserModelNotice.newName,
+              })
+            }}
+          </div>
+          <div class="mt-1">
+            <NButton text type="primary" size="tiny" class="text-link" :loading="reindexingCategory" @click="doReindexCategory">
+              {{ t('indexer.reindexCategory') }}
+            </NButton>
+          </div>
+        </NAlert>
 
         <!-- Self-hosted platform modal -->
         <NModal v-model:show="showSelfHostedModal" preset="card" :title="t('indexer.selfHostedSetting')" style="width: 600px">
@@ -633,6 +975,9 @@ onUnmounted(() => {
                 <NButton text type="primary" size="tiny" class="text-link ml-2" @click="openModelEditModal">
                   {{ t('indexer.editModel') }}
                 </NButton>
+              </NFormItem>
+              <NFormItem :label="t('indexer.embeddingModel')">
+                <span class="selectable mr-4">{{ activeEmbeddingModel?.title || activeEmbeddingModel?.name || '-' }}</span>
               </NFormItem>
               <NFormItem :label="`${selfHostedPlatformList.find(p => p.name === activeSelfHostedPlatform)?.title} ${t('common.setting')}`">
                 <SelfHostedPlatformEdit
@@ -670,6 +1015,73 @@ onUnmounted(() => {
               </div>
             </NCard>
           </NScrollbar>
+        </NModal>
+
+        <!-- Embedding backend switch confirmation -->
+        <NModal
+          :show="showSwitchDialog"
+          preset="card"
+          :title="t('indexer.switchTitle')"
+          style="width: 560px"
+          :mask-closable="!switchingBackend"
+          @update:show="(v: boolean) => { if (!switchingBackend) showSwitchDialog = v }"
+        >
+          <div v-if="pendingSwitch" class="text-xs space-y-2">
+            <div>
+              {{
+                t('indexer.switchTarget', {
+                  model: pendingSwitch.modelTitle,
+                  backend: identityBackendTitle(pendingSwitch.platform),
+                })
+              }}
+            </div>
+            <NAlert v-if="pendingSwitch.existingCollection" type="success" :show-icon="false">
+              {{ t('indexer.switchExistingInstant') }}
+            </NAlert>
+            <NAlert v-else type="warning" :show-icon="false">
+              {{
+                t('indexer.switchNewRebuild', {
+                  count: pendingSwitch.pendingFiles,
+                })
+              }}
+            </NAlert>
+            <NFormItem :label="t('indexer.switchRebuildLabel')" label-placement="left">
+              <NRadioGroup v-model:value="switchRebuildChoice" size="small">
+                <NRadio value="fast" :disabled="!switchFastAvailable">
+                  {{ t('indexer.switchRebuildFast') }}
+                </NRadio>
+                <NRadio value="full">
+                  {{ t('indexer.switchRebuildFull') }}
+                </NRadio>
+                <NRadio value="none">
+                  {{ t('indexer.switchRebuildNone') }}
+                </NRadio>
+              </NRadioGroup>
+            </NFormItem>
+            <div v-if="switchRebuildChoice === 'fast'" class="text-xs text-gray-400">
+              {{ t('indexer.switchFastHint') }}
+            </div>
+            <NCheckbox v-model:checked="switchClearOthers">
+              {{ t('indexer.switchClearOthers') }}
+            </NCheckbox>
+            <div v-if="switchClearOthers" class="text-xs text-gray-400">
+              {{
+                pendingSwitch.platform === 'local'
+                  ? t('indexer.switchClearCostLocal')
+                  : t('indexer.switchClearCostRemote')
+              }}
+            </div>
+          </div>
+          <template #footer>
+            <NSpace justify="end">
+              <NButton ghost :disabled="switchingBackend" @click="showSwitchDialog = false">
+                {{ t('common.cancel') }}
+              </NButton>
+              <NButton type="primary" ghost :loading="switchingBackend" @click="doConfirmSwitch">
+                {{ t('common.confirm') }}
+              </NButton>
+            </NSpace>
+          </template>
         </NModal>
       </div>
     </NCard>

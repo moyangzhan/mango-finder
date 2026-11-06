@@ -22,6 +22,7 @@ const {
   searchDevices,
   selectedDeviceIds,
   searchStatuses,
+  semanticNotice,
   hasRemoteDevices,
   hitTypeLabels,
   isKeywordOnlyMatch,
@@ -272,6 +273,11 @@ onDeactivated(() => {
             {{ t('cluster.selectAll') }}
           </NButton>
         </div>
+      </div>
+
+      <!-- Semantic search degradation notice (backend unavailable / rebuild in progress) -->
+      <div v-if="semanticNotice && !localSearching" class="mt-2 text-xs text-amber-500">
+        {{ semanticNotice }}
       </div>
 
       <!-- Search status indicator -->

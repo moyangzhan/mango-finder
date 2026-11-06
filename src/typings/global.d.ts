@@ -260,3 +260,33 @@ interface ClusterSetting {
   auto_accept_pairing: boolean;
   online_check_interval: number;
 }
+/** Per-category availability of the bundled local model backends */
+interface LocalBackendStatus {
+  vector_missing: string[];
+  vision_missing: string[];
+  audio_missing: string[];
+}
+
+/** Active embedding backend identity (platform+model+dim+has_sparse) */
+interface EmbeddingIdentity {
+  platform: string;
+  model: string;
+  dim: number;
+  has_sparse: boolean;
+}
+
+/** One registered vector collection (management tab row) */
+interface EmbeddingCollectionRow {
+  platform: string;
+  model: string;
+  dim: number;
+  has_sparse: boolean;
+  is_local: boolean;
+  content_rows: number;
+  meta_rows: number;
+  file_count: number;
+  estimated_bytes: number;
+  create_time: string;
+  update_time: string;
+  is_active: boolean;
+}

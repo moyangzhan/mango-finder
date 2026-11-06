@@ -2,6 +2,7 @@
 import { useRoute } from 'vue-router'
 import CommonSetting from './CommonSetting.vue'
 import IndexerSetting from './IndexerSetting.vue'
+import VectorLibrary from './VectorLibrary.vue'
 import ClusterSetting from './ClusterSetting.vue'
 import About from './About.vue'
 import { useSettingStore } from '@/stores/setting'
@@ -36,6 +37,9 @@ function onUpdateTab(tabName: string) {
       </NTabPane>
       <NTabPane name="indexer" display-directive="show" :tab="t('indexer.setting')">
         <IndexerSetting />
+      </NTabPane>
+      <NTabPane name="vectorLibrary" display-directive="show" :tab="t('vectorLibrary.title')">
+        <VectorLibrary />
       </NTabPane>
       <NTabPane name="cluster" display-directive="show" :tab="t('cluster.title')">
         <ClusterSetting />
