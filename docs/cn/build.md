@@ -56,6 +56,8 @@ pnpm i
 
 后四个为 OCR 模型（本地图片文字识别使用）。
 
+> 「Lite 变体」构建不含这些文件也完全可行：应用检测到文件缺失时会将对应本地后端置灰并引导使用远程/自托管后端，见[第 7 节](#7-构建发布版本)。
+
 ## 5. Whisper.cpp 依赖
 
 音频转文字功能使用 [whisper.cpp](https://github.com/ggerganov/whisper.cpp)，不同操作系统需要安装不同的依赖。
@@ -236,3 +238,33 @@ pnpm tauri build                    ← 自动合并 tauri.<platform>.conf.json�
 `src-tauri/target/release/bundle/msi/Mango.Finder_0.12.0_x64_en-US.msi`
 
 CLI 用法见 [cli.md](./cli.md)。
+
+### Full / Lite 双变体
+
+「0 本地模型」是受支持的运行形态，不是独立版本：一份代码、一个运行时、两种发行变体。
+
+| 变体 | 内容 | 体积 | 适用 |
+| --- | --- | --- | --- |
+| **Full** | 可执行文件 + 全部本地模型 | ~1GB | 个人离线用户，开箱即用 |
+| **Lite** | 仅可执行文件 | 预计 50-70MB（MSI LZX 压缩后） | 团队场景（Ollama 集中部署 + 成员自托管调用）、纯远程/仅关键词用户 |
+
+两种变体使用同一 identifier/UpgradeCode，互为原地升级：Full→Lite（或反向）直接安装即可，MajorUpgrade 会清理多余文件，数据库位于数据目录不受影响。
+
+**Lite 的运行行为：**
+
+- 关键词检索（FTS）不依赖任何模型，始终可用
+- 设置页中「向量/视觉/音频」三个类目各自独立选择本地/自托管/远程后端；本地选项按**模型文件检测**自动灰亮（缺任一文件即置灰并提示缺失清单），检测在启动与每次打开设置页时刷新——手动把模型文件放回数据目录的 `model` 文件夹后选项即亮起，无需重启
+- 向量（embedding）后端支持本地 ONNX 与平台 API（OpenAI 兼容 `/v1/embeddings`，Ollama/vLLM 同协议）；切换向量后端 = 切换向量库，应用内按「模型 · 后端」分库并存、默认保留，切回已有库即时生效（详见 GUI 设置页「向量库」标签）
+- 远程视觉/音频由多模态模型/ASR 端点覆盖；OCR 无独立远程通道（远程模式由多模态模型顺带覆盖，精度不等价）
+
+**CI 双产物**：`build.yml` 每个平台连续构建两次——先 Full，再剥离 `bundle.resources` 构建 Lite，产物以 `_Full` / `_Lite` 后缀命名（如 `Mango.Finder_0.12.0_x64_en-US_Full.msi` / `..._Lite.msi`）。
+
+**本地构建 Lite**：
+
+```sh
+python scripts/strip_bundle_resources.py   # 就地移除 tauri.conf.json 的 bundle.resources
+pnpm tauri build
+git checkout -- src-tauri/tauri.conf.json  # 构建后恢复配置
+```
+
+> 之所以就地修改配置：Tauri 的 `--config` 是深合并，无法删除已声明的键（空对象合并为无操作）。

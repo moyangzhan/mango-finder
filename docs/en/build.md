@@ -55,6 +55,8 @@ Download the required files from [Hugging Face: moyangzhan/mango-finder](https:/
 
 The last four are the OCR models used by the local image text-recognition parser.
 
+> Building the **Lite variant** without these files is fully supported: the app greys out the affected local backends when files are missing and guides you to remote/self-hosted backends — see [Section 7](#7-release-build).
+
 ## 5. Whisper.cpp Dependencies
 
 The audio transcription feature uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Different operating systems require different dependencies.
@@ -235,3 +237,33 @@ Installers land in `src-tauri/target/release/bundle/` in platform-specific forma
 `src-tauri/target/release/bundle/msi/Mango.Finder_0.12.0_x64_en-US.msi`
 
 For CLI usage, see [cli.md](./cli.md).
+
+### Full / Lite variants
+
+"Zero local models" is a supported runtime form, not a separate edition: one codebase, one runtime, two distribution variants.
+
+| Variant | Contents | Size | For |
+| --- | --- | --- | --- |
+| **Full** | Executables + all local models | ~1GB | Offline personal use, works out of the box |
+| **Lite** | Executables only | est. 50-70MB (after MSI LZX compression) | Teams (central Ollama + self-hosted calls), remote/keyword-only users |
+
+Both variants share the same identifier/UpgradeCode and upgrade each other in place: installing Full→Lite (or back) just works — MajorUpgrade removes extra files; the database lives in the data directory and is untouched.
+
+**Lite runtime behavior:**
+
+- Keyword search (FTS) works without any model, always available
+- In settings, the vector/vision/audio categories each pick local/self-hosted/remote independently; local options are gated on **model file detection** (any missing file greys the option with the missing list). Detection refreshes at startup and on every settings-page open — dropping the model files back into the `model` folder of the data directory lights the options up, no restart needed
+- The vector (embedding) backend supports local ONNX and platform APIs (OpenAI-compatible `/v1/embeddings`; Ollama/vLLM speak the same protocol). Switching the vector backend switches the vector library: libraries coexist per "model · backend", are retained by default, and switching back to an existing one is instant (see the "Vector Libraries" tab in settings)
+- Remote vision/audio are covered by multimodal models / ASR endpoints; OCR has no dedicated remote channel (covered incidentally by multimodal models, not equivalent in accuracy)
+
+**CI dual artifacts**: `build.yml` builds twice per platform — Full first, then Lite with `bundle.resources` stripped — and names the artifacts with `_Full` / `_Lite` suffixes (e.g. `Mango.Finder_0.12.0_x64_en-US_Full.msi` / `..._Lite.msi`).
+
+**Building Lite locally**:
+
+```sh
+python scripts/strip_bundle_resources.py   # remove bundle.resources from tauri.conf.json in place
+pnpm tauri build
+git checkout -- src-tauri/tauri.conf.json  # restore the config afterwards
+```
+
+> The in-place edit exists because Tauri's `--config` deep-merges and cannot delete declared keys (an empty object merges as a no-op).

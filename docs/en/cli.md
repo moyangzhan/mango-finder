@@ -15,6 +15,8 @@ cargo build --release --bin mfd
 
 The build script copies the model files to `target/<profile>/assets/model`, and `mfd` looks for them next to its own executable first (symlink invocations resolve to the real path) — no extra setup. The binary ends up at `src-tauri/target/release/mfd.exe` (Windows) or `src-tauri/target/release/mfd` (macOS/Linux). To use it from anywhere, either add `src-tauri/target/release/` to your `PATH`, or copy the binary **together with the `assets` folder** to a directory already on your `PATH` (copying the binary alone leaves the models behind).
 
+`mfd` also runs without the model files (this is exactly what the Lite installer ships): keyword search, path search, and file/device management are unaffected. After switching the vector backend to remote/self-hosted in the GUI settings, semantic search and indexing work as usual. The `mfd serve` daemon pre-warms the local model only when the vector backend is local; pending metadata embeddings are caught up in the background by the daemon (same job as the GUI, cross-process mutex).
+
 ## Getting Help
 
 ```bash
@@ -61,7 +63,7 @@ mfd search "report.docx" --type keyword --limit 5
 ```
 
 **Notes:**
-- Semantic search requires local embedding model files
+- Semantic search needs an available vector (embedding) backend: the local model files, or a remote/self-hosted embedding backend configured in the GUI settings (OpenAI-compatible `/v1/embeddings`; Ollama/vLLM speak the same protocol). When the backend is unavailable, semantic search returns empty results with a log line; keyword search is unaffected
 - `total` in the output is the full match count; `returned` is the number of items actually returned after `--limit`
 
 ### similar - Find Similar Files

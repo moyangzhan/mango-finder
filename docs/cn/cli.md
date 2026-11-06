@@ -15,6 +15,8 @@ cargo build --release --bin mfd
 
 构建脚本会把模型文件复制到 `target/<profile>/assets/model`，`mfd` 会优先在自身所在目录寻找模型（经软链调用时会先解析真实路径）——无需额外配置。产物位于 `src-tauri/target/release/mfd.exe`（Windows）或 `src-tauri/target/release/mfd`（macOS/Linux）。如需在任意位置使用，可将 `src-tauri/target/release/` 加入 `PATH`，或把二进制**连同 `assets` 目录一起**复制到已在 `PATH` 中的目录（只复制二进制会丢失模型文件）。
 
+模型文件缺失时 `mfd` 仍可运行（Lite 安装包即如此）：关键词检索、路径检索、文件与设备管理不受影响；向量后端在 GUI 设置页切换为远程/自托管后，语义检索与索引照常工作。`mfd serve` 守护进程仅在向量后端为本地时预热本地模型；缺失的元数据嵌入由守护进程在后台自动补齐（与 GUI 同一任务，跨进程互斥）。
+
 ## 获取帮助
 
 ```bash
@@ -61,7 +63,7 @@ mfd search "report.docx" --type keyword --limit 5
 ```
 
 **说明：**
-- 语义搜索需要本地存在 embedding 模型文件
+- 语义搜索需要一个可用的向量（embedding）后端：本地模型文件，或在 GUI 设置页配置的远程/自托管 embedding 后端（OpenAI 兼容 `/v1/embeddings`，Ollama/vLLM 同协议）；后端不可用时语义检索返回空结果并记录日志，关键词检索不受影响
 - 输出中的 `total` 为完整匹配数量，`returned` 为应用 `--limit` 后实际返回的数量
 
 ### similar - 查找相似文件
