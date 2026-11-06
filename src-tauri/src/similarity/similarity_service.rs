@@ -429,25 +429,23 @@ fn visual_scan_candidates(
 }
 
 /// 文本分块并逐块计算嵌入（仅内存，不写库），供外部文件现场计算使用
+/// 走嵌入分发器:按向量类目后端配置(local/selfhosted/remote)取后端,批量调用
 async fn embed_text_to_chunks(content: &str) -> Result<Vec<(Vec<f32>, SparseVector)>, String> {
-    let chunks = {
-        let mut manager = embedding_service_manager::get_manager().write().await;
-        let embedding_service = manager.service().await.map_err(|e| e.to_string())?;
-        text_util::split_text(content, &embedding_service.tokenizer)
-            .map_err(|e| format!("Failed to split text: {}", e))?
-    };
+    let chunks = embedding_service_manager::split_chunks(content)
+        .await
+        .map_err(|e| format!("Failed to split text: {}", e))?;
+    let chunks: Vec<&String> = chunks.iter().filter(|c| !c.trim().is_empty()).collect();
 
+    const BATCH_SIZE: usize = 16;
     let mut result = Vec::with_capacity(chunks.len());
-    for chunk in &chunks {
-        if chunk.trim().is_empty() {
-            continue;
-        }
-        let mut manager = embedding_service_manager::get_manager().write().await;
-        let embed_result = manager
-            .embed(chunk)
+    for batch in chunks.chunks(BATCH_SIZE) {
+        let texts: Vec<String> = batch.iter().map(|s| (*s).clone()).collect();
+        let embed_results = embedding_service_manager::embed_batch(&texts)
             .await
             .map_err(|e| format!("Failed to embed text: {}", e))?;
-        result.push((embed_result.dense, embed_result.sparse));
+        for embed_result in embed_results {
+            result.push((embed_result.dense, embed_result.sparse));
+        }
     }
     Ok(result)
 }

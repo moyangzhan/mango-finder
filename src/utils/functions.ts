@@ -24,6 +24,7 @@ export function emptyIndexerSetting(): IndexerSetting {
     parser_mode: 'local',
     image_parser_mode: 'local',
     audio_parser_mode: 'local',
+    embedding_parser_mode: 'local',
     file_content_language: 'en',
     ignore_dirs: [] as string[],
     ignore_exts: [] as string[],

@@ -155,6 +155,30 @@ pub fn hybrid_search(
     return Ok(filtered_result);
 }
 
+/// Delete a file's metadata rows in the ACTIVE collection (idempotent re-embed).
+pub fn delete_by_file_id(file_id: i64) -> Result<usize, RepositoryError> {
+    if file_id < 1 {
+        return Ok(0);
+    }
+    let (tables, _) = active_tables();
+    let mut conn = crate::db_init_manager::open_db()?;
+    let tx = conn.transaction()?;
+    tx.execute(
+        &format!(
+            "delete from {vec} where id in (select id from {data} where file_id = :file_id)",
+            vec = tables.meta_vec,
+            data = tables.meta_data
+        ),
+        &[(":file_id", &file_id)],
+    )?;
+    let affected = tx.execute(
+        &format!("delete from {data} where file_id = :file_id", data = tables.meta_data),
+        &[(":file_id", &file_id)],
+    )?;
+    tx.commit()?;
+    Ok(affected)
+}
+
 fn build_file_metadata_embedding(row: &Row<'_>) -> Result<FileMetaEmbedding, RepositoryError> {
     let distance: f32 = row.get("distance").unwrap_or(1.0); // Default to 1.0 if distance is not available
     return Ok(FileMetaEmbedding {

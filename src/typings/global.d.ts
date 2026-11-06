@@ -70,6 +70,7 @@ interface IndexerSetting {
   parser_mode: string; // "local" | "selfhosted" | "remote" | "mixed"
   image_parser_mode: string;
   audio_parser_mode: string;
+  embedding_parser_mode: string; // vector category backend: "local" | "selfhosted" | "remote"
   file_content_language: string;
   ignore_dirs: string[];
   ignore_path_prefixes: string[];
@@ -191,6 +192,8 @@ interface SearchStatus {
 
 // Local device search result
 interface LocalDeviceSearchResult {
+  /** One-line degradation notice for semantic searches (backend unavailable / rebuild in progress) */
+  semantic_notice?: string | null;
   results: SearchResult[],
   total: number,
 }

@@ -22,7 +22,8 @@ mod db_init_manager;
 mod db_migrations;
 mod document_loaders;
 mod embedding_service;
-mod embedding_service_manager;
+// Public for the CLI/daemon: it routes embedding through the same dispatcher
+pub mod embedding_service_manager;
 mod errors;
 mod fs_watcher;
 mod image_parser;

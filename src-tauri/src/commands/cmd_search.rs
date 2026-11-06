@@ -23,6 +23,9 @@ pub struct SearchDevice {
 pub struct LocalDeviceSearchResult {
     pub results: Vec<SearchResult>,
     pub total: usize,
+    /// One-line degradation notice for semantic searches (backend unavailable /
+    /// rebuild in progress); keyword searches never set it
+    pub semantic_notice: Option<String>,
 }
 
 /// Search local device only
@@ -32,10 +35,24 @@ pub async fn local_device_search(
     query: &str,
     search_type: &str,
 ) -> Result<LocalDeviceSearchResult, String> {
-    // Same dispatch source as CLI/daemon (searcher::search_by_type)
-    let results = searcher::search_by_type(query, Some(search_type)).await;
-    let total = results.len();
-    Ok(LocalDeviceSearchResult { results, total })
+    // Keyword shares the CLI dispatch source; semantic goes through the
+    // notice-aware path so the results panel can degrade honestly
+    if search_type == "keyword" {
+        let results = searcher::search_by_type(query, Some(search_type)).await;
+        let total = results.len();
+        return Ok(LocalDeviceSearchResult {
+            results,
+            total,
+            semantic_notice: None,
+        });
+    }
+    let outcome = crate::searcher::semantic_search_engine::search_with_notice(query).await;
+    let total = outcome.results.len();
+    Ok(LocalDeviceSearchResult {
+        results: outcome.results,
+        total,
+        semantic_notice: outcome.degraded_notice,
+    })
 }
 
 #[command]

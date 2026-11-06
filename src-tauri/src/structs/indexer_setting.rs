@@ -100,6 +100,7 @@ pub struct IndexerSetting {
     pub parser_mode: String, // "local" | "selfhosted" | "remote" | "mixed" - quick preset
     pub image_parser_mode: FileParserMode,
     pub audio_parser_mode: FileParserMode,
+    pub embedding_parser_mode: FileParserMode, // vector category: own backend, independent of parser presets
     pub ignore_dirs: Vec<String>,
     pub ignore_path_prefixes: Vec<String>, // Full path prefixes to ignore
     pub ignore_exts: Vec<String>,
@@ -113,11 +114,12 @@ impl Serialize for IndexerSetting {
         S: serde::Serializer,
     {
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("IndexerSetting", 9)?;
+        let mut state = serializer.serialize_struct("IndexerSetting", 10)?;
         state.serialize_field("is_private", &self.is_private)?;
         state.serialize_field("parser_mode", &self.parser_mode)?;
         state.serialize_field("image_parser_mode", &self.image_parser_mode)?;
         state.serialize_field("audio_parser_mode", &self.audio_parser_mode)?;
+        state.serialize_field("embedding_parser_mode", &self.embedding_parser_mode)?;
         state.serialize_field("ignore_dirs", &self.ignore_dirs)?;
         state.serialize_field("ignore_path_prefixes", &self.ignore_path_prefixes)?;
         state.serialize_field("ignore_exts", &self.ignore_exts)?;
@@ -168,6 +170,10 @@ impl<'de> Deserialize<'de> for IndexerSetting {
                 .get("audio_parser_mode")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
+            embedding_parser_mode: obj
+                .get("embedding_parser_mode")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default(),
             ignore_dirs: obj
                 .get("ignore_dirs")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -196,6 +202,7 @@ impl Default for IndexerSetting {
             parser_mode: "local".to_string(),
             image_parser_mode: FileParserMode::Local,
             audio_parser_mode: FileParserMode::Local,
+            embedding_parser_mode: FileParserMode::Local,
             ignore_exts: vec![],
             ignore_files: vec![],
             ignore_dirs: vec![],

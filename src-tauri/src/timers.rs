@@ -24,6 +24,9 @@ pub fn start_after_ui_mounted() {
     let _ = tokio::spawn(async {
         watch_path_indexing_job().await;
     });
+    let _ = tokio::spawn(async {
+        indexer_service::run_metadata_catchup().await;
+    });
 }
 
 async fn embedding_service_cleanup() {

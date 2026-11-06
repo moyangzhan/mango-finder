@@ -1,6 +1,7 @@
 pub mod audio_analyzer;
 pub mod chat_capable;
 pub mod document_loader;
+pub mod embedding_capable;
 pub mod image_analyzer;
 pub mod indexing_template;
 pub mod self_hosted_audio_analyzer;

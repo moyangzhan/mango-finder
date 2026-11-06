@@ -28,7 +28,12 @@ pub async fn ui_mounted(app: AppHandle) -> Result<(), String> {
             .unwrap_or_else(|error| {
                 log::error!("init file watch error:{}", error);
             }); // File watcher start
-        if file_content_embedding_repo::count().unwrap_or(0) > 0 {
+        if file_content_embedding_repo::count().unwrap_or(0) > 0
+            && crate::embedding_service_manager::current_mode().await
+                == crate::enums::FileParserMode::Local
+        {
+            // Only the local vector backend has a local ONNX session to warm;
+            // remote/self-hosted backends would just log load failures
             searcher::semantic_search_engine::warmup_embedding_service()
                 .await
                 .unwrap_or_else(|error| {

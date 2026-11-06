@@ -1,15 +1,17 @@
-use crate::embedding_service_manager::get_manager;
+use crate::embedding_service_manager;
 use crate::entities::{FileContentEmbedding, FileInfo, FileMetaEmbedding};
 use crate::enums::HitType;
 use crate::errors::AppError;
 use crate::global::{QUERY_MIN_SCORE, SHORT_QUERY_LEN};
 use crate::repositories::{
-    file_content_embedding_repo, file_info_repo, file_metadata_embedding_repo,
+    embedding_collection_repo, file_content_embedding_repo, file_info_repo,
+    file_metadata_embedding_repo, model_platform_repo,
 };
 use crate::searcher::fts_search_engine;
 use crate::structs::embed_result::EmbedResult;
 use crate::structs::search_result::SearchResult;
 use crate::utils::search_util::STOPWORDS;
+use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -24,25 +26,105 @@ struct SearchTmp {
     match_keywords: HashSet<String>,
 }
 
+/// Semantic search outcome with an optional user-facing degradation notice:
+/// the query is answered honestly instead of an empty result being mistaken
+/// for "no matching files".
+///
+/// 语义检索结果 + 可选的面向用户降级说明:对查询诚实反馈,
+/// 避免空结果被误读为「没有匹配文件」。
+#[derive(Debug, Default)]
+pub struct SemanticSearchOutcome {
+    pub results: Vec<SearchResult>,
+    pub degraded_notice: Option<String>,
+}
+
 pub async fn warmup_embedding_service() -> Result<(), AppError> {
-    let mut manager = get_manager().write().await;
+    let mut manager = embedding_service_manager::get_manager().write().await;
     manager.warmup().await?;
     Ok(())
 }
 
 pub async fn search(query: &str) -> Vec<SearchResult> {
+    search_with_notice(query).await.results
+}
+
+/// Semantic search with degradation notices:
+/// - active identity ≠ indexed identity → a rebuild/switch is in progress,
+///   semantic search is refused so keyword mode stays the single source of truth;
+/// - embedding backend failure → notice names the concrete platform and the
+///   likely cause (self-hosted service down / API key & network).
+pub async fn search_with_notice(query: &str) -> SemanticSearchOutcome {
     log::debug!("Search: {}", query);
-    let start = Instant::now();
-    let embed_result = {
-        let mut manager = get_manager().write().await;
-        manager.embed(query).await.unwrap_or_else(|e| {
-            log::error!("embed query failed, error: {:?}", e);
-            EmbedResult::default()
-        })
+    // Guardrail: while the active collection is still being (re)built, refuse
+    // semantic search instead of mixing vector spaces
+    let active = embedding_collection_repo::active_identity();
+    match embedding_collection_repo::indexed_identity() {
+        Some(indexed) if indexed.same_backend(&active) => {}
+        Some(_) | None => {
+            return SemanticSearchOutcome {
+                results: Vec::new(),
+                degraded_notice: Some(t!("message.semantic-degraded-rebuilding").to_string()),
+            };
+        }
+    }
+    let embed_result = match embedding_service_manager::embed(query).await {
+        Ok(result) => result,
+        Err(error) => {
+            log::error!("embed query failed, error: {:?}", error);
+            return SemanticSearchOutcome {
+                results: Vec::new(),
+                degraded_notice: Some(backend_unavailable_notice(&active, &error)),
+            };
+        }
     };
     if embed_result.dense.is_empty() {
-        return Vec::new();
+        return SemanticSearchOutcome {
+            results: Vec::new(),
+            degraded_notice: Some(backend_unavailable_notice(
+                &active,
+                &AppError::EmbeddingError("empty embedding response".to_string()),
+            )),
+        };
     }
+    let result = search_by_embed_result(query, embed_result).await;
+    SemanticSearchOutcome {
+        results: result,
+        degraded_notice: None,
+    }
+}
+
+/// One-line degradation notice naming the concrete platform (title, not the
+/// internal name) and the concrete error detail when available.
+fn backend_unavailable_notice(
+    identity: &crate::structs::embedding_identity::EmbeddingIdentity,
+    error: &AppError,
+) -> String {
+    let detail = error.to_string();
+    if identity.is_local() {
+        return t!("message.semantic-degraded-local", detail = detail).to_string();
+    }
+    let active_self_hosted = crate::read_lock!(crate::global::ACTIVE_SELF_HOSTED_PLATFORM);
+    if identity.platform == active_self_hosted.name {
+        return t!(
+            "message.semantic-degraded-selfhosted",
+            platform = active_self_hosted.title,
+            detail = detail
+        )
+        .to_string();
+    }
+    let title = model_platform_repo::get_one(&identity.platform)
+        .map(|p| p.title)
+        .unwrap_or_else(|_| identity.platform.clone());
+    t!(
+        "message.semantic-degraded-remote",
+        platform = title,
+        detail = detail
+    )
+    .to_string()
+}
+
+async fn search_by_embed_result(query: &str, embed_result: EmbedResult) -> Vec<SearchResult> {
+    let start = Instant::now();
     let short_query = embed_result.sparse.indices.len() <= SHORT_QUERY_LEN;
     let embedding = Arc::new(embed_result.dense);
     let indices = Arc::new(embed_result.sparse.indices);

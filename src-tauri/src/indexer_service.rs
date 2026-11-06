@@ -914,3 +914,153 @@ pub async fn clear_index() -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Background metadata catch-up: embed metadata for files whose content index
+/// is done but the metadata embedding is still pending (v6 upgrade leftovers,
+/// switch-back restores, earlier failures). Runs only while no indexing /
+/// storage-change job is active; a backend failure pauses the round and the
+/// next cycle retries - transient outages self-heal, nothing blocks.
+///
+/// 后台 metadata 补嵌:为内容索引已完成但元数据嵌入仍待处理的文件补嵌
+/// (v6 升级遗留、切回恢复、早前失败)。仅在无索引/存储变更任务运行时执行;
+/// 后端失败暂停本轮、下轮重试 —— 小概率故障自愈,不阻断任何功能。
+/// Cross-process lease so the GUI and an `mfd serve` daemon sharing the same
+/// database never run the metadata catch-up concurrently (doubled API cost and
+/// racing delete+insert pairs). Owner token = client_id + pid; a 10-minute TTL
+/// makes a crashed holder self-release. The verify-after-write read resolves
+/// the read-check-write race: only the process whose token is present after
+/// both writes proceeds.
+///
+/// 跨进程租约:GUI 与共享同一数据库的 mfd serve daemon 不会并发跑补嵌
+/// (双倍 API 开销 + delete/insert 竞争)。持有者令牌 = client_id + pid,
+/// 10 分钟 TTL 让崩溃持有者自释放;写后回读消除读-判-写竞争,
+/// 只有最终写入令牌的进程继续执行。
+const METADATA_CATCHUP_LEASE: &str = "metadata_catchup_owner";
+const METADATA_CATCHUP_LEASE_TTL_SECS: i64 = 600;
+
+fn try_acquire_catchup_lease() -> bool {
+    let now = chrono::Utc::now().timestamp();
+    let token = format!(
+        "{}-{}",
+        *crate::read_lock!(crate::global::CLIENT_ID),
+        std::process::id()
+    );
+    let current = config_repo::get_val(METADATA_CATCHUP_LEASE);
+    if let Some((holder, expiry_str)) = current.split_once('|') {
+        if let Ok(expiry) = expiry_str.parse::<i64>() {
+            if expiry > now && holder != token {
+                return false; // another live holder
+            }
+        }
+    }
+    let _ = config_repo::upsert(
+        METADATA_CATCHUP_LEASE,
+        &format!("{}|{}", token, now + METADATA_CATCHUP_LEASE_TTL_SECS),
+    );
+    // Verify after write: the loser's token gets overwritten and it stops here
+    config_repo::get_val(METADATA_CATCHUP_LEASE).starts_with(&token)
+}
+
+pub async fn run_metadata_catchup() {
+    loop {
+        if crate::global::EXIT_APP_SIGNAL.load(Ordering::SeqCst) {
+            break;
+        }
+        if SCANNING.load(Ordering::SeqCst)
+            || INDEXING.load(Ordering::SeqCst)
+            || CONTENT_STORAGE_CHANGING.load(Ordering::SeqCst)
+        {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            continue;
+        }
+        if !try_acquire_catchup_lease() {
+            // Another process (GUI or daemon) holds the catch-up lease
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            continue;
+        }
+        let mut min_id = 0i64;
+        let mut processed_any = false;
+        let mut backend_failed = false;
+        'round: loop {
+            let files = match file_info_repo::list_meta_pending(min_id, 64) {
+                Ok(files) => files,
+                Err(e) => {
+                    log::warn!("metadata catch-up list failed: {}", e);
+                    break;
+                }
+            };
+            if files.is_empty() {
+                break;
+            }
+            for file in &files {
+                if crate::global::EXIT_APP_SIGNAL.load(Ordering::SeqCst) {
+                    return;
+                }
+                if SCANNING.load(Ordering::SeqCst)
+                    || INDEXING.load(Ordering::SeqCst)
+                    || CONTENT_STORAGE_CHANGING.load(Ordering::SeqCst)
+                {
+                    break 'round;
+                }
+                min_id = file.id;
+                let meta_text = file.metadata.to_text();
+                let embed_result =
+                    match crate::embedding_service_manager::embed(meta_text.as_str()).await {
+                        Ok(result) => result,
+                        Err(e) => {
+                            // Backend unavailable: pause this round, retry next cycle
+                            log::warn!("metadata catch-up embed failed: {}", e);
+                            backend_failed = true;
+                            break 'round;
+                        }
+                    };
+                processed_any = true;
+                if embed_result.dense.is_empty() {
+                    let _ = file_info_repo::update_meta_index_status(
+                        file.id,
+                        crate::enums::FileIndexStatus::IndexFailed.value(),
+                        "empty embedding response",
+                    );
+                    continue;
+                }
+                // Idempotent: drop a previous partial row for this file first
+                let _ = crate::repositories::file_metadata_embedding_repo::delete_by_file_id(file.id);
+                let inserted = crate::repositories::file_metadata_embedding_repo::insert(
+                    &(crate::entities::FileMetaEmbedding {
+                        id: 0,
+                        file_id: file.id,
+                        embedding: embed_result.dense,
+                        sparse_vec: embed_result.sparse,
+                        distance: -0.1,
+                        sparse_score: 0.0,
+                        score: 0,
+                    }),
+                );
+                match inserted {
+                    Ok(_) => {
+                        let _ = file_info_repo::update_meta_index_status(
+                            file.id,
+                            crate::enums::FileIndexStatus::Indexed.value(),
+                            "success",
+                        );
+                    }
+                    Err(e) => {
+                        log::warn!("metadata catch-up insert failed for {}: {}", file.id, e);
+                        let _ = file_info_repo::update_meta_index_status(
+                            file.id,
+                            crate::enums::FileIndexStatus::IndexFailed.value(),
+                            e.to_string().as_str(),
+                        );
+                    }
+                }
+            }
+        }
+        if backend_failed || !processed_any {
+            // Nothing to do (or transient failure): idle wait before re-checking
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        } else {
+            // Finished a batch; brief pause before looking for more
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    }
+}

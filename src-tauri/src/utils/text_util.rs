@@ -40,3 +40,15 @@ pub fn split_text(text: &str, tokenizer: &Tokenizer) -> Result<Vec<String>, Box<
     let splitter = TextSplitter::new(config);
     Ok(splitter.chunks(text).map(|x| x.to_string()).collect())
 }
+
+/// Character-based chunking fallback for backends without a local tokenizer
+/// (remote / self-hosted embedding, or the lite package with no model files).
+/// The default ChunkConfig sizer is already char-based.
+///
+/// 无本地 tokenizer 的后端(远程/自托管 embedding,或无模型文件的 lite 包)
+/// 使用的按字符分块回退。ChunkConfig 默认 sizer 即按字符。
+pub fn split_text_by_chars(text: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    let config = ChunkConfig::new(DOCUMENT_CHUNK_SIZE).with_overlap(DOCUMENT_CHUNK_OVERLAP)?;
+    let splitter = TextSplitter::new(config);
+    Ok(splitter.chunks(text).map(|x| x.to_string()).collect())
+}

@@ -1,5 +1,5 @@
 use crate::document_loaders::cleanup_extracted_images;
-use crate::embedding_service_manager::get_manager;
+use crate::embedding_service_manager;
 use crate::entities::{FileContentEmbedding, FileInfo, FileMetaEmbedding, IndexingTask};
 use crate::enums::{FileCategory, FileIndexStatus, IndexingEvent};
 use crate::errors::{AppError, IndexingError};
@@ -10,7 +10,6 @@ use crate::repositories::{
     file_metadata_embedding_repo,
 };
 use crate::similarity::image_similarity;
-use crate::structs::embed_result::EmbedResult;
 use crate::structs::file_metadata::FileMetadata;
 use crate::utils::{file_util, frontend_util, indexing_task_util, text_util};
 use rust_i18n::t;
@@ -236,99 +235,73 @@ pub async fn embedding_content(file_id: i64, content: &str) -> Result<(), Indexi
         return Err(IndexingError::EmptyContent);
     }
 
-    // Embedding content
-    let chunks = {
-        let mut manager = get_manager().write().await;
-        let embedding_service = manager.service().await?;
-        text_util::split_text(&content, &embedding_service.tokenizer)
-            .map_err(|op| AppError::DocumentSplitterError(op.to_string()))?
-    };
-    // Guardrail: every vector written must match the active collection's dim,
-    // otherwise vec0 would reject (or worse, silently mismatch) - fail the file
-    // explicitly with a readable reason instead of the old zero-vector fallback.
-    let identity = embedding_collection_repo::active_identity();
-    for (chunk_index, chunk_text) in chunks.into_iter().enumerate() {
-        log::debug!(
-            "Processing chunk {} with {} chars",
-            chunk_index,
-            chunk_text.len()
-        );
-        let mut keep_run = true;
-        let chunk_embed_result = {
-            let mut manager = get_manager().write().await;
-            match manager.embed(&chunk_text).await {
-                Ok(embedding) => embedding,
-                Err(op) => {
-                    drop(manager);
-                    log::warn!("Embedding chunk error: {}", op);
-                    let _ = file_info_repo::update_content_index_status(
-                        file_id,
-                        FileIndexStatus::IndexFailed.value(),
-                        op.to_string().as_str(),
-                    );
-                    keep_run = false;
-                    EmbedResult::default()
-                }
+    // Chunk via the embedding dispatcher (tokenizer for local, char fallback otherwise)
+    let chunks = embedding_service_manager::split_chunks(content)
+        .await
+        .map_err(|op| AppError::DocumentSplitterError(op.to_string()))?;
+    // Dim guardrail lives inside the dispatcher (asserts against the active
+    // identity), replacing the old silent zero-vector fallback
+    const BATCH_SIZE: usize = 16;
+    for (batch_start, batch) in chunks.chunks(BATCH_SIZE).enumerate() {
+        let texts: Vec<String> = batch.to_vec();
+        let embed_results = match embedding_service_manager::embed_batch(&texts).await {
+            Ok(results) => results,
+            Err(op) => {
+                log::warn!("Embedding chunk error: {}", op);
+                let _ = file_info_repo::update_content_index_status(
+                    file_id,
+                    FileIndexStatus::IndexFailed.value(),
+                    op.to_string().as_str(),
+                );
+                return Ok(());
             }
         };
-        if !keep_run {
-            continue;
-        }
-        if chunk_embed_result.dense.is_empty() {
-            let _ = file_info_repo::update_content_index_status(
+        for (batch_offset, (chunk_text, chunk_embed_result)) in
+            batch.iter().zip(embed_results.into_iter()).enumerate()
+        {
+            let chunk_index = batch_start * BATCH_SIZE + batch_offset;
+            log::debug!(
+                "Processing chunk {} with {} chars",
+                chunk_index,
+                chunk_text.len()
+            );
+            if chunk_embed_result.dense.is_empty() {
+                let _ = file_info_repo::update_content_index_status(
+                    file_id,
+                    FileIndexStatus::IndexFailed.value(),
+                    "Failed to convert embedding to array",
+                );
+                return Ok(());
+            }
+            let new_embedding_data = FileContentEmbedding {
+                id: 0,
                 file_id,
-                FileIndexStatus::IndexFailed.value(),
-                "Failed to convert embedding to array",
-            );
-            keep_run = false;
-        }
-        if chunk_embed_result.dense.len() != identity.dim {
-            let msg = format!(
-                "Embedding dim {} does not match active collection dim {} ({} · {})",
-                chunk_embed_result.dense.len(),
-                identity.dim,
-                identity.model,
-                identity.platform
-            );
-            log::warn!("{msg}");
-            let _ = file_info_repo::update_content_index_status(
-                file_id,
-                FileIndexStatus::IndexFailed.value(),
-                msg.as_str(),
-            );
-            keep_run = false;
-        }
-        if !keep_run {
-            continue;
-        }
-        let new_embedding_data = FileContentEmbedding {
-            id: 0,
-            file_id,
-            embedding: chunk_embed_result.dense,
-            chunk_index: chunk_index as i64,
-            chunk_text,
-            sparse_vec: chunk_embed_result.sparse,
+                embedding: chunk_embed_result.dense,
+                chunk_index: chunk_index as i64,
+                chunk_text: chunk_text.clone(),
+                sparse_vec: chunk_embed_result.sparse,
 
-            distance: -0.1,
-            sparse_score: 0.0,
-            score: 0,
-        };
-        let embedding_result = file_content_embedding_repo::insert(&new_embedding_data)?;
-        if let Some(embedding_result) = embedding_result {
-            file_content_fts_repo::insert(
-                file_id,
-                embedding_result.id,
-                new_embedding_data.chunk_text.as_str(),
-            )
-            .await
-            .unwrap_or_default();
+                distance: -0.1,
+                sparse_score: 0.0,
+                score: 0,
+            };
+            let embedding_result = file_content_embedding_repo::insert(&new_embedding_data)?;
+            if let Some(embedding_result) = embedding_result {
+                file_content_fts_repo::insert(
+                    file_id,
+                    embedding_result.id,
+                    new_embedding_data.chunk_text.as_str(),
+                )
+                .await
+                .unwrap_or_default();
+            }
         }
-        let _ = file_info_repo::update_content_index_status(
-            file_id,
-            FileIndexStatus::Indexed.value(),
-            "success",
-        )?;
     }
+    let _ = file_info_repo::update_content_index_status(
+        file_id,
+        FileIndexStatus::Indexed.value(),
+        "success",
+    )?;
     Ok(())
 }
 
@@ -336,15 +309,12 @@ pub async fn embedding_metadata(
     file_id: i64,
     file_meta: &FileMetadata,
 ) -> Result<(), IndexingError> {
-    // File meta embedding
-    let mut guard = get_manager().write().await;
-    let meta_embed_result = match guard.embed(file_meta.to_text().as_str()).await {
-        Ok(embedding) => {
-            drop(guard);
-            embedding
-        }
+    // File meta embedding via the dispatcher (dim guardrail inside)
+    let meta_embed_result = match embedding_service_manager::embed(file_meta.to_text().as_str())
+        .await
+    {
+        Ok(embedding) => embedding,
         Err(op) => {
-            drop(guard);
             log::warn!("Embedding meta error: {}", op);
             file_info_repo::update_meta_index_status(
                 file_id,
@@ -354,22 +324,11 @@ pub async fn embedding_metadata(
             return Ok(());
         }
     };
-    // Guardrail: dim must match the active collection (replaces the old silent
-    // zero-vector fallback that kept the metadata semantic index permanently dead)
-    let identity = embedding_collection_repo::active_identity();
-    if meta_embed_result.dense.len() != identity.dim {
-        let msg = format!(
-            "Metadata embedding dim {} does not match active collection dim {} ({} · {})",
-            meta_embed_result.dense.len(),
-            identity.dim,
-            identity.model,
-            identity.platform
-        );
-        log::warn!("{msg}");
+    if meta_embed_result.dense.is_empty() {
         file_info_repo::update_meta_index_status(
             file_id,
             FileIndexStatus::IndexFailed.value(),
-            msg.as_str(),
+            "Failed to convert embedding to array",
         )?;
         return Ok(());
     }

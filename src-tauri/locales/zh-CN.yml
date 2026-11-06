@@ -58,6 +58,10 @@ message:
   indexing-skip-by-privacy: "隐私设置：跳过音频索引"
   abort-tasks-and-exit: 是否中止后台任务 [%{tasks}] 并退出 Mango Finder？
   file-not-found: 文件未找到
+  semantic-degraded-rebuilding: 语义索引正在重建或切换中，已临时降级为关键词检索
+  semantic-degraded-selfhosted: 模型接口不可用，请排查 %{platform} 服务是否启动、地址端口是否正确（%{detail}）
+  semantic-degraded-remote: 模型接口不可用，请排查 %{platform} 的 API Key 与网络情况（%{detail}）
+  semantic-degraded-local: 本地向量模型不可用（%{detail}），请检查模型文件或到设置中切换向量后端
   internal-error: 服务器内部错误
   migration-processing: 存储位置切换进行中，请稍候...
 cli:

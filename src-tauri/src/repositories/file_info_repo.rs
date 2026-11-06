@@ -290,8 +290,37 @@ pub fn list_unindexed_files(
 pub fn count_unindexed() -> Result<i64, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare("select count(*) from file_info where content_index_status = 1")?;
-    let count = stmt.query_row([], |row| row.get(0))?;
+    let count: i64 = stmt.query_row([], |row| row.get(0))?;
     Ok(count)
+}
+
+/// Files whose content index is done but the metadata embedding is still
+/// pending (upgrade leftovers, switch-back restores, earlier failures).
+/// Picked up by the background metadata catch-up job.
+///
+/// 内容索引已完成但元数据嵌入仍待处理的文件(升级遗留、切回恢复、早前失败),
+/// 由后台 metadata 补嵌任务捞起。
+pub fn list_meta_pending(min_id: i64, limit: i64) -> Result<Vec<FileInfo>, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
+    // Content blob excluded: only the metadata text is needed here, and the
+    // content column can be hundreds of KB per row in "database" storage mode
+    let sql = format!(
+        "select {} from file_info where id > :min_id and meta_index_status = 1 and content_index_status = 3 order by id asc limit :limit",
+        meta_columns()
+    );
+    let mut stmt = conn.prepare(sql.as_str())?;
+    let rows = stmt.query_map(
+        named_params! {
+            ":min_id": min_id,
+            ":limit": limit,
+        },
+        |row| Ok(build_file_info(row)?),
+    )?;
+    let mut result = Vec::new();
+    for item in rows {
+        result.push(item?);
+    }
+    Ok(result)
 }
 
 pub fn count_unindexed_files(category: i64) -> Result<i64, RepositoryError> {
