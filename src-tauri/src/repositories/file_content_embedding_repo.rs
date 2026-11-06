@@ -270,6 +270,31 @@ pub fn list_by_file_id(file_id: i64) -> Result<Vec<FileContentEmbedding>, Reposi
     Ok(results)
 }
 
+/// Delete a file's content rows in the ACTIVE collection only (used by the
+/// fast re-embed channel, which must not touch the source collection).
+pub fn delete_active_rows_by_file(file_id: i64) -> Result<usize, RepositoryError> {
+    if file_id < 1 {
+        return Ok(0);
+    }
+    let tables = active_tables();
+    let mut conn = crate::db_init_manager::open_db()?;
+    let tx = conn.transaction()?;
+    tx.execute(
+        &format!(
+            "delete from {vec} where id in (select id from {data} where file_id = :file_id)",
+            vec = tables.content_vec,
+            data = tables.content_data
+        ),
+        &[(":file_id", &file_id)],
+    )?;
+    let affected = tx.execute(
+        &format!("delete from {data} where file_id = :file_id", data = tables.content_data),
+        &[(":file_id", &file_id)],
+    )?;
+    tx.commit()?;
+    Ok(affected)
+}
+
 /// List raw chunk rows (id, file_id, chunk_index, chunk_text) of the active
 /// collection - used by the fast re-embed rebuild channel.
 ///
@@ -280,8 +305,11 @@ pub struct RawChunkRow {
     pub chunk_text: String,
 }
 
-pub fn list_raw_chunks(min_id: i64, limit: i64) -> Result<Vec<RawChunkRow>, RepositoryError> {
-    let tables = active_tables();
+pub fn list_raw_chunks(
+    tables: &CollectionTables,
+    min_id: i64,
+    limit: i64,
+) -> Result<Vec<RawChunkRow>, RepositoryError> {
     let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(&format!(
         "select id, file_id, chunk_index, chunk_text from {} where id > ?1 order by id asc limit ?2",
@@ -293,6 +321,27 @@ pub fn list_raw_chunks(min_id: i64, limit: i64) -> Result<Vec<RawChunkRow>, Repo
             chunk_index: row.get(2)?,
             chunk_text: row.get(3)?,
         })
+    })?;
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+    Ok(results)
+}
+
+/// All chunk texts of one file in a SPECIFIC collection (source collection of
+/// the fast re-embed channel), ordered by chunk_index.
+pub fn list_chunk_texts_by_file(
+    tables: &CollectionTables,
+    file_id: i64,
+) -> Result<Vec<(i64, String)>, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt = conn.prepare(&format!(
+        "select chunk_index, chunk_text from {} where file_id = ?1 order by chunk_index asc",
+        tables.content_data
+    ))?;
+    let rows = stmt.query_map([file_id], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
     })?;
     let mut results = Vec::new();
     for row in rows {

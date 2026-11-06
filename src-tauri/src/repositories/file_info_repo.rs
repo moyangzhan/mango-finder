@@ -294,6 +294,21 @@ pub fn count_unindexed() -> Result<i64, RepositoryError> {
     Ok(count)
 }
 
+/// Reset one category's files to Waiting (content + meta), returning the
+/// affected row count. Used by the category-level re-index entry.
+///
+/// 单类目文件置 Waiting(内容 + 元数据),返回受影响行数。按类目重索引入口使用。
+pub fn reset_category_status_waiting(category: i64) -> Result<usize, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
+    let affected = conn.execute(
+        "update file_info set content_index_status = 1, content_index_status_msg = '',
+            meta_index_status = 1, meta_index_status_msg = ''
+         where category = :category and (content_index_status != 1 or meta_index_status != 1)",
+        named_params! {":category": category},
+    )?;
+    Ok(affected)
+}
+
 /// Files whose content index is done but the metadata embedding is still
 /// pending (upgrade leftovers, switch-back restores, earlier failures).
 /// Picked up by the background metadata catch-up job.

@@ -326,6 +326,150 @@ pub async fn count_indexed_files(category: &str) -> Result<i64, String> {
         .map_err(|e: crate::repositories::RepositoryError| e.to_string())
 }
 
+// ========== Embedding backend & vector collection commands ==========
+
+/// Per-category availability of the bundled local model backends (settings-page
+/// greying, preset fallback and first-run default all share this one source).
+#[command]
+pub async fn check_local_backends()
+-> Result<crate::utils::resource_util::LocalBackendStatus, String> {
+    Ok(crate::utils::resource_util::check_local_backends())
+}
+
+/// Startup diagnostic: diff the resource snapshot against the previous startup.
+/// Non-empty vanished list = install damage / antivirus quarantine / deletion →
+/// the GUI shows the diagnostic modal.
+#[derive(serde::Serialize)]
+pub struct ResourceDiagnostic {
+    pub vanished: Vec<String>,
+    pub affected_categories: Vec<String>,
+}
+
+#[command]
+pub async fn get_resource_diagnostic() -> Result<ResourceDiagnostic, String> {
+    let vanished = crate::utils::resource_util::startup_resource_check();
+    let affected_categories = crate::utils::resource_util::affected_categories(&vanished);
+    Ok(ResourceDiagnostic {
+        vanished,
+        affected_categories,
+    })
+}
+
+/// Active embedding identity (platform+model+dim+has_sparse) for the settings UI.
+#[command]
+pub async fn get_active_embedding_identity()
+-> Result<crate::structs::embedding_identity::EmbeddingIdentity, String> {
+    Ok(crate::repositories::embedding_collection_repo::active_identity())
+}
+
+/// All registered vector collections with live stats + active flag, for the
+/// management tab.
+#[derive(serde::Serialize)]
+pub struct EmbeddingCollectionRow {
+    #[serde(flatten)]
+    pub info: crate::repositories::embedding_collection_repo::EmbeddingCollectionInfo,
+    pub is_active: bool,
+}
+
+#[command]
+pub async fn load_embedding_collections() -> Result<Vec<EmbeddingCollectionRow>, String> {
+    let active = crate::repositories::embedding_collection_repo::active_identity();
+    let rows = crate::repositories::embedding_collection_repo::list_collections()
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|info| {
+            let is_active = info.platform == active.platform && info.model == active.model;
+            EmbeddingCollectionRow { info, is_active }
+        })
+        .collect())
+}
+
+/// Clear one non-active collection (drop its tables + registry row). The active
+/// collection must be switched away from first - the switch flow itself guards it.
+#[command]
+pub async fn clear_embedding_collection(platform: String, model: String) -> Result<(), String> {
+    if crate::global::INDEXING.load(std::sync::atomic::Ordering::SeqCst)
+        || crate::global::SCANNING.load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err("Indexing is in progress; try again after it finishes".to_string());
+    }
+    let active = crate::repositories::embedding_collection_repo::active_identity();
+    if active.platform == platform && active.model == model {
+        return Err("The active collection cannot be cleared; switch to another backend first".to_string());
+    }
+    // Dim only matters for the derived table names; look it up from the registry
+    let identity = crate::repositories::embedding_collection_repo::list_collections()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|c| c.platform == platform && c.model == model)
+        .map(|c| crate::structs::embedding_identity::EmbeddingIdentity {
+            platform: c.platform,
+            model: c.model,
+            dim: c.dim,
+            has_sparse: c.has_sparse,
+        })
+        .ok_or_else(|| format!("Collection not found: {} · {}", model, platform))?;
+    crate::repositories::embedding_collection_repo::drop_collection(&identity)
+        .map_err(|e| e.to_string())
+}
+
+/// Clear every non-active collection in one go.
+#[command]
+pub async fn clear_inactive_embedding_collections() -> Result<usize, String> {
+    if crate::global::INDEXING.load(std::sync::atomic::Ordering::SeqCst)
+        || crate::global::SCANNING.load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err("Indexing is in progress; try again after it finishes".to_string());
+    }
+    let active = crate::repositories::embedding_collection_repo::active_identity();
+    let collections = crate::repositories::embedding_collection_repo::list_collections()
+        .map_err(|e| e.to_string())?;
+    let mut cleared = 0;
+    for collection in collections {
+        if collection.platform == active.platform && collection.model == active.model {
+            continue;
+        }
+        let identity = crate::structs::embedding_identity::EmbeddingIdentity {
+            platform: collection.platform,
+            model: collection.model,
+            dim: collection.dim,
+            has_sparse: collection.has_sparse,
+        };
+        crate::repositories::embedding_collection_repo::drop_collection(&identity)
+            .map_err(|e| e.to_string())?;
+        cleared += 1;
+    }
+    Ok(cleared)
+}
+
+/// Switch the vector backend. The settings page confirms the rebuild (and its
+/// cost) BEFORE calling this - the command itself is the single switch entry.
+#[command]
+pub async fn switch_embedding_backend(
+    mode: String,
+    platform: String,
+    model: String,
+    rebuild: String,
+    clear_others: bool,
+) -> Result<crate::indexer_service::SwitchOutcome, String> {
+    let mode = match mode.as_str() {
+        "local" => crate::enums::FileParserMode::Local,
+        "selfhosted" => crate::enums::FileParserMode::SelfHosted,
+        "remote" => crate::enums::FileParserMode::Remote,
+        _ => return Err(format!("Unknown backend mode: {}", mode)),
+    };
+    crate::indexer_service::switch_embedding_backend(mode, platform, model, rebuild, clear_others)
+        .await
+}
+
+/// Category-level optional re-index after changing a parser model
+/// (re-transcribe audio / re-caption images with the new model).
+#[command]
+pub async fn reindex_category(category: String) -> Result<bool, String> {
+    crate::indexer_service::start_category_reindex(&category).await
+}
+
 // ========== Config commands ==========
 
 #[command]

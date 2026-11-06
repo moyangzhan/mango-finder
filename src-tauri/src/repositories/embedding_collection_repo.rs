@@ -604,6 +604,26 @@ pub fn reset_all_status_waiting() -> Result<(), RepositoryError> {
     Ok(())
 }
 
+/// File ids that own at least one content chunk in the given collection,
+/// paginated - drives the fast re-embed rebuild channel.
+pub fn list_file_ids_in_collection(
+    tables: &CollectionTables,
+    min_file_id: i64,
+    limit: i64,
+) -> Result<Vec<i64>, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
+    let mut stmt = conn.prepare(&format!(
+        "select distinct file_id from {} where file_id > ?1 order by file_id asc limit ?2",
+        tables.content_data
+    ))?;
+    let rows = stmt.query_map([min_file_id, limit], |row| row.get::<_, i64>(0))?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row?);
+    }
+    Ok(result)
+}
+
 /// Table sets of every registered collection (used by the delete cascades).
 fn registered_table_sets(conn: &Connection) -> Result<Vec<CollectionTables>, RepositoryError> {
     let mut stmt =

@@ -278,3 +278,78 @@ mod tests {
         assert!(assert_dim(std::slice::from_ref(&drifted), &id).is_err());
     }
 }
+
+/// Sentinel text used to probe a candidate backend's dim before creating its
+/// collection (dim is a property of the collection, discovered at runtime -
+/// never hand-entered).
+const PROBE_SENTINEL: &str = "mango finder embedding probe";
+
+/// Probe a candidate backend identity: embeds the sentinel once with the given
+/// platform+model and reads dim (and has_sparse) from the response. Used by the
+/// settings-page switch flow before a collection is created.
+pub async fn probe_identity(
+    mode: &FileParserMode,
+    platform: &str,
+    model: &str,
+) -> Result<EmbeddingIdentity, AppError> {
+    match mode {
+        FileParserMode::Local => {
+            // Known statics for the bundled backend; probing the ONNX session
+            // would load it needlessly
+            Ok(EmbeddingIdentity::local())
+        }
+        FileParserMode::SelfHosted => {
+            // The dispatcher only accepts the ACTIVE self-hosted platform name;
+            // probing a different one would build an identity every later embed
+            // rejects
+            let active_name =
+                crate::read_lock!(crate::global::ACTIVE_SELF_HOSTED_PLATFORM).name.clone();
+            if platform != active_name {
+                return Err(AppError::EmbeddingError(format!(
+                    "platform '{platform}' is not the active self-hosted platform '{active_name}'"
+                )));
+            }
+            let self_hosted = crate::repositories::self_hosted_platform_repo::get_one(platform)
+                .map_err(|e| AppError::ModelPlatformNotFound(format!("{platform}: {e}")))?;
+            let ai_model = ai_model_repo::get_one(platform, model)
+                .map_err(|e| AppError::InternalError(e.to_string()))?
+                .ok_or(AppError::AiModelNotFound(format!("{model} · {platform}")))?;
+            let client = SelfHostedEmbeddingClient::new(self_hosted);
+            let results = client
+                .embed_texts_self_hosted(&ai_model, &[PROBE_SENTINEL.to_string()])
+                .await?;
+            let dim = results
+                .first()
+                .map(|r| r.dense.len())
+                .ok_or(AppError::EmbeddingError("empty probe response".to_string()))?;
+            Ok(EmbeddingIdentity {
+                platform: platform.to_string(),
+                model: model.to_string(),
+                dim,
+                has_sparse: false,
+            })
+        }
+        FileParserMode::Remote => {
+            let platform_row = model_platform_repo::get_one(platform)
+                .map_err(|e| AppError::ModelPlatformNotFound(format!("{platform}: {e}")))?;
+            let ai_model = ai_model_repo::get_one(platform, model)
+                .map_err(|e| AppError::InternalError(e.to_string()))?
+                .ok_or(AppError::AiModelNotFound(format!("{model} · {platform}")))?;
+            let proxy = PROXY.read().await.clone();
+            let client = RemoteEmbeddingClient::new(platform_row, proxy);
+            let results = client
+                .embed_texts(&ai_model, &[PROBE_SENTINEL.to_string()])
+                .await?;
+            let dim = results
+                .first()
+                .map(|r| r.dense.len())
+                .ok_or(AppError::EmbeddingError("empty probe response".to_string()))?;
+            Ok(EmbeddingIdentity {
+                platform: platform.to_string(),
+                model: model.to_string(),
+                dim,
+                has_sparse: false,
+            })
+        }
+    }
+}
