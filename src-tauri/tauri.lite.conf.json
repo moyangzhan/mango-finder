@@ -1,0 +1,20 @@
+{
+  "productName": "Mango Finder Lite",
+  "identifier": "myz.mango-finder-lite",
+  "build": {
+    "beforeBuildCommand": "pnpm build && cd src-tauri && cargo build --release --bin mfd --features lite"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Mango Finder Lite",
+        "width": 1000,
+        "height": 760,
+        "resizable": true,
+        "fullscreen": false,
+        "minWidth": 800,
+        "minHeight": 600
+      }
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 use crate::fs_watcher::watcher;
-use crate::global::{ACTIVE_LOCALE, APP_DATA_PATH, CLIENT_ID, UI_MOUNTED};
+use crate::global::{ACTIVE_LOCALE, APP_DATA_PATH, CLIENT_ID, DATA_DIR_NAME, UI_MOUNTED};
 use crate::repositories::file_content_embedding_repo;
 use crate::searcher;
 use crate::utils::{app_util, task_util};
@@ -194,7 +194,7 @@ pub async fn revert_data_path(old_path: String, app: AppHandle) -> Result<(), St
             log::error!("Failed to get user data directory: {}", error);
             PathBuf::from("./")
         })
-        .join(env!("CARGO_PKG_NAME"));
+        .join(DATA_DIR_NAME);
     let config_path = sys_data_path.join(".config");
     if let Err(e) = std::fs::write(&config_path, &old_path) {
         log::error!("Failed to revert data path: {}", e);

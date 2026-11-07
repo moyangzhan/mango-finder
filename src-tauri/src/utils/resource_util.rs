@@ -108,17 +108,37 @@ pub fn diff_vanished(old: &BTreeMap<String, bool>, new: &BTreeMap<String, bool>)
         .collect()
 }
 
+/// Snapshot config key scoped to the installed edition. Each edition has its
+/// own data directory by default, but a `.config` override can still point
+/// both editions at ONE directory — the baseline stays edition-scoped so one
+/// edition's file state never reads as the other's anomaly.
+///
+/// 按已安装版本划分的快照 config key。默认各版本数据目录独立,但 .config 覆盖
+/// 可让两个版本指向同一目录——基线仍按版本划分,一个版本的文件状况不会误报到
+/// 另一个版本头上。
+fn snapshot_key(edition: &str) -> String {
+    let slug: String = edition
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    format!("{}::{slug}", CONFIG_NAME_RESOURCE_SNAPSHOT)
+}
+
 /// Startup resource check: diff the current snapshot against the one stored at
 /// the previous startup, then persist the new snapshot. Returns the vanished
 /// file list for the diagnostic modal (empty = healthy or first run).
+/// `edition` (the app identifier) scopes the baseline to the installed edition.
 ///
 /// 启动资源检测:当前快照与上次启动存储的快照 diff,然后持久化新快照。
 /// 返回消失文件清单供诊断模态使用(空 = 健康或首次运行)。
-pub fn startup_resource_check() -> Vec<String> {
+/// `edition`(应用 identifier)将基线限定在本安装版本内。
+pub fn startup_resource_check(edition: &str) -> Vec<String> {
+    let key = snapshot_key(edition);
     let current = resource_snapshot();
-    let stored = crate::repositories::config_repo::get_val(CONFIG_NAME_RESOURCE_SNAPSHOT);
+    let stored = crate::repositories::config_repo::get_val(&key);
     let vanished = if stored.is_empty() {
-        Vec::new() // first run (or lite install): no baseline, nothing to report
+        Vec::new() // first run of this edition: no baseline, nothing to report
     } else {
         match serde_json::from_str::<BTreeMap<String, bool>>(&stored) {
             Ok(old) => diff_vanished(&old, &current),
@@ -126,7 +146,7 @@ pub fn startup_resource_check() -> Vec<String> {
         }
     };
     if let Ok(json) = serde_json::to_string(&current) {
-        let _ = crate::repositories::config_repo::upsert(CONFIG_NAME_RESOURCE_SNAPSHOT, &json);
+        let _ = crate::repositories::config_repo::upsert(&key, &json);
     }
     vanished
 }

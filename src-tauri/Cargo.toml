@@ -7,6 +7,12 @@ default-run = "mango-finder"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+# Lite edition: no bundled models, own identity / data dir / service port.
+# Enabled via `tauri build --features lite --config tauri.lite.conf.json` (pnpm build:lite).
+# Lite 版本:不内置模型,独立标识/数据目录/服务端口。经 `--features lite` + lite 配置覆盖启用。
+lite = []
+
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.

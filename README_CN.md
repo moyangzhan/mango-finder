@@ -99,6 +99,21 @@ Mango Finder（原名 MangoDesk）是一款用自然语言搜索本地文件的�
   - Rust
   - Tauri Core
 
+## 📦 发行版本
+
+提供两个可共存安装的版本，功能完全相同，差别只在是否内置本地模型。
+
+| 版本 | 内容 | 体积 | 本地模型 | 自托管模型 | 远程模型 | 适用 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Full（完整版）** | 可执行文件 + 全部本地模型 | ~1GB | ✅ | ✅ | ✅ | 单机可离线使用，多机互联时文件不出局域网 |
+| **Lite（轻量版）** | 仅可执行文件 | 预计 50-70MB（MSI LZX 压缩后） | ❌ | ✅ | ✅ | 团队场景（Ollama 集中部署 + 模型自托管调用） |
+
+两个版本是相互独立的安装项，安装与卸载互不影响；数据目录也各自一份，加装 Lite 后为全新状态。
+
+**跨设备搜索与版本无关**：A 电脑的 Full 可与 B 电脑的 Lite 互相发现、配对、互搜——集群按设备互联，每台设备装哪个版本均可。
+
+**Lite 的运行行为：**「向量/视觉/音频」类目的本地模型选项因缺少模型文件而置灰，可选择自托管/远程后端。
+
 ## 🚀 开发
 
 环境搭建与构建：[docs/cn/build.md](./docs/cn/build.md)
@@ -106,7 +121,8 @@ Mango Finder（原名 MangoDesk）是一款用自然语言搜索本地文件的�
 ```sh
 pnpm i               # 安装前端依赖
 pnpm tauri dev       # 开发模式运行 GUI
-pnpm tauri build     # 构建安装包（GUI + CLI） -> src-tauri/target/release/bundle/
+pnpm build:full      # 构建 Full 安装包（GUI + CLI） -> src-tauri/target/release/bundle/
+pnpm build:lite      # 构建 Lite 安装包
 ```
 
 CLI 与 GUI 同 crate，开发模式直接运行任意子命令：

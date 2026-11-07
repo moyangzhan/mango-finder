@@ -87,6 +87,27 @@ pub const CONFIG_NAME_INDEXED_EMBEDDING: &'static str = "indexed_embedding";
 /// Resource existence snapshot of the last startup (missing-backend diagnostics)
 pub const CONFIG_NAME_RESOURCE_SNAPSHOT: &'static str = "local_resource_snapshot";
 
+/// Edition switch, compile-time: the Lite build passes `--features lite`.
+/// 版本开关，编译期：Lite 构建传入 `--features lite`。
+pub const IS_LITE: bool = cfg!(feature = "lite");
+
+/// Data directory name under the OS data dir. Full keeps the crate name (existing
+/// users' path unchanged, zero migration); Lite uses its own so the coinstalled
+/// editions hold fully separate data.
+/// OS 数据目录下的应用数据目录名。Full 沿用 crate 名（存量用户路径不变，零迁移）；
+/// Lite 使用专属目录名，共存的两个版本数据完全隔离。
+pub const DATA_DIR_NAME: &str = if IS_LITE {
+    "mango-finder-lite"
+} else {
+    "mango-finder"
+};
+
+/// Loopback/cluster service ports. The differing defaults let a Full and a Lite
+/// run their servers at the same time; which one applies is picked at compile time.
+/// 回环/集群服务端口。默认值分版以便两版本同时运行；生效值编译期选定。
+pub const DEFAULT_PORT_FULL: i32 = 15678;
+pub const DEFAULT_PORT_LITE: i32 = 15679;
+
 pub static APP_DATA_PATH: RwLock<String> = RwLock::new(String::new());
 pub static ONNX_EXEC_PROVIDERS_INITIALIZED: OnceLock<bool> = OnceLock::new();
 pub static HOME_PATH: OnceLock<String> = OnceLock::new();

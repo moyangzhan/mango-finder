@@ -8,6 +8,10 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "dev:full": "tauri dev",
+    "dev:lite": "tauri dev --features lite --config src-tauri/tauri.lite.conf.json",
+    "build:full": "tauri build --config src-tauri/tauri.full.conf.json",
+    "build:lite": "tauri build --features lite --config src-tauri/tauri.lite.conf.json",
     "test": "vitest",
     "lint": "eslint ./src",
     "lint:fix": "eslint ./src --fix"

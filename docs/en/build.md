@@ -37,158 +37,17 @@ Install tools: <https://www.rust-lang.org/tools/install>
 Install Tauri Prerequisites:
 <https://tauri.app/start/prerequisites/>
 
-## 4. Download Model Files
+## 4. Whisper.cpp Dependencies
 
-Download the required files from [Hugging Face: moyangzhan/mango-finder](https://huggingface.co/moyangzhan/mango-finder/tree/main) and place them in the `src-tauri/assets/model` directory.
+The `whisper-rs` crate is a cargo build dependency of the audio transcription feature — unrelated to the model files; dev mode and both Full / Lite builds need it. Requirements per OS; full steps in **[whisper.md](./whisper.md)**:
 
-**Required Files** (authoritative list: `bundle.resources` in `tauri.conf.json`):
+| OS | Key requirements |
+| --- | --- |
+| Windows | CMake 4.3 + LLVM/Clang **18** (19/20/22 have compatibility issues); env vars `CXXFLAGS`/`CFLAGS` = `/utf-8` |
+| macOS | Xcode CLT + CMake; Apple Silicon additionally needs `CFLAGS` and `MACOSX_DEPLOYMENT_TARGET`, minimum 10.15 |
+| Linux | Distro C/C++ build tools + CMake |
 
-- embedding.onnx
-- embedding\_tokenizer.json
-- vision.onnx
-- vision\_tokenizer.json
-- whisper-small-q8\_0.bin
-- ch_PP-OCRv4_det_infer.onnx
-- ch_ppocr_mobile_v2.0_cls_infer.onnx
-- ch_PP-OCRv4_rec_infer.onnx
-- ppocr_keys_v1.txt
-
-The last four are the OCR models used by the local image text-recognition parser.
-
-> Building the **Lite variant** without these files is fully supported: the app greys out the affected local backends when files are missing and guides you to remote/self-hosted backends — see [Section 7](#7-release-build).
-
-## 5. Whisper.cpp Dependencies
-
-The audio transcription feature uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Different operating systems require different dependencies.
-
-### Windows
-
-Compiling on Windows requires **CMake** and **LLVM/Clang 18** (Note: LLVM 19/20/22 have compatibility issues, please use LLVM 18).
-
-1. **Install CMake 4.3**
-
-   Download from [cmake-4.3.0](https://github.com/Kitware/CMake/releases/tag/v4.3.0-rc2)
-2. **Download and Install LLVM 18**
-
-   - Visit [LLVM 18.1.8 Release](https://github.com/llvm/llvm-project/releases/tag/llvmorg-18.1.8)
-   - Download `LLVM-18.1.8-win64.exe`
-   - Check **"Add LLVM to the system PATH for all users"** during installation
-3. **Verify installation**
-
-   ```sh
-   cmake --version
-   clang --version
-   ```
-
-   The clang version should show `18.1.8`
-4. **Set environment variables (permanent)**
-
-   - Press `Win + R`, type `sysdm.cpl`, press Enter
-   - Click **"Advanced"** tab → **"Environment Variables"**
-   - Under **"User variables"**, click **"New"** and add:
-
-   | Variable name | Value    |
-   | ------------- | -------- |
-   | `CXXFLAGS`    | `/utf-8` |
-   | `CFLAGS`      | `/utf-8` |
-
-   - Click OK and **restart your terminal** for changes to take effect
-5. **Build the project (first time only)**
-
-   Open **"x64 Native Tools Command Prompt for VS 2022"** (search from Start Menu), then build:
-
-   ```cmd
-   cd your-project-path\src-tauri
-   cargo build
-   ```
-
-   > ⚠️ **Important Notes**:
-   >
-   > - The `/utf-8` flag is required to resolve encoding issues
-   > - If previous build failed, run `cargo clean -p whisper-rs-sys` to clear cache first
-   > - After whisper is compiled successfully, subsequent builds can use `pnpm tauri dev` directly in any terminal
-   > - VSCode's rust-analyzer plugin auto-checks code on startup. Without MSVC environment, whisper-rs-sys build will fail and show as red in `target/debug/build` directory. If you've successfully built in "x64 Native Tools Command Prompt for VS 2022", you can ignore this error
-
-### macOS
-
-1. **Install Xcode Command Line Tools** (if not already installed):
-
-   ```sh
-   xcode-select --install
-   ```
-2. **Install CMake**:
-
-   ```sh
-   brew install cmake
-   ```
-3. **Set environment variables** (required for Apple Silicon):
-
-   For Apple Silicon Macs (M1/M2/M3), you need to set the following environment variables:
-
-   | Variable                   | Value                         | Purpose                                        |
-   | -------------------------- | ----------------------------- | ---------------------------------------------- |
-   | `CFLAGS`                   | `-U__ARM_FEATURE_MATMUL_INT8` | Avoid whisper.cpp compilation issues on ARM    |
-   | `MACOSX_DEPLOYMENT_TARGET` | `10.15`                       | Set minimum supported macOS version (Catalina) |
-
-   **Temporary (current terminal session):**
-
-   ```sh
-   export CFLAGS="-U__ARM_FEATURE_MATMUL_INT8"
-   export MACOSX_DEPLOYMENT_TARGET="10.15"
-   ```
-
-   **Permanent (add to your shell config):**
-
-   ```sh
-   # For zsh (default on macOS)
-   echo 'export CFLAGS="-U__ARM_FEATURE_MATMUL_INT8"' >> ~/.zshrc
-   echo 'export MACOSX_DEPLOYMENT_TARGET="10.15"' >> ~/.zshrc
-   source ~/.zshrc
-
-   # For bash
-   echo 'export CFLAGS="-U__ARM_FEATURE_MATMUL_INT8"' >> ~/.bash_profile
-   echo 'export MACOSX_DEPLOYMENT_TARGET="10.15"' >> ~/.bash_profile
-   source ~/.bash_profile
-   ```
-4. **Add Rust target**:
-
-   ```sh
-   rustup target add aarch64-apple-darwin
-   ```
-5. **Build**:
-
-   ```sh
-   pnpm tauri build
-   # Or explicitly specify target
-   pnpm tauri build --target aarch64-apple-darwin
-   ```
-
-> **Note**: The minimum supported macOS version is 10.15 (Catalina).
-
-### Linux
-
-Most Linux distributions require C/C++ build tools:
-
-**Ubuntu/Debian:**
-
-```sh
-sudo apt update
-sudo apt install build-essential cmake
-```
-
-**Fedora/RHEL:**
-
-```sh
-sudo dnf install gcc-c++ make cmake
-```
-
-**Arch Linux:**
-
-```sh
-sudo pacman -S base-devel cmake
-```
-
-## 6. Running (Development)
+## 5. Running (Development)
 
 ### GUI
 
@@ -200,8 +59,11 @@ A Tauri app has at least [two processes](https://tauri.app/concept/process-model
 Both backend and frontend start with a single command:
 
 ```sh
-pnpm tauri dev
+pnpm tauri dev   # default Full identity (i.e. pnpm dev:full)
+pnpm dev:lite    # Lite identity: own data dir mango-finder-lite, port 15679, Lite window title
 ```
+
+In dev mode, local models resolve straight from `src-tauri/assets/model` (just drop them in; no copy to target needed) — capability still follows file detection: to test the "local options greyed" shape under `dev:lite`, temporarily move that directory away. Do not run both identities' dev at once (they share the vite port 5173).
 
 ### CLI
 
@@ -218,14 +80,40 @@ cargo run --bin mfd -- serve
 
 `RUST_LOG` sets the log level (default `info`); the other CLI environment variables are listed in [cli.md](./cli.md).
 
-## 7. Release Build
+## 6. Release Build
+
+Both editions share one build pipeline; every difference is expressed on the build command via the `lite` cargo feature and the config overlays (`tauri.full.conf.json` / `tauri.lite.conf.json`) — no file rewriting scripts. Note: a bare `pnpm tauri build` yields a Full-identity installer WITHOUT models; use `pnpm build:full` / `pnpm build:lite`.
+
+### Full / Lite variants
+
+Two coinstallable editions (one codebase, two build configurations): independent installs that never affect each other, each with its own data directory (`mango-finder` / `mango-finder-lite`); on Linux the two debs conflict over `/usr/bin/mfd` and cannot coinstall (coexistence is a Windows/macOS capability). For the edition comparison and Lite runtime behavior, see the "Editions" section of the [README](../../README.md).
+
+### Building Full
+
+First download the model files: fetch the required files from [Hugging Face: moyangzhan/mango-finder](https://huggingface.co/moyangzhan/mango-finder/tree/main) and place them in the `src-tauri/assets/model` directory.
+
+**Required Files** (authoritative list: `bundle.resources` in `src-tauri/tauri.full.conf.json`):
+
+- embedding.onnx
+- embedding\_tokenizer.json
+- vision.onnx
+- vision\_tokenizer.json
+- whisper-small-q8\_0.bin
+- ch_PP-OCRv4_det_infer.onnx
+- ch_ppocr_mobile_v2.0_cls_infer.onnx
+- ch_PP-OCRv4_rec_infer.onnx
+- ppocr_keys_v1.txt
+
+The last four are the OCR models used by the local image text-recognition parser.
+
+> The model list lives in the Full overlay rather than the main config because `--config` deep-merge can only add/override — it cannot delete keys declared in the main config. "Not declared in the base, added by the Full build" is what lets the Lite build rewrite nothing.
 
 ```sh
-pnpm tauri build
+pnpm build:full   # i.e. pnpm tauri build --config src-tauri/tauri.full.conf.json
 ```
 
 ```text
-pnpm tauri build                    ← auto-merges tauri.<platform>.conf.json to pick installer formats
+pnpm build:full                     ← auto-merges tauri.<platform>.conf.json and tauri.full.conf.json (model manifest)
 ├─ beforeBuildCommand: pnpm build (frontend) + cargo build --release --bin mfd (builds the CLI first)
 ├─ cargo build (the GUI app itself)
 └─ bundle: packages the installer; mfd rides in automatically as a cargo bin, models copied via resources
@@ -238,32 +126,31 @@ Installers land in `src-tauri/target/release/bundle/` in platform-specific forma
 
 For CLI usage, see [cli.md](./cli.md).
 
-### Full / Lite variants
+### Building Lite
 
-"Zero local models" is a supported runtime form, not a separate edition: one codebase, one runtime, two distribution variants.
-
-| Variant | Contents | Size | For |
-| --- | --- | --- | --- |
-| **Full** | Executables + all local models | ~1GB | Offline personal use, works out of the box |
-| **Lite** | Executables only | est. 50-70MB (after MSI LZX compression) | Teams (central Ollama + self-hosted calls), remote/keyword-only users |
-
-Both variants share the same identifier/UpgradeCode and upgrade each other in place: installing Full→Lite (or back) just works — MajorUpgrade removes extra files; the database lives in the data directory and is untouched.
-
-**Lite runtime behavior:**
-
-- Keyword search (FTS) works without any model, always available
-- In settings, the vector/vision/audio categories each pick local/self-hosted/remote independently; local options are gated on **model file detection** (any missing file greys the option with the missing list). Detection refreshes at startup and on every settings-page open — dropping the model files back into the `model` folder of the data directory lights the options up, no restart needed
-- The vector (embedding) backend supports local ONNX and platform APIs (OpenAI-compatible `/v1/embeddings`; Ollama/vLLM speak the same protocol). Switching the vector backend switches the vector library: libraries coexist per "model · backend", are retained by default, and switching back to an existing one is instant (see the "Vector Libraries" tab in settings)
-- Remote vision/audio are covered by multimodal models / ASR endpoints; OCR has no dedicated remote channel (covered incidentally by multimodal models, not equivalent in accuracy)
-
-**CI dual artifacts**: `build.yml` builds twice per platform — Full first, then Lite with `bundle.resources` stripped — and names the artifacts with `_Full` / `_Lite` suffixes (e.g. `Mango.Finder_0.12.0_x64_en-US_Full.msi` / `..._Lite.msi`).
-
-**Building Lite locally**:
+The Lite build needs no model files; compile-time dependencies are identical to Full (whisper-rs is a cargo build dependency — separate from the model files — so the Section 4 toolchain is equally required):
 
 ```sh
-python scripts/strip_bundle_resources.py   # remove bundle.resources from tauri.conf.json in place
-pnpm tauri build
-git checkout -- src-tauri/tauri.conf.json  # restore the config afterwards
+pnpm build:lite   # i.e. pnpm tauri build --features lite --config src-tauri/tauri.lite.conf.json
 ```
 
+Two sources of difference:
+
+- **the `lite` cargo feature** (applies to the GUI and `mfd` alike at compile time): the `IS_LITE` global switch, data directory name `mango-finder-lite`, default service port `15679` (including the fresh-DB `cluster_setting` seed; see `global.rs`)
+- **the `src-tauri/tauri.lite.conf.json` overlay**: Lite-specific productName / identifier / window title
+
+`mfd` ships in the package too; the installer name carries Lite, e.g. on windows:
+`src-tauri/target/release/bundle/msi/Mango.Finder.Lite_0.12.0_x64_en-US.msi`
+
 > The in-place edit exists because Tauri's `--config` deep-merges and cannot delete declared keys (an empty object merges as a no-op).
+
+### Building both (CI)
+
+`build.yml` builds twice per platform in the same job (cargo cache reused):
+
+| Edition | Build command | Example artifact (windows) |
+| --- | --- | --- |
+| Full | `pnpm tauri build --config src-tauri/tauri.full.conf.json` | `Mango.Finder_0.12.0_x64_en-US_Full.msi` |
+| Lite | `pnpm tauri build --features lite --config src-tauri/tauri.lite.conf.json` | `Mango.Finder.Lite_0.12.0_x64_en-US_Lite.msi` |
+
+Full's model files are downloaded from Hugging Face before the builds (Full only).

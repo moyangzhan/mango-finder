@@ -129,15 +129,18 @@ pub fn exec_ddl_with_conn(conn: &Connection) -> Result<()> {
 pub fn init_data_with_conn(conn: &Connection) -> Result<()> {
     info!("dbv3.init_data_with_conn");
 
-    // Cluster configuration defaults (stored as JSON)
-    conn.execute_batch(
+    // Cluster configuration defaults (stored as JSON); the port is the edition's
+    // compile-time default, so a fresh Lite DB seeds its own port (15679)
+    // 集群配置默认值(JSON 存储);端口取编译期版本默认值,全新 Lite 库播种专属端口(15679)
+    conn.execute_batch(&format!(
         r#"
         INSERT OR IGNORE INTO config (name, value) VALUES (
             'cluster_setting',
-            '{"enabled":false,"port":15678,"device_name":"","allow_to_be_discovered":true,"auto_request_pairing":false,"auto_accept_pairing":false,"online_check_interval":30}'
+            '{{"enabled":false,"port":{},"device_name":"","allow_to_be_discovered":true,"auto_request_pairing":false,"auto_accept_pairing":false,"online_check_interval":30}}'
         );
         "#,
-    )?;
+        crate::server::http_server::DEFAULT_PORT
+    ))?;
 
     Ok(())
 }

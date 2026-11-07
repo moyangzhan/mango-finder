@@ -19,9 +19,15 @@ use tokio::sync::watch;
 /// HTTP server shutdown signal sender
 static SHUTDOWN_SENDER: RwLock<Option<watch::Sender<bool>>> = RwLock::new(None);
 
-/// Default port, the fallback `utils::port_util::clamp_port` uses for out-of-range values
-/// 默认端口;`utils::port_util::clamp_port` 对超范围值使用的回退
-pub const DEFAULT_PORT: i32 = 15678;
+/// Default port, the fallback `utils::port_util::clamp_port` uses for out-of-range values;
+/// edition-picked at compile time (Lite defaults to its own port so both editions can run at once)
+/// 默认端口;`utils::port_util::clamp_port` 对超范围值使用的回退;
+/// 编译期按版本选定(Lite 使用专属默认端口,两版本可同时运行)
+pub const DEFAULT_PORT: i32 = if crate::global::IS_LITE {
+    crate::global::DEFAULT_PORT_LITE
+} else {
+    crate::global::DEFAULT_PORT_FULL
+};
 
 /// Whether this process is the CLI daemon carrying the server (decides whether /cli/shutdown actually exits)
 /// 当前进程是否为承载 server 的 CLI daemon(决定 /cli/shutdown 是否真正退出)

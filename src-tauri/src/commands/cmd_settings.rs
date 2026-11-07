@@ -338,7 +338,9 @@ pub async fn check_local_backends()
 
 /// Startup diagnostic: diff the resource snapshot against the previous startup.
 /// Non-empty vanished list = install damage / antivirus quarantine / deletion →
-/// the GUI shows the diagnostic modal.
+/// the GUI shows the diagnostic modal. The baseline is scoped to the installed
+/// edition via the app identifier (editions have separate data directories;
+/// scoping also covers a `.config` override converging them on one).
 #[derive(serde::Serialize)]
 pub struct ResourceDiagnostic {
     pub vanished: Vec<String>,
@@ -346,8 +348,9 @@ pub struct ResourceDiagnostic {
 }
 
 #[command]
-pub async fn get_resource_diagnostic() -> Result<ResourceDiagnostic, String> {
-    let vanished = crate::utils::resource_util::startup_resource_check();
+pub async fn get_resource_diagnostic(app: AppHandle) -> Result<ResourceDiagnostic, String> {
+    let vanished =
+        crate::utils::resource_util::startup_resource_check(&app.config().identifier);
     let affected_categories = crate::utils::resource_util::affected_categories(&vanished);
     Ok(ResourceDiagnostic {
         vanished,

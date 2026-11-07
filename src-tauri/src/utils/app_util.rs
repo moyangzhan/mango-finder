@@ -1,7 +1,8 @@
 use crate::enums::{FileContentLanguage, TrayMenuItem};
 use crate::global::{
     APP_DATA_PATH, AUDIO_DECODER_NAME, AUDIO_DECODER_PATH, AUDIO_ENCODER_NAME, AUDIO_ENCODER_PATH,
-    AUDIO_TOKENIZER_NAME, AUDIO_TOKENIZER_PATH, CONTENT_STORAGE_CHANGING, DB_PATH, DOWNLOADING,
+    AUDIO_TOKENIZER_NAME, AUDIO_TOKENIZER_PATH, CONTENT_STORAGE_CHANGING, DATA_DIR_NAME,
+    DB_PATH, DOWNLOADING,
     EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_PATH, EMBEDDING_TOKENIZER_NAME, EMBEDDING_TOKENIZER_PATH,
     EXIT_APP_SIGNAL, EXTRACTED_IMAGES_PATH, HOME_PATH, INDEXING, OCR_CLS_MODEL_NAME,
     OCR_CLS_MODEL_PATH, OCR_DET_MODEL_NAME, OCR_DET_MODEL_PATH, OCR_DICT_NAME, OCR_DICT_PATH,
@@ -178,7 +179,7 @@ pub async fn set_data_path(
             error!("Failed to get user data directory:{}", error);
             PathBuf::from("./")
         })
-        .join(env!("CARGO_PKG_NAME"));
+        .join(DATA_DIR_NAME);
     info!("system data path: {}", sys_data_path.display());
     let old_data_path = crate::read_lock!(APP_DATA_PATH).clone();
     let config_path = sys_data_path.join(".config");
@@ -232,7 +233,7 @@ pub async fn reset_data_path(force: bool, app: &AppHandle) -> Result<String, Str
             error!("Failed to get user data directory:{}", error);
             PathBuf::from("./")
         })
-        .join(env!("CARGO_PKG_NAME"));
+        .join(DATA_DIR_NAME);
     set_data_path(sys_data_path.to_str().unwrap_or(""), force, app).await
 }
 
@@ -245,15 +246,29 @@ pub async fn init_paths(app: &AppHandle) {
             error!("Failed to get user data directory:{}", error);
             PathBuf::from("./")
         })
-        .join(env!("CARGO_PKG_NAME"));
+        .join(DATA_DIR_NAME);
     info!("system data path: {}", data_base.display());
     init_paths_core(data_base);
     let resource_dir = app.path().resource_dir().unwrap_or_else(|e| {
         error!("Failed to get resource directory: {}", e);
-        PathBuf::from(app_home_dir()).join("assets")
+        PathBuf::from(app_home_dir())
     });
-    info!("Resource directory: {}", resource_dir.display());
-    init_model_assets(&resource_dir);
+    // In dev, resource_dir() is target/debug and tauri-build no longer copies models
+    // there (the manifest lives only in the Full overlay) — resolve from the source
+    // tree instead (the dev working directory is src-tauri). Release keeps the
+    // bundled layout untouched.
+    let resource_base = if cfg!(debug_assertions) {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        if cwd.join("assets").join("model").exists() {
+            cwd
+        } else {
+            resource_dir
+        }
+    } else {
+        resource_dir
+    };
+    info!("Resource directory: {}", resource_base.display());
+    init_model_assets(&resource_base);
 }
 
 /// App home directory: cwd in debug builds, the executable directory in releases.
@@ -640,7 +655,7 @@ pub fn get_default_file_content_language() -> FileContentLanguage {
 fn standalone_data_base() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(env!("CARGO_PKG_NAME"))
+        .join(DATA_DIR_NAME)
 }
 
 pub fn init_paths_standalone() -> Result<(), String> {
@@ -660,7 +675,13 @@ pub fn init_paths_standalone() -> Result<(), String> {
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."));
     let cwd = std::env::current_dir().unwrap_or_default();
-    let resource_base = if exe_dir.join("assets").join("model").exists() {
+    // Dev: tauri-build no longer copies models into target (the manifest lives only
+    // in the Full overlay), so the source tree wins over possibly-stale target copies.
+    // 开发态:tauri-build 不再将模型拷入 target(清单只在 Full 覆盖里),源码树优先于
+    // 可能过期的 target 残留副本。
+    let resource_base = if cfg!(debug_assertions) && cwd.join("assets").join("model").exists() {
+        cwd
+    } else if exe_dir.join("assets").join("model").exists() {
         exe_dir
     } else if cwd.join("assets").join("model").exists() {
         cwd

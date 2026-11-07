@@ -99,6 +99,21 @@ Supports three processing modes: **Local** (fully offline), **Self-Hosted** (Oll
   - Rust
   - Tauri Core
 
+## 📦 Editions
+
+Two coinstallable editions with identical features — the only difference is whether the local models are bundled.
+
+| Edition | Contents | Size | Local models | Self-hosted models | Remote models | For |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Full** | Executables + all local models | ~1GB | ✅ | ✅ | ✅ | Usable fully offline standalone; with multi-device interconnection, files never leave the LAN |
+| **Lite** | Executables only | est. 50-70MB (after MSI LZX compression) | ❌ | ✅ | ✅ | Teams (central Ollama deployment + self-hosted model calls) |
+
+The two are independent installs — installing or uninstalling one never affects the other; each also keeps its own data directory, so a freshly added Lite starts clean.
+
+**Cross-device search is edition-agnostic**: a Full on machine A discovers, pairs with and searches a Lite on machine B — the cluster interconnects devices, and each device may run either edition.
+
+**Lite runtime behavior:** the local model options for the vector/vision/audio categories are greyed out (model files missing); self-hosted/remote backends remain selectable.
+
 ## 🚀 Development
 
 Environment setup & build: [docs/en/build.md](./docs/en/build.md)
@@ -106,7 +121,8 @@ Environment setup & build: [docs/en/build.md](./docs/en/build.md)
 ```sh
 pnpm i               # install frontend dependencies
 pnpm tauri dev       # run the GUI in dev mode
-pnpm tauri build     # build the installer (GUI + CLI) -> src-tauri/target/release/bundle/
+pnpm build:full      # build the Full installer (GUI + CLI) -> src-tauri/target/release/bundle/
+pnpm build:lite      # build the Lite installer
 ```
 
 The CLI builds from the same crate — run any subcommand directly in dev mode:
