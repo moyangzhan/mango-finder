@@ -49,24 +49,27 @@ pub async fn search(query: &str) -> Vec<SearchResult> {
 }
 
 /// Semantic search with degradation notices:
-/// - active identity ≠ indexed identity → a rebuild/switch is in progress,
-///   semantic search is refused so keyword mode stays the single source of truth;
+/// - no active identity → the query cannot be embedded at all (fresh lite
+///   install before the first switch);
 /// - embedding backend failure → notice names the concrete platform and the
 ///   likely cause (self-hosted service down / API key & network).
+///
+/// A partially built collection is searched as-is: the query embedding and
+/// the tables both derive from the active identity, so results stay
+/// space-consistent — files not yet embedded simply don't surface.
 pub async fn search_with_notice(query: &str) -> SemanticSearchOutcome {
     log::debug!("Search: {}", query);
-    // Guardrail: while the active collection is still being (re)built, refuse
-    // semantic search instead of mixing vector spaces
-    let active = embedding_collection_repo::active_identity();
-    match embedding_collection_repo::indexed_identity() {
-        Some(indexed) if indexed.same_backend(&active) => {}
-        Some(_) | None => {
+    // No vector library configured yet (fresh lite install): semantic search
+    // is not available at all, degrade with a precise notice
+    let active = match embedding_collection_repo::active_identity() {
+        Some(active) => active,
+        None => {
             return SemanticSearchOutcome {
                 results: Vec::new(),
-                degraded_notice: Some(t!("message.semantic-degraded-rebuilding").to_string()),
+                degraded_notice: Some(t!("message.semantic-degraded-unconfigured").to_string()),
             };
         }
-    }
+    };
     let embed_result = match embedding_service_manager::embed(query).await {
         Ok(result) => result,
         Err(error) => {

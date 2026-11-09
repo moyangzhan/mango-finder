@@ -165,7 +165,9 @@ pub async fn embed_batch(texts: &[String]) -> Result<Vec<EmbedResult>, AppError>
         return Ok(Vec::new());
     }
     let mode = current_mode().await;
-    let identity = embedding_collection_repo::active_identity();
+    let identity = embedding_collection_repo::active_identity().ok_or_else(|| {
+        AppError::EmbeddingError(t!("message.no-active-embedding").to_string())
+    })?;
     if !identity_matches_mode(&identity, &mode) {
         return Err(AppError::EmbeddingError(format!(
             "embedding backend setting ({}) does not match the active vector collection identity ({} · {}); switch the vector backend in settings first",
@@ -196,6 +198,11 @@ pub async fn embed_batch(texts: &[String]) -> Result<Vec<EmbedResult>, AppError>
             client.embed_texts(&model, texts).await?
         }
     };
+    // A successful call proves the backend is reachable: clear the persistent
+    // unreachable marker set by a declared-dim fallback switch
+    if crate::repositories::embedding_collection_repo::service_unreachable() {
+        let _ = crate::repositories::embedding_collection_repo::set_service_unreachable(false);
+    }
     assert_dim(&results, &identity)?;
     Ok(results)
 }
@@ -352,4 +359,35 @@ pub async fn probe_identity(
             })
         }
     }
+}
+
+/// Identity from the model's declared dimension (ai_model.properties), used
+/// when the backend cannot be probed: the switch itself must always succeed —
+/// an unreachable/misconfigured backend surfaces later as per-embed errors
+/// and the search degrade notice instead of blocking the choice.
+pub fn declared_identity(
+    mode: &FileParserMode,
+    platform: &str,
+    model: &str,
+) -> Result<EmbeddingIdentity, AppError> {
+    if matches!(mode, FileParserMode::Local) {
+        return Ok(EmbeddingIdentity::local());
+    }
+    let ai_model = ai_model_repo::get_one(platform, model)
+        .map_err(|e| AppError::InternalError(e.to_string()))?
+        .ok_or(AppError::AiModelNotFound(format!("{model} · {platform}")))?;
+    let props: serde_json::Value = serde_json::from_str(&ai_model.properties)
+        .map_err(|e| AppError::InternalError(format!("invalid model properties: {e}")))?;
+    let dim = props
+        .get("dimension")
+        .and_then(|v| v.as_u64())
+        .ok_or(AppError::AiModelNotFound(format!(
+            "no declared dimension for {model} · {platform}"
+        )))? as usize;
+    Ok(EmbeddingIdentity {
+        platform: platform.to_string(),
+        model: model.to_string(),
+        dim,
+        has_sparse: false,
+    })
 }

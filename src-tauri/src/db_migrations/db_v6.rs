@@ -75,34 +75,40 @@ drop table if exists file_metadata_data;
 drop table if exists file_metadata_vec;
 "#,
     )?;
-    let static_tables = CollectionTables::local_static();
-    embedding_collection_repo::create_collection_tables(conn, &static_tables, LOCAL_DIM)?;
 
-    // Register the local collection; the existing 1024 content index stays in place
-    embedding_collection_repo::register_collection(conn, &EmbeddingIdentity::local())?;
+    // Full seeds the local collection as the out-of-box backend; lite starts
+    // with no vector library (tables are created on demand at the first switch)
+    if !crate::global::IS_LITE {
+        let static_tables = CollectionTables::local_static();
+        embedding_collection_repo::create_collection_tables(conn, &static_tables, LOCAL_DIM)?;
 
-    // Metadata rows are all zero vectors today: queue them for re-embedding.
-    // Content statuses are untouched - the content index remains valid.
-    conn.execute_batch(
-        "update file_info set meta_index_status = 1, meta_index_status_msg = '';",
-    )?;
+        // Register the local collection; the existing 1024 content index stays in place
+        embedding_collection_repo::register_collection(conn, &EmbeddingIdentity::local())?;
+
+        // Metadata rows are all zero vectors today: queue them for re-embedding.
+        // Content statuses are untouched - the content index remains valid.
+        conn.execute_batch(
+            "update file_info set meta_index_status = 1, meta_index_status_msg = '';",
+        )?;
+    }
 
     Ok(())
 }
 
 pub fn init_data_with_conn(conn: &Connection) -> Result<()> {
-    // Active + indexed identity default to the local backend: the existing
-    // content index was produced by it, so semantic search keeps working after upgrade.
-    let local = EmbeddingIdentity::local();
-    let identity_json = serde_json::to_string(&local)?;
-    conn.execute(
-        "insert or ignore into config (name, value) values ('active_embedding', ?1)",
-        [&identity_json],
-    )?;
-    conn.execute(
-        "insert or ignore into config (name, value) values ('indexed_embedding', ?1)",
-        [&identity_json],
-    )?;
+    // Full defaults both identities to the local backend; lite leaves them unset
+    if !crate::global::IS_LITE {
+        let local = EmbeddingIdentity::local();
+        let identity_json = serde_json::to_string(&local)?;
+        conn.execute(
+            "insert or ignore into config (name, value) values ('active_embedding', ?1)",
+            [&identity_json],
+        )?;
+        conn.execute(
+            "insert or ignore into config (name, value) values ('indexed_embedding', ?1)",
+            [&identity_json],
+        )?;
+    }
 
     // Seed embedding models for the remote/self-hosted channels (editable via the UI)
     conn.execute_batch(
@@ -159,6 +165,30 @@ create table ai_model(
         .expect("prereq schema");
         exec_ddl_with_conn(&conn).expect("ddl");
         init_data_with_conn(&conn).expect("data");
+
+        if crate::global::IS_LITE {
+            let collections: i64 = conn
+                .query_row("select count(*) from embedding_collections", [], |r| r.get(0))
+                .expect("count collections");
+            assert_eq!(collections, 0, "lite must not register the local collection");
+            let active_rows: i64 = conn
+                .query_row(
+                    "select count(*) from config where name = 'active_embedding'",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("count active_embedding rows");
+            assert_eq!(active_rows, 0, "lite must not seed an active identity");
+            let models: i64 = conn
+                .query_row(
+                    "select count(*) from ai_model where model_types = 'embedding'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(models, 4, "embedding model seeds");
+            return;
+        }
 
         let dim: i64 = conn
             .query_row(

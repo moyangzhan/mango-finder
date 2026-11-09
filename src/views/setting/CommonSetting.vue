@@ -2,9 +2,9 @@
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { relaunch } from '@tauri-apps/plugin-process'
+import ProxyEdit from './ProxyEdit.vue'
 import { useAppStore } from '@/stores/app'
 import { setLocale, t } from '@/locales'
-import { emptyProxyInfo } from '@/utils/functions'
 
 const dataPath = ref('')
 const appStore = useAppStore()
@@ -12,7 +12,6 @@ const activePlatform = ref('openai')
 const activeTheme = ref(appStore.getTheme)
 const activeLanguage = ref('en-US')
 const activeTab = ref('openai')
-const proxy = ref<ProxyInfo>(emptyProxyInfo())
 const needRestart = ref(false)
 const dataCopying = ref(false)
 const cliStatus = ref<{ mfd_path: string, exists: boolean, installed: boolean }>({ mfd_path: '', exists: false, installed: false })
@@ -55,17 +54,6 @@ function handleThemeChanged(selectedTheme: string) {
   console.log('themeChanged', selectedTheme)
   activeTheme.value = selectedTheme
   appStore.changeTheme()
-}
-
-function handleSaveProxy() {
-  console.log('onSaveProxy', proxy.value)
-  invoke('update_proxy_info', { proxyInfo: proxy.value }).then((res) => {
-    console.log('update_proxy_info result', res)
-    window.$message.success(t('common.saveSuccess'))
-  }).catch((err) => {
-    console.error('update_proxy_info error', err)
-    window.$message.error(t('common.operationFailed'))
-  })
 }
 
 async function openDirDialog() {
@@ -199,8 +187,6 @@ onMounted(async () => {
   console.log('active_locale', activeLocale)
   setLocale(activeLocale as 'en-US' | 'zh-CN')
   activeLanguage.value = activeLocale as string
-  const proxyInfo = await invoke('load_proxy_info')
-  proxy.value = proxyInfo as ProxyInfo
   const userDataPath = await invoke<string>('get_data_path')
   dataPath.value = userDataPath
   await loadCliStatus()
@@ -282,24 +268,7 @@ onMounted(async () => {
       </div>
     </NCard>
     <NCard :title="t('proxy.setting')" class="mb-4" size="small" :bordered="true">
-      <div class="flex flex-col">
-        <NFormItem :label="t('proxy.protocol')">
-          <NInput v-model:value="proxy.protocol" />
-        </NFormItem>
-
-        <NFormItem :label="t('proxy.host')">
-          <NInput v-model:value="proxy.host" />
-        </NFormItem>
-
-        <NFormItem :label="t('proxy.port')">
-          <NInputNumber v-model:value="proxy.port" />
-        </NFormItem>
-        <div>
-          <NButton ghost @click="handleSaveProxy">
-            {{ t('common.save') }}
-          </NButton>
-        </div>
-      </div>
+      <ProxyEdit />
     </NCard>
   </div>
 </template>

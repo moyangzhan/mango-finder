@@ -477,6 +477,15 @@ async fn reparse_file(
     }
 }
 
+/// Display label of the active embedding identity for task records
+/// ("model · platform", or an "unconfigured" marker when none is active).
+fn embedding_identity_label() -> String {
+    match embedding_collection_repo::active_identity() {
+        Some(identity) => format!("{} · {}", identity.model, identity.platform),
+        None => t!("message.embedding-unconfigured").to_string(),
+    }
+}
+
 /// Whether the active embedding identity differs from the identity whose
 /// collection currently holds a complete index (platform+model pair equality).
 /// Generalizes the old local-model-name check to any backend.
@@ -485,9 +494,10 @@ async fn reparse_file(
 /// 将旧的本地模型名检测泛化到任意后端。
 pub fn is_embedding_model_changed() -> Result<bool, String> {
     let active = embedding_collection_repo::active_identity();
-    match embedding_collection_repo::indexed_identity() {
-        Some(indexed) => Ok(!active.same_backend(&indexed)),
-        None => Ok(true),
+    match (active.as_ref(), embedding_collection_repo::indexed_identity()) {
+        (Some(active), Some(indexed)) => Ok(!active.same_backend(&indexed)),
+        // Unconfigured, or nothing completely indexed yet: treat as changed
+        _ => Ok(true),
     }
 }
 
@@ -523,8 +533,7 @@ pub async fn start_indexing(paths: Vec<String>, from: &str) -> Result<bool, Stri
 
     STOP_INDEX_SIGNAL.store(false, Ordering::SeqCst);
     // Record the active identity ("model · platform") on the task
-    let identity = embedding_collection_repo::active_identity();
-    let embedding_model = format!("{} · {}", identity.model, identity.platform);
+    let embedding_model = embedding_identity_label();
     let task = match indexing_task_util::task_new(&paths.to_vec(), &embedding_model).await {
         Ok(t) => t,
         Err(e) => {
@@ -553,7 +562,7 @@ pub async fn start_indexing(paths: Vec<String>, from: &str) -> Result<bool, Stri
             // a user stop leaves the collection incomplete
             if !STOP_INDEX_SIGNAL.load(Ordering::SeqCst) {
                 let active = embedding_collection_repo::active_identity();
-                let _ = embedding_collection_repo::set_indexed_identity(Some(&active));
+                let _ = embedding_collection_repo::set_indexed_identity(active.as_ref());
             }
             if let Err(e) = indexing_finish(task.id, "done", from).await {
                 log::error!("Failed to finish indexing task: {}", e);
@@ -1086,12 +1095,16 @@ pub async fn run_metadata_catchup() {
 
 #[derive(serde::Serialize)]
 pub struct SwitchOutcome {
-    /// The probed identity actually in effect after the switch
+    /// The identity actually in effect after the switch (probed live, or
+    /// declared-dimension when the backend could not be reached)
     pub identity: crate::structs::embedding_identity::EmbeddingIdentity,
     /// Target collection already existed (instant switch, no rebuild needed)
     pub existing_collection: bool,
     /// A background rebuild was started
     pub rebuild_started: bool,
+    /// The backend could not be reached; every embed fails (and search
+    /// degrades with a notice) until the service is back
+    pub service_unreachable: bool,
 }
 
 /// Watched paths (all indexed locations), used as the rebuild scope.
@@ -1108,6 +1121,9 @@ async fn all_watch_paths() -> Vec<String> {
 async fn persist_embedding_mode(mode: crate::enums::FileParserMode) -> Result<(), String> {
     let mut setting = INDEXER_SETTING.write().await;
     setting.embedding_parser_mode = mode;
+    // Keep the cached preset label consistent with the flipped mode (the
+    // frontend may have persisted a transient "mixed" before the dialog)
+    setting.parser_mode = setting.derived_parser_mode().to_string();
     let json = serde_json::to_string(&*setting).map_err(|e| e.to_string())?;
     config_repo::update_by_name(CONFIG_NAME_INDEXER_SETTING, &json).map_err(|e| e.to_string())?;
     Ok(())
@@ -1138,10 +1154,29 @@ fn clear_other_collections(
 /// lock on EVERY error path (a leaked persistent lock blocks all storage tasks
 /// until orphan cleanup, an hour later).
 /// 前置:存储任务锁已由调用方持有;本函数不触碰锁,错误统一由调用方解锁。
+/// Restore the active/indexed identity after a failed flip (previous may be
+/// None = the unconfigured state a fresh lite install switches out of).
+fn restore_previous_identity(
+    previous_identity: Option<&crate::structs::embedding_identity::EmbeddingIdentity>,
+) {
+    match previous_identity {
+        Some(prev) => {
+            let _ = embedding_collection_repo::set_indexed_identity(Some(prev));
+            let _ = embedding_collection_repo::set_active_identity(prev);
+            let prev_tables = embedding_collection_repo::collection_tables(prev);
+            let _ = embedding_collection_repo::restore_status_for(&prev_tables);
+        }
+        None => {
+            let _ = embedding_collection_repo::set_indexed_identity(None);
+            let _ = embedding_collection_repo::clear_active_identity();
+        }
+    }
+}
+
 async fn perform_switch_flip(
     mode: crate::enums::FileParserMode,
     identity: &crate::structs::embedding_identity::EmbeddingIdentity,
-    previous_identity: &crate::structs::embedding_identity::EmbeddingIdentity,
+    previous_identity: Option<&crate::structs::embedding_identity::EmbeddingIdentity>,
     same_target: bool,
 ) -> Result<bool, String> {
     // existing = registered AND holds data
@@ -1167,9 +1202,7 @@ async fn perform_switch_flip(
         embedding_collection_repo::set_indexed_identity(Some(identity)).map_err(|e| e.to_string())?;
         if let Err(e) = persist_embedding_mode(mode).await {
             // Roll back to the previous identity so mode/identity stay in sync
-            let prev_tables = embedding_collection_repo::collection_tables(previous_identity);
-            let _ = embedding_collection_repo::restore_status_for(&prev_tables);
-            let _ = embedding_collection_repo::set_active_identity(previous_identity);
+            restore_previous_identity(previous_identity);
             return Err(e);
         }
         return Ok(true);
@@ -1182,10 +1215,7 @@ async fn perform_switch_flip(
     embedding_collection_repo::reset_all_status_waiting().map_err(|e| e.to_string())?;
     if let Err(e) = persist_embedding_mode(mode).await {
         // Roll back: previous identity + statuses recomputed for it
-        let _ = embedding_collection_repo::set_indexed_identity(Some(previous_identity));
-        let _ = embedding_collection_repo::set_active_identity(previous_identity);
-        let prev_tables = embedding_collection_repo::collection_tables(previous_identity);
-        let _ = embedding_collection_repo::restore_status_for(&prev_tables);
+        restore_previous_identity(previous_identity);
         return Err(e);
     }
     Ok(false)
@@ -1222,36 +1252,86 @@ pub async fn switch_embedding_backend(
     rebuild: String,
     clear_others: bool,
 ) -> Result<SwitchOutcome, String> {
+    // A running indexing job belongs to the previous backend (e.g. the last
+    // switch's background rebuild): signal it to stop and wait for the lock;
+    // only a job that refuses to yield in time blocks the switch
     if SCANNING.load(Ordering::SeqCst) || INDEXING.load(Ordering::SeqCst) {
-        return Err(t!("message.indexing-processing").to_string());
+        STOP_INDEX_SIGNAL.store(true, Ordering::SeqCst);
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        while (SCANNING.load(Ordering::SeqCst) || INDEXING.load(Ordering::SeqCst))
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        if SCANNING.load(Ordering::SeqCst) || INDEXING.load(Ordering::SeqCst) {
+            return Err(t!("message.indexing-processing").to_string());
+        }
+        STOP_INDEX_SIGNAL.store(false, Ordering::SeqCst);
     }
     // Single barrier up front: everything below runs under the storage lock
     task_util::lock_storage_task(&task_util::ActiveTask::new("indexing"))
         .map_err(|e| e.to_string())?;
 
-    // 1. Probe the candidate identity (dim discovered from the backend itself)
-    let identity = match crate::embedding_service_manager::probe_identity(&mode, &platform, &model)
-        .await
-    {
-        Ok(identity) => identity,
-        Err(e) => {
-            let _ = task_util::unlock_storage_task();
-            return Err(e.to_string());
-        }
-    };
+    // 1. Probe the candidate identity (dim discovered from the backend itself).
+    //    The switch must ALWAYS succeed: an unreachable backend falls back to
+    //    the model's declared dimension — embeds (and search) then degrade
+    //    with notices until the service is back. Only when no dimension is
+    //    declared either does the switch fail with the probe error.
+    let (identity, service_unreachable) =
+        match crate::embedding_service_manager::probe_identity(&mode, &platform, &model).await {
+            Ok(identity) => (identity, false),
+            Err(e) => {
+                let fallback =
+                    match crate::embedding_service_manager::declared_identity(&mode, &platform, &model) {
+                        Ok(identity) => identity,
+                        Err(_) => {
+                            let _ = task_util::unlock_storage_task();
+                            return Err(e.to_string());
+                        }
+                    };
+                log::warn!(
+                    "embedding probe failed ({e}); switching to {} · {} with declared dim {}",
+                    fallback.model,
+                    fallback.platform,
+                    fallback.dim
+                );
+                (fallback, true)
+            }
+        };
 
     let previous_identity = embedding_collection_repo::active_identity();
-    let same_target = previous_identity.same_backend(&identity);
+    // Captured BEFORE the flip clears/changes the indexed marker: whether the
+    // previous collection is a complete source for a fast re-embed
+    let previous_was_indexed = previous_identity
+        .as_ref()
+        .map(|prev| {
+            matches!(
+                embedding_collection_repo::indexed_identity(),
+                Some(ref indexed) if indexed.same_backend(prev)
+            )
+        })
+        .unwrap_or(false);
+    let same_target = previous_identity
+        .as_ref()
+        .map(|prev| prev.same_backend(&identity))
+        .unwrap_or(false);
 
     // 2. Flip identity/collection state (mode persisted only after the flip;
     //    every error unlocks here - no leaked persistent lock)
-    let existing_collection = match perform_switch_flip(mode, &identity, &previous_identity, same_target).await {
+    let existing_collection = match perform_switch_flip(mode, &identity, previous_identity.as_ref(), same_target).await {
         Ok(existing) => existing,
         Err(e) => {
             let _ = task_util::unlock_storage_task();
             return Err(e);
         }
     };
+
+    // Persist the reachability verdict so the settings banner survives page
+    // changes and restarts; a successful switch to a reachable backend clears
+    // a stale flag from an earlier one
+    if let Err(e) = embedding_collection_repo::set_service_unreachable(service_unreachable) {
+        log::warn!("Failed to persist service_unreachable: {e}");
+    }
 
     // 3. Rebuild dispatch. Same target with a built collection = nothing left
     //    to do. Otherwise the requested rebuild ("fast"/"full") runs in the
@@ -1279,7 +1359,11 @@ pub async fn switch_embedding_backend(
         STOP_INDEX_SIGNAL.store(false, Ordering::SeqCst);
         let source_identity = previous_identity.clone();
         let target_identity = identity.clone();
-        let use_full = rebuild == "full";
+        // Fast re-embed copies chunk_text from the previous collection, so the
+        // source must be the fully indexed one: no previous (unconfigured
+        // fresh install) or a partially built one (its rebuild just got
+        // interrupted by this switch) leaves files uncovered — full pipeline
+        let use_full = rebuild == "full" || source_identity.is_none() || !previous_was_indexed;
         let paths = if use_full { all_watch_paths().await } else { Vec::new() };
         if use_full && paths.is_empty() {
             // Nothing to rebuild: finish inline, statuses stay Waiting
@@ -1295,19 +1379,25 @@ pub async fn switch_embedding_backend(
                 identity,
                 existing_collection,
                 rebuild_started: false,
+                service_unreachable,
             });
         }
         let _ = tokio::spawn(async move {
             if use_full {
                 run_full_rebuild_job(&paths, &target_identity, clear_others).await;
             } else {
-                run_fast_reembed_job(&source_identity, &target_identity, clear_others).await;
+                // use_full already covers the no-source (unconfigured) case,
+                // so a fast re-embed always has a source collection here
+                let source = source_identity
+                    .expect("fast re-embed requires a previous collection");
+                run_fast_reembed_job(&source, &target_identity, clear_others).await;
             }
         });
         return Ok(SwitchOutcome {
             identity,
             existing_collection,
             rebuild_started: true,
+            service_unreachable,
         });
     }
 
@@ -1325,6 +1415,7 @@ pub async fn switch_embedding_backend(
         identity,
         existing_collection,
         rebuild_started: false,
+        service_unreachable,
     })
 }
 
@@ -1659,15 +1750,9 @@ pub async fn start_category_reindex(category: &str) -> Result<bool, String> {
 
     STOP_INDEX_SIGNAL.store(false, Ordering::SeqCst);
     INDEXING.store(true, Ordering::SeqCst);
-    let identity = embedding_collection_repo::active_identity();
     let task = match indexing_task_util::task_new(
         &Vec::new(),
-        &format!(
-            "re-index · {} · {} · {}",
-            category.to_text(),
-            identity.model,
-            identity.platform
-        ),
+        &format!("re-index · {} · {}", category.to_text(), embedding_identity_label()),
     )
     .await
     {

@@ -1,4 +1,6 @@
-use crate::global::{CONFIG_NAME_ACTIVE_EMBEDDING, CONFIG_NAME_INDEXED_EMBEDDING};
+use crate::global::{
+    CONFIG_NAME_ACTIVE_EMBEDDING, CONFIG_NAME_INDEXED_EMBEDDING, CONFIG_NAME_SERVICE_UNREACHABLE,
+};
 use crate::repositories::RepositoryError;
 use crate::structs::embedding_identity::{
     EmbeddingIdentity, LOCAL_DIM, LOCAL_MODEL, LOCAL_PLATFORM,
@@ -352,22 +354,32 @@ pub fn get_collection(
 // ---------------------------------------------------------------------------
 
 /// Active embedding identity, read from the config table (µs-level point query).
-/// Falls back to the local identity when the key is missing/corrupt.
-pub fn active_identity() -> EmbeddingIdentity {
+/// None = no vector library configured yet (fresh lite installs seed nothing;
+/// full installs seed the local identity in the v6 migration). A corrupt value
+/// logs and reads as unconfigured rather than silently pretending to be local.
+pub fn active_identity() -> Option<EmbeddingIdentity> {
     let value = crate::repositories::config_repo::get_val(CONFIG_NAME_ACTIVE_EMBEDDING);
     if value.is_empty() {
-        return EmbeddingIdentity::local();
+        return None;
     }
-    serde_json::from_str(&value).unwrap_or_else(|e| {
-        log::error!("Invalid active_embedding config, fallback to local: {e}");
-        EmbeddingIdentity::local()
-    })
+    serde_json::from_str(&value)
+        .map(Some)
+        .unwrap_or_else(|e| {
+            log::error!("Invalid active_embedding config, treated as unconfigured: {e}");
+            None
+        })
 }
 
 pub fn set_active_identity(identity: &EmbeddingIdentity) -> Result<(), RepositoryError> {
     let json = serde_json::to_string(identity)
         .map_err(|e| RepositoryError::InvalidInput(e.to_string()))?;
     crate::repositories::config_repo::upsert(CONFIG_NAME_ACTIVE_EMBEDDING, &json)?;
+    Ok(())
+}
+
+/// Clear the active identity (back to the unconfigured state).
+pub fn clear_active_identity() -> Result<(), RepositoryError> {
+    crate::repositories::config_repo::upsert(CONFIG_NAME_ACTIVE_EMBEDDING, "")?;
     Ok(())
 }
 
@@ -380,6 +392,18 @@ pub fn indexed_identity() -> Option<EmbeddingIdentity> {
         return None;
     }
     serde_json::from_str(&value).ok()
+}
+
+/// Whether the active backend was unreachable at switch time (declared-dim
+/// fallback used). Any later successful embed clears it.
+pub fn service_unreachable() -> bool {
+    crate::repositories::config_repo::get_val(CONFIG_NAME_SERVICE_UNREACHABLE) == "true"
+}
+
+pub fn set_service_unreachable(value: bool) -> Result<(), RepositoryError> {
+    let value = if value { "true" } else { "" };
+    crate::repositories::config_repo::upsert(CONFIG_NAME_SERVICE_UNREACHABLE, value)?;
+    Ok(())
 }
 
 pub fn set_indexed_identity(identity: Option<&EmbeddingIdentity>) -> Result<(), RepositoryError> {

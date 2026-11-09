@@ -84,6 +84,9 @@ pub const CONFIG_NAME_ACTIVE_SELF_HOSTED_PLATFORM: &'static str = "active_self_h
 pub const CONFIG_NAME_ACTIVE_EMBEDDING: &'static str = "active_embedding";
 /// Identity whose collection currently holds a complete, searchable index
 pub const CONFIG_NAME_INDEXED_EMBEDDING: &'static str = "indexed_embedding";
+/// Set when a switch used the declared-dim fallback (backend unreachable);
+/// cleared by the first successful embed
+pub const CONFIG_NAME_SERVICE_UNREACHABLE: &'static str = "embedding_service_unreachable";
 /// Resource existence snapshot of the last startup (missing-backend diagnostics)
 pub const CONFIG_NAME_RESOURCE_SNAPSHOT: &'static str = "local_resource_snapshot";
 

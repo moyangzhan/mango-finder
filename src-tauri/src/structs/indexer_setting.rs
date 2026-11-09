@@ -100,7 +100,9 @@ pub struct IndexerSetting {
     pub parser_mode: String, // "local" | "selfhosted" | "remote" | "mixed" - quick preset
     pub image_parser_mode: FileParserMode,
     pub audio_parser_mode: FileParserMode,
-    pub embedding_parser_mode: FileParserMode, // vector category: own backend, independent of parser presets
+    // Vector category: own backend choice per row; the parser presets drive it
+    // through the standard switch flow (identity flip = potential rebuild)
+    pub embedding_parser_mode: FileParserMode,
     pub ignore_dirs: Vec<String>,
     pub ignore_path_prefixes: Vec<String>, // Full path prefixes to ignore
     pub ignore_exts: Vec<String>,
@@ -195,14 +197,38 @@ impl<'de> Deserialize<'de> for IndexerSetting {
     }
 }
 
+impl IndexerSetting {
+    /// Derived preset label from the three category modes. Mirrors the
+    /// frontend computeParserMode: the self-hosted preset exempts audio —
+    /// the default tool Ollama has no ASR endpoint, so audio legitimately
+    /// sits elsewhere while image/vector stay self-hosted.
+    pub fn derived_parser_mode(&self) -> &'static str {
+        use FileParserMode::*;
+        match (&self.image_parser_mode, &self.audio_parser_mode, &self.embedding_parser_mode) {
+            (Local, Local, Local) => "local",
+            (SelfHosted, _, SelfHosted) => "selfhosted",
+            (Remote, Remote, Remote) => "remote",
+            _ => "mixed",
+        }
+    }
+}
+
 impl Default for IndexerSetting {
     fn default() -> Self {
+        // Lite bundles no local model files, so cloud is the out-of-box preset
+        // for every category (local stays selectable once users supply the
+        // files themselves); Full keeps the fully-local default
+        let (parser_mode, mode) = if crate::global::IS_LITE {
+            ("remote", FileParserMode::Remote)
+        } else {
+            ("local", FileParserMode::Local)
+        };
         Self {
             is_private: true,
-            parser_mode: "local".to_string(),
-            image_parser_mode: FileParserMode::Local,
-            audio_parser_mode: FileParserMode::Local,
-            embedding_parser_mode: FileParserMode::Local,
+            parser_mode: parser_mode.to_string(),
+            image_parser_mode: mode.clone(),
+            audio_parser_mode: mode.clone(),
+            embedding_parser_mode: mode,
             ignore_exts: vec![],
             ignore_files: vec![],
             ignore_dirs: vec![],

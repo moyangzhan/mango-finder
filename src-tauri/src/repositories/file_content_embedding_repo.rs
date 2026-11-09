@@ -15,8 +15,10 @@ use rusqlite::{Result, Row, named_params};
 /// 激活向量库的内容分块向量。表名由激活嵌入身份派生(config 表为单一事实源,
 /// 每次调用直读;本地静态表只是派生函数的一个返回值)。
 
-fn active_tables() -> CollectionTables {
-    embedding_collection_repo::collection_tables(&embedding_collection_repo::active_identity())
+fn active_tables() -> Result<CollectionTables, RepositoryError> {
+    embedding_collection_repo::active_identity()
+        .map(|identity| embedding_collection_repo::collection_tables(&identity))
+        .ok_or_else(|| RepositoryError::InvalidInput("no active embedding identity".to_string()))
 }
 
 fn f32_bytes(values: &[f32]) -> Vec<u8> {
@@ -37,7 +39,7 @@ fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
 pub fn insert(
     file_content_embedding: &FileContentEmbedding,
 ) -> Result<Option<FileContentEmbedding>, RepositoryError> {
-    let tables = active_tables();
+    let tables = active_tables()?;
     let mut conn = crate::db_init_manager::open_db()?;
     let tx = conn.transaction()?;
 
@@ -90,7 +92,7 @@ pub fn insert(
 }
 
 pub fn update(file_content_embedding: &FileContentEmbedding) -> Result<usize, RepositoryError> {
-    let tables = active_tables();
+    let tables = active_tables()?;
     let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(&format!(
         "update {vec} set embedding = :embedding where id = :id",
@@ -118,7 +120,7 @@ pub fn hybrid_search(
     query_sparse_values: &[f32],
     min_score: usize, // 1 - 100
 ) -> Result<Vec<FileContentEmbedding>, RepositoryError> {
-    let tables = active_tables();
+    let tables = active_tables()?;
     let dense_only = query_sparse_indices.is_empty();
     let is_short_query = !dense_only && query_sparse_indices.len() <= SHORT_QUERY_LEN;
     let sparse_threshold = if dense_only {
@@ -199,7 +201,7 @@ pub fn list_chunks_by_ids(ids: &Vec<u32>) -> Result<Vec<String>, RepositoryError
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let tables = active_tables();
+    let tables = active_tables()?;
     let conn = crate::db_init_manager::open_db()?;
     let ids_str = ids
         .iter()
@@ -225,7 +227,7 @@ pub fn list_chunks_by_ids(ids: &Vec<u32>) -> Result<Vec<String>, RepositoryError
 }
 
 pub fn count() -> Result<i64, RepositoryError> {
-    let tables = active_tables();
+    let tables = active_tables()?;
     let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(&format!("SELECT COUNT(*) FROM {}", tables.content_vec))?;
     let count: i64 = stmt.query_row([], |row| row.get(0))?;
@@ -234,7 +236,7 @@ pub fn count() -> Result<i64, RepositoryError> {
 
 /// Get all embeddings for a specific file (for document similarity)
 pub fn list_by_file_id(file_id: i64) -> Result<Vec<FileContentEmbedding>, RepositoryError> {
-    let tables = active_tables();
+    let tables = active_tables()?;
     let conn = crate::db_init_manager::open_db()?;
     let mut stmt = conn.prepare(&format!(
         "SELECT v.id, d.file_id, d.chunk_index, d.chunk_text, v.embedding, d.sparse_weights
@@ -276,7 +278,7 @@ pub fn delete_active_rows_by_file(file_id: i64) -> Result<usize, RepositoryError
     if file_id < 1 {
         return Ok(0);
     }
-    let tables = active_tables();
+    let tables = active_tables()?;
     let mut conn = crate::db_init_manager::open_db()?;
     let tx = conn.transaction()?;
     tx.execute(
@@ -356,7 +358,7 @@ pub fn find_image_similarity_candidates(
     source_file_id: i64,
     limit: usize,
 ) -> Result<Vec<ImageSimilarityCandidate>, RepositoryError> {
-    let tables = active_tables();
+    let tables = active_tables()?;
     let conn = crate::db_init_manager::open_db()?;
 
     // Get source embedding
@@ -395,7 +397,7 @@ fn find_image_candidates_by_embedding_bytes(
     embedding_bytes: &[u8],
     limit: usize,
 ) -> Result<Vec<ImageSimilarityCandidate>, RepositoryError> {
-    let tables = active_tables();
+    let tables = active_tables()?;
     let conn = crate::db_init_manager::open_db()?;
 
     // Use ANN search to find similar embeddings, then join with file_info for image_hash

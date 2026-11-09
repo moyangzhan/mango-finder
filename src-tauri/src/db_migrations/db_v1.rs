@@ -262,20 +262,24 @@ pub fn init_data_with_conn(conn: &Connection) -> Result<()> {
         ),
     )?;
 
-    let (default_locale, default_file_content_language) =
+    let default_locale =
         if get_default_file_content_language() == FileContentLanguage::Chinese {
-            ("zh-CN", "zh")
+            "zh-CN"
         } else {
-            ("en-US", "en")
+            "en-US"
         };
     conn.execute(
         "insert or ignore into config (name, value) VALUES ('active_locale', ?1)",
         (default_locale,),
     )?;
-    let default_indexer_setting = format!(
-        r#"{{"is_private":true,"parser_mode":"local","file_content_language":"{}","image_parser_mode":"local","audio_parser_mode":"local","ignore_dirs":["node_modules"],"ignore_path_prefixes":[],"ignore_exts":["tmp"],"ignore_files":[],"save_parsed_content": {{"document":false,"image":true,"audio":true,"video":true}}}}"#,
-        default_file_content_language
-    );
+    // Fresh-install defaults: the edition-aware preset from
+    // IndexerSetting::default plus extras (skip node_modules/tmp,
+    // parsed document text not stored)
+    let mut default_setting = crate::structs::indexer_setting::IndexerSetting::default();
+    default_setting.ignore_dirs = vec!["node_modules".to_string()];
+    default_setting.ignore_exts = vec!["tmp".to_string()];
+    default_setting.content_storage.document = "none".to_string();
+    let default_indexer_setting = serde_json::to_string(&default_setting).unwrap_or_default();
     // is_private: Deprecated, kept for backward compatibility parser_mode: "local" | "selfhosted" | "remote" | "mixed"
     conn.execute(
         "insert or ignore into config (name, value) VALUES ('indexer_setting', ?1)",

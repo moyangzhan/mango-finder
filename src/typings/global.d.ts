@@ -71,7 +71,6 @@ interface IndexerSetting {
   image_parser_mode: string;
   audio_parser_mode: string;
   embedding_parser_mode: string; // vector category backend: "local" | "selfhosted" | "remote"
-  file_content_language: string;
   ignore_dirs: string[];
   ignore_path_prefixes: string[];
   ignore_exts: string[];

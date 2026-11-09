@@ -9,10 +9,11 @@ use rusqlite::{Result, Row, named_params};
 ///
 /// 激活向量库的文件元数据向量(见 file_content_embedding_repo)。
 
-fn active_tables() -> (CollectionTables, usize) {
-    let identity = embedding_collection_repo::active_identity();
+fn active_tables() -> Result<(CollectionTables, usize), RepositoryError> {
+    let identity = embedding_collection_repo::active_identity()
+        .ok_or_else(|| RepositoryError::InvalidInput("no active embedding identity".to_string()))?;
     let dim = identity.dim;
-    (embedding_collection_repo::collection_tables(&identity), dim)
+    Ok((embedding_collection_repo::collection_tables(&identity), dim))
 }
 
 fn f32_bytes(values: &[f32]) -> Vec<u8> {
@@ -26,7 +27,7 @@ fn f32_bytes(values: &[f32]) -> Vec<u8> {
 pub fn insert(
     file_metadata_embedding: &FileMetaEmbedding,
 ) -> Result<Option<FileMetaEmbedding>, RepositoryError> {
-    let (tables, dim) = active_tables();
+    let (tables, dim) = active_tables()?;
     let mut conn = crate::db_init_manager::open_db()?;
 
     let tx: rusqlite::Transaction<'_> = conn.transaction()?;
@@ -95,7 +96,7 @@ pub fn hybrid_search(
     query_sparse_values: &[f32],
     min_score: usize, // 1 - 100
 ) -> Result<Vec<FileMetaEmbedding>, RepositoryError> {
-    let (tables, dim) = active_tables();
+    let (tables, dim) = active_tables()?;
     let dense_only = query_sparse_indices.is_empty();
     let q_dense = vector_util::finalize_metadata_embedding(dense_embedding.to_vec(), dim);
     let embedding_bytes = f32_bytes(&q_dense);
@@ -160,7 +161,7 @@ pub fn delete_by_file_id(file_id: i64) -> Result<usize, RepositoryError> {
     if file_id < 1 {
         return Ok(0);
     }
-    let (tables, _) = active_tables();
+    let (tables, _) = active_tables()?;
     let mut conn = crate::db_init_manager::open_db()?;
     let tx = conn.transaction()?;
     tx.execute(

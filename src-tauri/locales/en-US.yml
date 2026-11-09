@@ -58,10 +58,12 @@ message:
   indexing-skip-by-privacy: "Privacy setting: skip indexing audio"
   abort-tasks-and-exit: Abort running background tasks [%{tasks}] and exit Mango Finder?
   file-not-found: File not found
-  semantic-degraded-rebuilding: The semantic index is rebuilding/switching; temporarily degraded to keyword search
   semantic-degraded-selfhosted: Model API unavailable. Check whether the %{platform} service is running and the host/port are correct (%{detail})
   semantic-degraded-remote: Model API unavailable. Check the %{platform} API key and network (%{detail})
-  semantic-degraded-local: Local embedding model unavailable (%{detail}). Check the model files or switch the vector backend in settings
+  semantic-degraded-local: Local embedding model unavailable (%{detail}). Check the model files or switch models in settings
+  semantic-degraded-unconfigured: The semantic index is not set up yet; temporarily degraded to keyword search
+  no-active-embedding: The semantic index is not set up yet; finish the switch in settings first
+  embedding-unconfigured: unconfigured
   internal-error: Internal server error
   migration-processing: Content storage change is in progress. Please wait.
 cli:

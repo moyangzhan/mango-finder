@@ -5,6 +5,7 @@ import { join } from '@tauri-apps/api/path'
 import type { DataTableColumns } from 'naive-ui'
 import ModelPlatformEdit from './ModelPlatformEdit.vue'
 import SelfHostedPlatformEdit from './SelfHostedPlatformEdit.vue'
+import ProxyEdit from './ProxyEdit.vue'
 import { useIndexerStore } from '@/stores/indexer'
 import { useAppStore } from '@/stores/app'
 import { t } from '@/locales'
@@ -41,8 +42,11 @@ const parserMode = ref<ParserMode>('local')
 // preset fallback and switch validation)
 const localBackends = ref<LocalBackendStatus | null>(null)
 
-// Active embedding identity: { platform, model, dim, has_sparse }
+// Active embedding identity: { platform, model, dim, has_sparse }; null AFTER
+// load = no vector library configured yet (fresh lite install)
 const activeIdentity = ref<EmbeddingIdentity | null>(null)
+// Distinguishes "identity not loaded yet" from "unconfigured" (both null)
+const identityLoaded = ref(false)
 // Embedding model row of the CURRENT mode's platform (display + switch source)
 const activeEmbeddingModel = ref<AiModel | null>(null)
 
@@ -90,6 +94,121 @@ function selfHostedAudioAvailable() {
   return activeSelfHostedPlatform.value === 'vllm'
 }
 
+/** Mode label for the overview/status table */
+function modeLabel(mode: string) {
+  if (mode === 'selfhosted')
+    return t('common.selfHosted')
+  if (mode === 'remote')
+    return t('common.cloud')
+  return t('common.local')
+}
+
+/** Preset label from all three category modes (vector included) */
+function computeParserMode(imageMode: string, audioMode: string, vectorMode: string): ParserMode {
+  if (imageMode === 'local' && audioMode === 'local' && vectorMode === 'local')
+    return 'local'
+  // Self-hosted preset exempts audio: the default tool Ollama has no ASR
+  // endpoint, so audio legitimately sits on cloud (or local in Full) while
+  // image/vector stay self-hosted
+  if (imageMode === 'selfhosted' && vectorMode === 'selfhosted')
+    return 'selfhosted'
+  if (imageMode === 'remote' && audioMode === 'remote' && vectorMode === 'remote')
+    return 'remote'
+  return 'mixed'
+}
+
+/** Mirror of the backend dispatcher's identity/mode consistency check */
+function identityMatchesMode(identity: EmbeddingIdentity, mode: string) {
+  if (mode === 'local')
+    return identity.platform === 'local'
+  if (mode === 'selfhosted')
+    return identity.platform !== 'local' && identity.platform === activeSelfHostedPlatform.value
+  return identity.platform !== 'local' && identity.platform !== activeSelfHostedPlatform.value
+}
+
+/** True while no vector library is configured yet (fresh lite install), or the
+ * active one lags behind the selected mode — the switch flow hasn't run */
+const switchPending = computed(() =>
+  identityLoaded.value
+  && (activeIdentity.value === null
+    || !identityMatchesMode(activeIdentity.value, indexerStore.indexerSetting.embedding_parser_mode)))
+
+/** Load the active identity; null after load = unconfigured (fresh lite) */
+async function reloadActiveIdentity() {
+  activeIdentity.value = await invoke<EmbeddingIdentity | null>('get_active_embedding_identity')
+  identityLoaded.value = true
+}
+
+/** True while the active vector collection is not the fully indexed one —
+ * semantic search stays refused until a (re)build completes. rebuildRunning
+ * splits the notice: an indexing task is regenerating vs. waiting for one */
+const semanticRebuildPending = ref(false)
+const rebuildRunning = ref(false)
+const serviceUnreachable = ref(false)
+
+async function reloadSemanticPending() {
+  try {
+    semanticRebuildPending.value = await invoke<boolean>('embedding_rebuild_pending')
+    serviceUnreachable.value = await invoke<boolean>('embedding_service_unreachable')
+    const task = await invoke<{ task_type: string } | null>('get_storage_task')
+    rebuildRunning.value = semanticRebuildPending.value && task?.task_type === 'indexing'
+  } catch { /* keep previous */ }
+}
+
+/** Unconfigured + cloud mode without an API key: the switch cannot succeed
+ * yet, guide to the settings modal first (self-hosted seeds count as ready) */
+const vectorBackendReady = computed(() => {
+  if (indexerStore.indexerSetting.embedding_parser_mode !== 'remote')
+    return true
+  const platform = modelPlatformList.value.find(p => p.name === activePlatform.value)
+  return !!platform && platform.api_key !== ''
+})
+
+/** Open the settings modal matching the current vector mode */
+function openVectorConfig() {
+  if (indexerStore.indexerSetting.embedding_parser_mode === 'selfhosted')
+    showSelfHostedModal.value = true
+  else
+    showCloudModal.value = true
+}
+
+/** First activation: once credentials exist the switch completes itself —
+ * an empty library needs no rebuild, so no dialog interrupts the flow.
+ * With indexed files present the rebuild choice stays with the user. */
+const autoActivating = ref(false)
+
+async function autoActivateVectorBackend() {
+  if (autoActivating.value || !identityLoaded.value || activeIdentity.value !== null || !vectorBackendReady.value)
+    return
+  autoActivating.value = true
+  try {
+    let pendingFiles = 0
+    try {
+      pendingFiles = await invoke<number>('count_indexed_files', { category: 'document' })
+        + await invoke<number>('count_indexed_files', { category: 'image' })
+        + await invoke<number>('count_indexed_files', { category: 'audio' })
+    } catch { /* estimate only */ }
+    if (pendingFiles > 0)
+      return
+
+    const mode = indexerStore.indexerSetting.embedding_parser_mode as BackendMode
+    const resolved = await resolveEmbeddingTarget(mode)
+    if (!resolved)
+      return
+    await switchBackendDirectly(mode, resolved)
+  } catch (e) {
+    console.error('auto activate vector backend failed', e)
+    window.$message.error(typeof e === 'string' ? e : t('common.operationFailed'))
+  } finally {
+    autoActivating.value = false
+  }
+}
+
+watch(() => identityLoaded.value && activeIdentity.value === null && vectorBackendReady.value, (ready) => {
+  if (ready)
+    autoActivateVectorBackend()
+})
+
 function missingFilesTooltip(missing: string[]) {
   return t('indexer.missingLocalFiles', { files: missing.join(', ') })
 }
@@ -106,24 +225,17 @@ function identityBackendTitle(platform: string) {
 }
 
 async function initStatusData() {
-  // Detect parser mode based on image and audio parser modes
+  // Detect parser mode from image, audio and vector modes
   const setting = indexerStore.indexerSetting
   const imageMode = setting.image_parser_mode
   const audioMode = setting.audio_parser_mode
 
-  // Determine mode: local | selfhosted | remote | mixed
-  if (imageMode === 'local' && audioMode === 'local')
-    parserMode.value = 'local'
-  else if (imageMode === 'selfhosted' && audioMode === 'local')
-    parserMode.value = 'selfhosted'
-  else if (imageMode === 'remote' && audioMode === 'remote')
-    parserMode.value = 'remote'
-  else
-    parserMode.value = 'mixed'
+  parserMode.value = computeParserMode(imageMode, audioMode, setting.embedding_parser_mode)
 
-  imageParserDesc.value = t('common.local')
-  audioParserDesc.value = t('common.local')
-  vectorParserDesc.value = '-'
+  // Category rows show the effective mode; refined with platform/model below
+  imageParserDesc.value = modeLabel(imageMode)
+  audioParserDesc.value = modeLabel(audioMode)
+  vectorParserDesc.value = modeLabel(setting.embedding_parser_mode)
 
   if (parserMode.value === 'remote' || imageMode === 'remote') {
     const platformInfo = modelPlatformList.value.find(
@@ -158,8 +270,10 @@ async function initStatusData() {
     }
   }
 
-  // Vector backend: display as "model · backend" from the active identity
-  if (activeIdentity.value)
+  // Vector backend: display as "model · backend" from the active identity;
+  // when the identity lags behind the mode (fresh lite cloud default before
+  // the first switch), show the mode label instead of a stale backend name
+  if (activeIdentity.value && identityMatchesMode(activeIdentity.value, setting.embedding_parser_mode))
     vectorParserDesc.value = `${activeIdentity.value.model} · ${identityBackendTitle(activeIdentity.value.platform)}`
 
   dataRef.value = [
@@ -403,25 +517,28 @@ async function doParserModeChanged(mode: ParserMode) {
   if (mode === 'mixed')
     return
 
-  parserMode.value = mode
-  indexerStore.indexerSetting.parser_mode = mode
-
   if (mode === 'local') {
-    // 本地模式：image/audio/vector 尽量 local；本地模型文件缺失的类目回落 remote
+    // 本地模式：三类目全部 local；本地模型文件缺失的类目回落 remote
     indexerStore.indexerSetting.image_parser_mode = visionAvailable() ? 'local' : 'remote'
     indexerStore.indexerSetting.audio_parser_mode = audioAvailable() ? 'local' : 'remote'
-    // Vector never silently falls back (identity change = rebuild); keep as-is
   } else if (mode === 'selfhosted') {
-    // 自托管模式：image 使用 selfhosted，audio 仅 vLLM 可自托管
+    // 自托管模式：保留当前自托管工具（通常是 Ollama，不强切 vLLM）；
+    // Ollama 无转写端点，音频回落云端（Lite 下本地亦不可选），
+    // 活动平台为 vLLM 时音频同样可选自托管
     indexerStore.indexerSetting.image_parser_mode = 'selfhosted'
-    indexerStore.indexerSetting.audio_parser_mode = selfHostedAudioAvailable() ? 'selfhosted' : (audioAvailable() ? 'local' : 'remote')
+    indexerStore.indexerSetting.audio_parser_mode = selfHostedAudioAvailable() ? 'selfhosted' : 'remote'
   } else if (mode === 'remote') {
-    // 云端模式：image 和 audio 都使用 remote
+    // 云端模式：三类目全部 remote
     indexerStore.indexerSetting.image_parser_mode = 'remote'
     indexerStore.indexerSetting.audio_parser_mode = 'remote'
   }
 
-  updateIndexerSetting()
+  updateParserModeFromSettings()
+  await updateIndexerSetting()
+
+  // 向量模型跟随预设，自动模式：同后端直接落库，换后端静默切换
+  // （已建目标库即时生效，否则后台重建 + toast 告警），不弹任何对话框
+  await onEmbeddingModeChanged(mode, true)
 }
 
 // Handle image parser mode change
@@ -477,8 +594,55 @@ async function resolveEmbeddingTarget(mode: BackendMode): Promise<{ platform: st
   }
 }
 
-/** Vector backend radio change: validate, then open the switch confirmation */
-async function onEmbeddingModeChanged(mode: string) {
+/** Switch without any dialog: the given rebuild choice runs on defaults
+ * (an empty/known collection takes "none", a new one "fast"; the backend
+ * upgrades fast to full when no source collection exists) and the outcome
+ * is reported as a light toast */
+async function switchBackendDirectly(mode: BackendMode, resolved: { platform: string, model: string, modelTitle: string }, rebuild: 'none' | 'fast' = 'none') {
+  const outcome = await invoke<{ rebuild_started: boolean, service_unreachable: boolean }>('switch_embedding_backend', {
+    mode,
+    platform: resolved.platform,
+    model: resolved.model,
+    rebuild,
+    clearOthers: false,
+  })
+  indexerStore.indexerSetting.embedding_parser_mode = mode
+  updateParserModeFromSettings()
+  if (outcome.service_unreachable) {
+    // The choice is in effect; the backend itself is unreachable — warn,
+    // never revert the selection
+    window.$message.warning(
+      t('indexer.switchDoneDegraded', {
+        model: resolved.modelTitle,
+        backend: identityBackendTitle(resolved.platform),
+      }),
+    )
+  } else {
+    window.$message.success(
+      outcome.rebuild_started
+        ? t('indexer.switchDoneRebuilding')
+        : t('indexer.switchDoneInstant'),
+    )
+  }
+  await reloadActiveIdentity()
+  await loadEmbeddingModel()
+  initStatusData()
+  await reloadSemanticPending()
+}
+
+/** Surface a failed direct switch: the vector row keeps its previous backend
+ * and the preset label falls to mixed — the toast names the concrete cause */
+function reportSwitchError(e: unknown) {
+  console.error('switch embedding backend failed', e)
+  window.$message.error(typeof e === 'string' ? e : t('common.operationFailed'))
+}
+
+/** Vector backend switch entry. auto = triggered by a parser preset click:
+ * never opens a modal (a compound action must not spawn dialogs) — an
+ * existing target collection switches instantly, a new one starts a
+ * background rebuild with a toast. The confirmation dialog stays reserved
+ * for explicit vector-row radio clicks with indexed files to protect. */
+async function onEmbeddingModeChanged(mode: string, auto = false) {
   const target = mode as BackendMode
   if (target === 'local' && !vectorAvailable()) {
     window.$message.warning(missingFilesTooltip(localBackends.value?.vector_missing || []))
@@ -500,6 +664,7 @@ async function onEmbeddingModeChanged(mode: string) {
   if (sameBackend) {
     // Same backend, mode realigned: just persist
     indexerStore.indexerSetting.embedding_parser_mode = target
+    updateParserModeFromSettings()
     updateIndexerSetting()
     return
   }
@@ -511,6 +676,33 @@ async function onEmbeddingModeChanged(mode: string) {
       + await invoke<number>('count_indexed_files', { category: 'image' })
       + await invoke<number>('count_indexed_files', { category: 'audio' })
   } catch { /* estimate only */ }
+
+  // Nothing indexed yet: no rebuild to choose from, switch directly
+  if (pendingFiles === 0) {
+    try {
+      await switchBackendDirectly(target, resolved)
+    } catch (e) {
+      reportSwitchError(e)
+    }
+    return
+  }
+
+  // Preset click: switch silently with default rebuild choice, toast the outcome
+  if (auto) {
+    let existing = false
+    try {
+      const collections = await invoke<EmbeddingCollectionRow[]>('load_embedding_collections')
+      existing = collections.some(
+        c => c.platform === resolved.platform && c.model === resolved.model && (c.content_rows > 0 || c.meta_rows > 0),
+      )
+    } catch { /* unknown → treat as a new collection */ }
+    try {
+      await switchBackendDirectly(target, resolved, existing ? 'none' : 'fast')
+    } catch (e) {
+      reportSwitchError(e)
+    }
+    return
+  }
 
   // Collection states: the target's existence, and the ACTIVE library's rows
   // (its stored chunk_text is the fast re-embed channel's raw material)
@@ -548,7 +740,7 @@ async function doConfirmSwitch() {
   const target = pendingSwitch.value
   switchingBackend.value = true
   try {
-    const outcome = await invoke<{ identity: EmbeddingIdentity, existing_collection: boolean, rebuild_started: boolean }>('switch_embedding_backend', {
+    const outcome = await invoke<{ identity: EmbeddingIdentity, existing_collection: boolean, rebuild_started: boolean, service_unreachable: boolean }>('switch_embedding_backend', {
       mode: target.mode,
       platform: target.platform,
       model: target.model,
@@ -556,15 +748,28 @@ async function doConfirmSwitch() {
       clearOthers: switchClearOthers.value,
     })
     indexerStore.indexerSetting.embedding_parser_mode = target.mode
+    // Keep the preset label consistent with the flipped mode for the next
+    // full-setting persist (backend persist_embedding_mode recomputes too)
+    updateParserModeFromSettings()
     showSwitchDialog.value = false
-    window.$message.success(
-      outcome.rebuild_started
-        ? t('indexer.switchDoneRebuilding')
-        : t('indexer.switchDoneInstant'),
-    )
-    activeIdentity.value = await invoke<EmbeddingIdentity>('get_active_embedding_identity')
+    if (outcome.service_unreachable) {
+      window.$message.warning(
+        t('indexer.switchDoneDegraded', {
+          model: target.modelTitle,
+          backend: identityBackendTitle(target.platform),
+        }),
+      )
+    } else {
+      window.$message.success(
+        outcome.rebuild_started
+          ? t('indexer.switchDoneRebuilding')
+          : t('indexer.switchDoneInstant'),
+      )
+    }
+    await reloadActiveIdentity()
     await loadEmbeddingModel()
     initStatusData()
+    await reloadSemanticPending()
   } catch (e) {
     console.error('switch embedding backend failed', e)
     window.$message.error(typeof e === 'string' ? e : t('common.operationFailed'))
@@ -573,24 +778,15 @@ async function doConfirmSwitch() {
   }
 }
 
-// Update parserMode based on current settings
+// Update parserMode based on current settings (all three category modes)
 function updateParserModeFromSettings() {
-  const imageMode = indexerStore.indexerSetting.image_parser_mode
-  const audioMode = indexerStore.indexerSetting.audio_parser_mode
-
-  if (imageMode === 'local' && audioMode === 'local') {
-    parserMode.value = 'local'
-    indexerStore.indexerSetting.parser_mode = 'local'
-  } else if (imageMode === 'selfhosted' && audioMode === 'local') {
-    parserMode.value = 'selfhosted'
-    indexerStore.indexerSetting.parser_mode = 'selfhosted'
-  } else if (imageMode === 'remote' && audioMode === 'remote') {
-    parserMode.value = 'remote'
-    indexerStore.indexerSetting.parser_mode = 'remote'
-  } else {
-    parserMode.value = 'mixed'
-    indexerStore.indexerSetting.parser_mode = 'mixed'
-  }
+  const setting = indexerStore.indexerSetting
+  parserMode.value = computeParserMode(
+    setting.image_parser_mode,
+    setting.audio_parser_mode,
+    setting.embedding_parser_mode,
+  )
+  setting.parser_mode = parserMode.value
 }
 
 async function updateIndexerSetting() {
@@ -613,6 +809,23 @@ function onModelPlatformSaved(updatedPlatform: ModelPlatform) {
   )
   if (index !== -1)
     modelPlatformList.value[index] = { ...updatedPlatform }
+}
+
+// The cloud modal hands over to the proxy editor; closing it returns to the cloud modal
+const showProxyEditModal = ref(false)
+const proxyEditFromCloud = ref(false)
+
+function onCloudProxySetting() {
+  showCloudModal.value = false
+  proxyEditFromCloud.value = true
+  showProxyEditModal.value = true
+}
+
+function onProxyEditClosed() {
+  if (proxyEditFromCloud.value) {
+    proxyEditFromCloud.value = false
+    showCloudModal.value = true
+  }
 }
 
 function onSelfHostedPlatformSaved(updatedPlatform: SelfHostedPlatform) {
@@ -711,8 +924,9 @@ onMounted(async () => {
 
     // Local backend detection runs once per settings-page open
     localBackends.value = await invoke<LocalBackendStatus>('check_local_backends')
-    activeIdentity.value = await invoke<EmbeddingIdentity>('get_active_embedding_identity')
+    await reloadActiveIdentity()
     await loadEmbeddingModel()
+    await reloadSemanticPending()
 
     const userDataPath = await invoke<string>('get_data_path')
     console.log('userDataPath', userDataPath)
@@ -720,6 +934,10 @@ onMounted(async () => {
     console.log('modelPath', modelPath.value)
     dbPath.value = await join(userDataPath, 'storage')
     initStatusData()
+
+    // Background (re)builds flip the semantic-pending state on Finish
+    unlistenIndexing = await listen<string>('selector-indexing', onIndexingEvent)
+    unlistenWatcherIndexing = await listen<string>('watcher-indexing', onIndexingEvent)
 
     // Listen for storage change events
     unlistenStorageChange = await listen<string>('content-storage-change-event', async (event) => {
@@ -759,19 +977,52 @@ onMounted(async () => {
 onActivated(async () => {
   try {
     localBackends.value = await invoke<LocalBackendStatus>('check_local_backends')
-    activeIdentity.value = await invoke<EmbeddingIdentity>('get_active_embedding_identity')
+    await reloadActiveIdentity()
     await loadEmbeddingModel()
     initStatusData()
+    await reloadSemanticPending()
   } catch { /* keep previous snapshot */ }
 })
 
+/** Indexing Start/Finish events keep the semantic notice live */
+let unlistenIndexing: (() => void) | null = null
+let unlistenWatcherIndexing: (() => void) | null = null
+
+async function onIndexingEvent(event: { payload: string }) {
+  let parsed: any
+  try {
+    parsed = JSON.parse(event.payload)
+  } catch {
+    return
+  }
+  if (parsed && (parsed.Start !== undefined || parsed.Finish !== undefined))
+    await reloadSemanticPending()
+}
+
 onUnmounted(() => {
   unlistenStorageChange?.()
+  unlistenIndexing?.()
+  unlistenWatcherIndexing?.()
 })
 </script>
 
 <template>
   <div>
+    <NAlert v-if="serviceUnreachable" type="error" :show-icon="false" size="small" class="mb-4">
+      {{
+        t('indexer.serviceUnreachable', {
+          model: activeIdentity?.model || '',
+          backend: activeIdentity ? identityBackendTitle(activeIdentity.platform) : '',
+        })
+      }}
+    </NAlert>
+    <NAlert v-else-if="semanticRebuildPending" type="warning" :show-icon="false" size="small" class="mb-4">
+      {{
+        rebuildRunning
+          ? t('indexer.semanticRebuilding', { model: activeIdentity?.model || '' })
+          : t('indexer.semanticRebuildPending', { model: activeIdentity?.model || '' })
+      }}
+    </NAlert>
     <NCard :title="t('common.overview')" class="mb-4 p-0" size="small" :bordered="true" hoverable>
       <div>
         <NDataTable size="small" :columns="columns" :data="dataRef" :default-expanded-row-keys="['index-content']" />
@@ -808,6 +1059,17 @@ onUnmounted(() => {
                 t('indexer.selfHostedModeDescDynamic', {
                   platform: selfHostedPlatformList.find((p) => p.name === activeSelfHostedPlatform)?.title,
                   model: selfHostedVisionModel?.title || selfHostedVisionModel?.name || 'LLaVA',
+                })
+              }}
+            </div>
+            <div
+              v-if="parserMode === 'selfhosted' && !selfHostedAudioAvailable() && indexerStore.indexerSetting.audio_parser_mode !== 'selfhosted'"
+              class="mt-1 text-gray-400"
+            >
+              {{
+                t('indexer.selfHostedAudioFallback', {
+                  platform: selfHostedPlatformList.find((p) => p.name === activeSelfHostedPlatform)?.title,
+                  audio: modeLabel(indexerStore.indexerSetting.audio_parser_mode),
                 })
               }}
             </div>
@@ -907,33 +1169,73 @@ onUnmounted(() => {
             <tr>
               <td>{{ t('indexer.vectorParser') }}</td>
               <td>
-                <div class="flex items-center gap-2">
-                  <NRadioGroup
-                    :value="indexerStore.indexerSetting.embedding_parser_mode"
-                    size="small"
-                    @update:value="onEmbeddingModeChanged"
-                  >
-                    <NTooltip>
-                      <template #trigger>
-                        <NRadio value="local" :disabled="!vectorAvailable()">
-                          {{ t('common.local') }}
-                        </NRadio>
+                <div class="flex flex-col gap-1">
+                  <div class="flex items-center gap-2">
+                    <NRadioGroup
+                      :value="indexerStore.indexerSetting.embedding_parser_mode"
+                      size="small"
+                      @update:value="onEmbeddingModeChanged"
+                    >
+                      <NTooltip>
+                        <template #trigger>
+                          <NRadio value="local" :disabled="!vectorAvailable()">
+                            {{ t('common.local') }}
+                          </NRadio>
+                        </template>
+                        <template v-if="!vectorAvailable()">
+                          {{ missingFilesTooltip(localBackends?.vector_missing || []) }}
+                        </template>
+                      </NTooltip>
+                      <NRadio value="selfhosted">
+                        {{ t('common.selfHosted') }}
+                      </NRadio>
+                      <NRadio value="remote">
+                        {{ t('common.cloud') }}
+                      </NRadio>
+                    </NRadioGroup>
+                    <span
+                      v-if="activeEmbeddingModel && activeIdentity && activeIdentity.platform === (indexerStore.indexerSetting.embedding_parser_mode === 'selfhosted' ? activeSelfHostedPlatform : activePlatform)"
+                      class="text-xs text-gray-400"
+                    >{{ activeEmbeddingModel.title || activeEmbeddingModel.name }} · {{ activeIdentity.dim }}</span>
+                  </div>
+                  <!-- No vector library configured yet (fresh lite install), or
+                       the active one lags behind the selected mode: a radio
+                       already sitting on the target value can never re-fire the
+                       switch flow. Without credentials guide to the settings
+                       modal first; otherwise offer the switch as "apply now" -->
+                  <div v-if="switchPending" class="flex items-center gap-2">
+                    <span class="text-xs text-gray-400">
+                      <template v-if="activeIdentity">
+                        {{ t('indexer.switchPendingCurrent', { model: activeIdentity.model, backend: identityBackendTitle(activeIdentity.platform) }) }}
                       </template>
-                      <template v-if="!vectorAvailable()">
-                        {{ missingFilesTooltip(localBackends?.vector_missing || []) }}
+                      <template v-else-if="!vectorBackendReady">
+                        {{ t('indexer.switchNeedConfig') }}
                       </template>
-                    </NTooltip>
-                    <NRadio value="selfhosted">
-                      {{ t('common.selfHosted') }}
-                    </NRadio>
-                    <NRadio value="remote">
-                      {{ t('common.cloud') }}
-                    </NRadio>
-                  </NRadioGroup>
-                  <span
-                    v-if="activeEmbeddingModel && activeIdentity && activeIdentity.platform === (indexerStore.indexerSetting.embedding_parser_mode === 'selfhosted' ? activeSelfHostedPlatform : activePlatform)"
-                    class="text-xs text-gray-400"
-                  >{{ activeEmbeddingModel.title || activeEmbeddingModel.name }} · {{ activeIdentity.dim }}</span>
+                      <template v-else>
+                        {{ t('indexer.switchPendingUnconfigured') }}
+                      </template>
+                    </span>
+                    <NButton
+                      v-if="!activeIdentity && !vectorBackendReady"
+                      text
+                      type="primary"
+                      size="tiny"
+                      class="text-link"
+                      @click="openVectorConfig"
+                    >
+                      {{ t('indexer.switchGoConfig') }}
+                    </NButton>
+                    <NButton
+                      v-else
+                      text
+                      type="primary"
+                      size="tiny"
+                      class="text-link"
+                      @click="onEmbeddingModeChanged(indexerStore.indexerSetting.embedding_parser_mode)"
+                    >
+                      {{ t('indexer.switchPendingAction') }}
+                    </NButton>
+                  </div>
                 </div>
               </td>
             </tr>
@@ -1011,10 +1313,22 @@ onUnmounted(() => {
                   :key="platform.name"
                   :model-platform="platform"
                   @saved="onModelPlatformSaved"
+                  @proxy-setting="onCloudProxySetting"
                 />
               </div>
             </NCard>
           </NScrollbar>
+        </NModal>
+
+        <!-- Proxy editor (handed over from the cloud modal, returns on close) -->
+        <NModal
+          v-model:show="showProxyEditModal"
+          preset="card"
+          :title="t('proxy.setting')"
+          style="width: 420px"
+          @after-leave="onProxyEditClosed"
+        >
+          <ProxyEdit />
         </NModal>
 
         <!-- Embedding backend switch confirmation -->

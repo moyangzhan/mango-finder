@@ -358,11 +358,32 @@ pub async fn get_resource_diagnostic(app: AppHandle) -> Result<ResourceDiagnosti
     })
 }
 
-/// Active embedding identity (platform+model+dim+has_sparse) for the settings UI.
+/// Active embedding identity (platform+model+dim+has_sparse) for the settings
+/// UI. None = no vector library configured yet (fresh lite install).
 #[command]
 pub async fn get_active_embedding_identity()
--> Result<crate::structs::embedding_identity::EmbeddingIdentity, String> {
+-> Result<Option<crate::structs::embedding_identity::EmbeddingIdentity>, String> {
     Ok(crate::repositories::embedding_collection_repo::active_identity())
+}
+
+/// True while the active vector collection is not the fully indexed one —
+/// semantic search stays refused until a (re)build completes.
+#[command]
+pub async fn embedding_rebuild_pending() -> bool {
+    match crate::repositories::embedding_collection_repo::active_identity() {
+        Some(active) => !matches!(
+            crate::repositories::embedding_collection_repo::indexed_identity(),
+            Some(ref indexed) if indexed.same_backend(&active)
+        ),
+        None => false,
+    }
+}
+
+/// True while the active backend is known unreachable (declared-dim switch
+/// fallback); the first successful embed clears it.
+#[command]
+pub async fn embedding_service_unreachable() -> bool {
+    crate::repositories::embedding_collection_repo::service_unreachable()
 }
 
 /// All registered vector collections with live stats + active flag, for the
@@ -382,7 +403,10 @@ pub async fn load_embedding_collections() -> Result<Vec<EmbeddingCollectionRow>,
     Ok(rows
         .into_iter()
         .map(|info| {
-            let is_active = info.platform == active.platform && info.model == active.model;
+            let is_active = active
+                .as_ref()
+                .map(|a| a.platform == info.platform && a.model == info.model)
+                .unwrap_or(false);
             EmbeddingCollectionRow { info, is_active }
         })
         .collect())
@@ -398,7 +422,11 @@ pub async fn clear_embedding_collection(platform: String, model: String) -> Resu
         return Err("Indexing is in progress; try again after it finishes".to_string());
     }
     let active = crate::repositories::embedding_collection_repo::active_identity();
-    if active.platform == platform && active.model == model {
+    if active
+        .as_ref()
+        .map(|a| a.platform == platform && a.model == model)
+        .unwrap_or(false)
+    {
         return Err("The active collection cannot be cleared; switch to another backend first".to_string());
     }
     // Dim only matters for the derived table names; look it up from the registry
@@ -430,8 +458,12 @@ pub async fn clear_inactive_embedding_collections() -> Result<usize, String> {
         .map_err(|e| e.to_string())?;
     let mut cleared = 0;
     for collection in collections {
-        if collection.platform == active.platform && collection.model == active.model {
-            continue;
+        if active
+            .as_ref()
+            .map(|a| a.platform == collection.platform && a.model == collection.model)
+            .unwrap_or(false)
+        {
+            continue
         }
         let identity = crate::structs::embedding_identity::EmbeddingIdentity {
             platform: collection.platform,

@@ -2,7 +2,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useDebounceFn } from '@vueuse/core'
 import { emptyModelPlatform } from '@/utils/functions'
-import { useSettingStore } from '@/stores/setting'
 import { t } from '@/locales'
 import { useAppStore } from '@/stores/app'
 
@@ -16,14 +15,10 @@ interface Props {
 }
 interface Emit {
   (ev: 'saved', updatedPlatform: ModelPlatform): void
+  (ev: 'proxySetting'): void
 }
-const settingStore = useSettingStore()
 const tmpPlatform = ref<ModelPlatform>(emptyModelPlatform())
 tmpPlatform.value = { ...props.modelPlatform }
-
-function gotoProxySetting() {
-  settingStore.changeTab('common')
-}
 
 const debounceSave = useDebounceFn(async () => {
   await invoke('update_model_platform', { platform: tmpPlatform.value })
@@ -64,10 +59,8 @@ async function checkConnection() {
       </NFormItem>
       <NFormItem :label="t('proxy.enable')">
         <NSwitch v-model:value="tmpPlatform.is_proxy_enable" class="mr-6" @update:value="debounceSave" />
-        <NButton text tag="a" target="_blank" type="primary" class="text-link" @click="gotoProxySetting">
-          {{
-            t('common.setting').toLowerCase()
-          }}
+        <NButton text type="primary" class="text-link" @click="emit('proxySetting')">
+          {{ t('common.setting') }}
         </NButton>
       </NFormItem>
       <NFormItem :label="t('common.description')">
