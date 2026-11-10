@@ -25,14 +25,29 @@ const debounceSave = useDebounceFn(async () => {
   emit('saved', tmpPlatform.value)
 }, 1000)
 
+interface CheckResult {
+  ok: boolean
+  text: string
+}
+
+/** Verdict of the last check, shown inside the modal above the button */
+const checkResult = ref<CheckResult | null>(null)
+
+function onEdit() {
+  // A past verdict describes the previous values; drop it on the first edit
+  checkResult.value = null
+  debounceSave()
+}
+
 const checking = ref(false)
 async function checkConnection() {
   checking.value = true
+  checkResult.value = null
   try {
     await invoke('check_model_platform', { platform: tmpPlatform.value })
-    window.$message.success(t('common.checkConnectionSuccess'))
+    checkResult.value = { ok: true, text: t('common.checkConnectionSuccess') }
   } catch (e: any) {
-    window.$message.error(`${t('common.checkConnectionFailed')}: ${e}`)
+    checkResult.value = { ok: false, text: `${t('common.checkConnectionFailed')}: ${e}` }
   } finally {
     checking.value = false
   }
@@ -46,28 +61,35 @@ async function checkConnection() {
         <NInput v-model:value="tmpPlatform.name" disabled />
       </NFormItem>
       <NFormItem :label="t('common.title')">
-        <NInput v-model:value="tmpPlatform.title" @update:value="debounceSave" />
+        <NInput v-model:value="tmpPlatform.title" @update:value="onEdit" />
       </NFormItem>
       <NFormItem label="Base Url">
-        <NInput v-model:value="tmpPlatform.base_url" @update:value="debounceSave" />
+        <NInput v-model:value="tmpPlatform.base_url" @update:value="onEdit" />
       </NFormItem>
       <NFormItem label="Api Key">
         <NInput
           v-model:value="tmpPlatform.api_key" type="password" show-password-on="click"
-          @update:value="debounceSave"
+          @update:value="onEdit"
         />
       </NFormItem>
       <NFormItem :label="t('proxy.enable')">
-        <NSwitch v-model:value="tmpPlatform.is_proxy_enable" class="mr-6" @update:value="debounceSave" />
+        <NSwitch v-model:value="tmpPlatform.is_proxy_enable" class="mr-6" @update:value="onEdit" />
         <NButton text type="primary" class="text-link" @click="emit('proxySetting')">
           {{ t('common.setting') }}
         </NButton>
       </NFormItem>
       <NFormItem :label="t('common.description')">
-        <NInput v-model:value="tmpPlatform.remark" @update:value="debounceSave" />
+        <NInput v-model:value="tmpPlatform.remark" @update:value="onEdit" />
       </NFormItem>
     </NForm>
     <div class="w-full">
+      <div
+        v-if="checkResult"
+        class="mb-2 text-xs break-words"
+        :class="checkResult.ok ? 'text-green-500' : 'text-red-400'"
+      >
+        {{ checkResult.text }}
+      </div>
       <NButton type="primary" :loading="checking" @click="checkConnection">
         {{ t('common.checkConnection') }}
       </NButton>
