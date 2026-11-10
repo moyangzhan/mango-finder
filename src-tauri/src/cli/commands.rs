@@ -166,7 +166,7 @@ pub enum IndexAction {
         /// Paths to index
         paths: Vec<String>,
     },
-    /// List indexed files
+    /// List workspace files
     List {
         #[arg(long, default_value = "1")]
         page: i64,

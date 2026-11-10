@@ -121,7 +121,7 @@ mfd index <action>
 **Actions:**
 - `status`: Show index status and recent task history
 - `start <paths...>`: Start indexing, runs in the foreground and returns when finished
-- `list [--page <n>] [--page-size <n>]`: List indexed files
+- `list [--page <n>] [--page-size <n>]`: List workspace files
 - `clear`: Clear all index
 
 **Examples:**
@@ -132,7 +132,7 @@ mfd index status
 # Start indexing (blocks until finished; progress logs go to stderr)
 mfd index start "C:\Documents" "D:\Projects"
 
-# List indexed files
+# List workspace files
 mfd index list --page 1 --page-size 50
 ```
 
@@ -148,7 +148,7 @@ mfd file <id> [--open] [--device <id>]
 
 **Parameters:**
 - `id`: File ID
-- `--open`: Open the file with the system default program (works for any indexed file type)
+- `--open`: Open the file with the system default program (works for any workspace file)
 - `--device`: Remote device ID (optional, not implemented yet)
 
 **Examples:**

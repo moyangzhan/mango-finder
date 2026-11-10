@@ -121,7 +121,7 @@ mfd index <action>
 **可用操作：**
 - `status`：查看索引状态和最近任务历史
 - `start <paths...>`：执行索引任务，前台运行直到完成后返回
-- `list [--page <n>] [--page-size <n>]`：列出已索引文件
+- `list [--page <n>] [--page-size <n>]`：列出工作区文件
 - `clear`：清空所有索引
 
 **示例：**
@@ -132,7 +132,7 @@ mfd index status
 # 开始索引（前台执行直到完成，进度日志输出到 stderr）
 mfd index start "C:\Documents" "D:\Projects"
 
-# 列出已索引文件
+# 列出工作区文件
 mfd index list --page 1 --page-size 50
 ```
 
@@ -148,7 +148,7 @@ mfd file <id> [--open] [--device <id>]
 
 **参数说明：**
 - `id`：文件 ID
-- `--open`：使用系统默认程序打开文件（适用于任意已索引的文件类型）
+- `--open`：使用系统默认程序打开文件（适用于任意工作区文件）
 - `--device`：远程设备 ID（可选，暂未实现）
 
 **示例：**
