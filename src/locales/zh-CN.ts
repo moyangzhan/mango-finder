@@ -2,7 +2,7 @@ export default {
   menu: {
     home: '首页',
     indexer: '索引器',
-    data: '数据',
+    data: '文件',
     setting: '设置',
     about: '关于',
     deviceManagement: '多设备互联',

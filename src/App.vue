@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RouterLink, RouterView } from 'vue-router'
+import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { NBadge, NButton, NConfigProvider, NIcon, NModal, darkTheme, dateEnUS, dateZhCN, enUS, zhCN } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import { FileTrayStackedOutline, GitNetworkOutline, HomeOutline, SettingsOutline } from '@vicons/ionicons5'
@@ -20,7 +20,21 @@ interface StorageTask {
 }
 
 const appStore = useAppStore()
+const route = useRoute()
 const activeMenu = ref<string>('menu-home')
+
+// Menu highlight follows the route: programmatic navigation (router.push
+// from banners/dialogs) never passes through a menu click
+const routeMenuKeys: Record<string, string> = {
+  Home: 'menu-home',
+  Indexer: 'menu-index',
+  Data: 'menu-data',
+  Device: 'menu-device',
+  Setting: 'menu-setting',
+}
+watch(() => route.name, (name) => {
+  activeMenu.value = routeMenuKeys[String(name)] || 'menu-home'
+}, { immediate: true })
 const showRecoveryDialog = ref(false)
 const recoveryTask = ref<StorageTask | null>(null)
 
@@ -97,7 +111,6 @@ function renderIcon(icon: Component) {
 }
 
 function gotoSetting() {
-  activeMenu.value = 'menu-setting'
   router.push({ name: 'Setting' })
 }
 const isDark = computed(() => appStore.getTheme === 'dark' ? darkTheme : null)

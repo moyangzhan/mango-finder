@@ -2,7 +2,7 @@ export default {
   menu: {
     home: 'Home',
     indexer: 'Indexer',
-    data: 'Data',
+    data: 'Files',
     setting: 'Settings',
     about: 'About',
     deviceManagement: 'Multi-Device',
