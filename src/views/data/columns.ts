@@ -2,6 +2,39 @@ import type { DataTableColumns } from 'naive-ui'
 import { NTooltip } from 'naive-ui'
 import { t } from '@/locales'
 
+const INDEX_STATUS_LABEL_KEYS: Record<number, string> = {
+  1: 'common.indexStatusWaiting',
+  2: 'common.indexStatusIndexing',
+  3: 'common.indexStatusIndexed',
+  4: 'common.indexStatusFailed',
+}
+
+/** Status label only; the detail message lives in its own column, with a
+ * tooltip here so hiding that column keeps failure reasons reachable.
+ * "success" is the normal receipt of the status itself, not a detail */
+function renderIndexStatus(status: number, msg: string) {
+  const key = INDEX_STATUS_LABEL_KEYS[status] ?? 'common.indexStatusWaiting'
+  const label = h('span', { class: status === 4 ? 'text-red-500' : '' }, t(key))
+  if (!msg || msg === 'success')
+    return label
+  return h(NTooltip, { showDelay: 300, placement: 'top' }, {
+    trigger: () => label,
+    default: () => msg,
+  })
+}
+
+/** Detail message of one index status: failure reason, skip note, or the
+ * success receipt, shown as a muted truncated line */
+function renderIndexStatusMessage(msg: string) {
+  const text = msg === 'success' ? t('common.success') : msg
+  if (!text)
+    return h('span', { class: 'text-gray-400' }, '-')
+  return h(NTooltip, { showDelay: 300, placement: 'top' }, {
+    trigger: () => h('span', { class: 'text-xs text-gray-400 truncate block' }, text),
+    default: () => text,
+  })
+}
+
 export const getFileColumns = (
   previewFn: (row: FileInfo) => void,
 ): DataTableColumns<FileInfo> => {
@@ -94,15 +127,39 @@ export const getFileColumns = (
     },
     {
       title: () => t('common.contentIndexStatus'),
-      key: 'content_index_status_msg',
+      key: 'content_index_status',
       width: 130,
       sorter: true,
+      render(row: FileInfo) {
+        return renderIndexStatus(row.content_index_status, row.content_index_status_msg)
+      },
+    },
+    {
+      title: () => t('common.contentIndexStatusMsg'),
+      key: 'content_index_status_msg',
+      width: 150,
+      sorter: true,
+      render(row: FileInfo) {
+        return renderIndexStatusMessage(row.content_index_status_msg)
+      },
     },
     {
       title: () => t('common.metadataIndexStatus'),
+      key: 'meta_index_status',
+      width: 150,
+      sorter: true,
+      render(row: FileInfo) {
+        return renderIndexStatus(row.meta_index_status, row.meta_index_status_msg)
+      },
+    },
+    {
+      title: () => t('common.metadataIndexStatusMsg'),
       key: 'meta_index_status_msg',
       width: 150,
       sorter: true,
+      render(row: FileInfo) {
+        return renderIndexStatusMessage(row.meta_index_status_msg)
+      },
     },
     {
       title: () => t('common.fileCreateTime'),

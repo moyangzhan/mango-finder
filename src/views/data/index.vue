@@ -27,16 +27,18 @@ const searchKeyword = ref('')
 const sortInfo = ref<FileSortInfo | null>(null)
 
 // Column visibility
-const allColumnKeys = ['category', 'path', 'file_ext', 'file_size', 'content_index_status_msg', 'meta_index_status_msg', 'file_create_time', 'file_update_time']
-const visibleColumnKeys = ref<string[]>(['category', 'path', 'file_ext', 'file_size', 'content_index_status_msg', 'file_update_time'])
+const allColumnKeys = ['category', 'path', 'file_ext', 'file_size', 'content_index_status', 'content_index_status_msg', 'meta_index_status', 'meta_index_status_msg', 'file_create_time', 'file_update_time']
+const visibleColumnKeys = ref<string[]>(['category', 'path', 'file_ext', 'file_size', 'content_index_status', 'content_index_status_msg', 'file_update_time'])
 
 const columnLabelMap: Record<string, string> = {
   category: t('common.category'),
   path: t('common.path'),
   file_ext: t('common.extension'),
   file_size: t('common.fileSize'),
-  content_index_status_msg: t('common.contentIndexStatus'),
-  meta_index_status_msg: t('common.metadataIndexStatus'),
+  content_index_status: t('common.contentIndexStatus'),
+  content_index_status_msg: t('common.contentIndexStatusMsg'),
+  meta_index_status: t('common.metadataIndexStatus'),
+  meta_index_status_msg: t('common.metadataIndexStatusMsg'),
   file_create_time: t('common.fileCreateTime'),
   file_update_time: t('common.fileUpdateTime'),
 }
@@ -266,7 +268,7 @@ onMounted(() => {
 
 <template>
   <div class="h-full m-auto p-4">
-    <NCard :title="t('indexer.indexedFiles')" class="shadow-sm">
+    <NCard :title="t('indexer.workspaceFiles')" class="shadow-sm">
       <!-- Toolbar: Actions (left) | Search + Filter (right) -->
       <div class="flex flex-wrap items-center gap-2 mb-3 justify-between">
         <!-- Left: Actions -->
