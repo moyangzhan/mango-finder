@@ -97,7 +97,7 @@ const columns = computed<DataTableColumns<EmbeddingCollectionRow>>(() => [
     title: t('vectorLibrary.modelBackend'),
     key: 'model',
     render(row) {
-      return `${row.model} · ${backendTitle(row.platform)}`
+      return `${backendTitle(row.platform)} => ${row.model}`
     },
   },
   {

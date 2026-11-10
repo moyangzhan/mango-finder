@@ -1235,6 +1235,8 @@ pub struct SwitchOutcome {
     /// The backend could not be reached; every embed fails (and search
     /// degrades with a notice) until the service is back
     pub service_unreachable: bool,
+    /// A running indexing job was stopped to let the switch through
+    pub indexing_aborted: bool,
 }
 
 /// Watched paths (all indexed locations), used as the rebuild scope.
@@ -1385,7 +1387,9 @@ pub async fn switch_embedding_backend(
     // A running indexing job belongs to the previous backend (e.g. the last
     // switch's background rebuild): signal it to stop and wait for the lock;
     // only a job that refuses to yield in time blocks the switch
+    let mut indexing_aborted = false;
     if SCANNING.load(Ordering::SeqCst) || INDEXING.load(Ordering::SeqCst) {
+        indexing_aborted = true;
         STOP_INDEX_SIGNAL.store(true, Ordering::SeqCst);
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
         while (SCANNING.load(Ordering::SeqCst) || INDEXING.load(Ordering::SeqCst))
@@ -1510,6 +1514,7 @@ pub async fn switch_embedding_backend(
                 existing_collection,
                 rebuild_started: false,
                 service_unreachable,
+                indexing_aborted,
             });
         }
         let _ = tokio::spawn(async move {
@@ -1528,6 +1533,7 @@ pub async fn switch_embedding_backend(
             existing_collection,
             rebuild_started: true,
             service_unreachable,
+            indexing_aborted,
         });
     }
 
@@ -1546,6 +1552,7 @@ pub async fn switch_embedding_backend(
         existing_collection,
         rebuild_started: false,
         service_unreachable,
+        indexing_aborted,
     })
 }
 

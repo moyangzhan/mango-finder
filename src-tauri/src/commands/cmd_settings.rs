@@ -105,7 +105,11 @@ pub async fn check_self_hosted_platform(platform: SelfHostedPlatform) -> Result<
 
     // 1. Check platform availability
     let base_url = format!("http://{}:{}", platform.host, platform.port);
-    let client = reqwest::Client::new();
+    // Bounded so a blackholed network cannot leave the caller hanging
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| e.to_string())?;
     let resp = client
         .get(&base_url)
         .send()
@@ -140,6 +144,27 @@ pub async fn check_self_hosted_platform(platform: SelfHostedPlatform) -> Result<
     }
 
     Ok(format!("ok ({} models)", configured.len()))
+}
+
+/// Model ids served by a self-hosted platform. One call doubles as the
+/// reachability probe and the per-category model presence check (settings
+/// diagnostics list every used backend that cannot serve right now).
+#[command]
+pub async fn list_self_hosted_models(platform: SelfHostedPlatform) -> Result<Vec<String>, String> {
+    use crate::utils::llm_client_util::create_client_for_self_hosted;
+
+    if platform.host.is_empty() {
+        return Err("Host is required".to_string());
+    }
+    let client = create_client_for_self_hosted(&platform).map_err(|e| e.to_string())?;
+    let models = tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        client.models().list(),
+    )
+    .await
+    .map_err(|_| "Request timed out".to_string())?
+    .map_err(|e| e.to_string())?;
+    Ok(models.data.into_iter().map(|m| m.id).collect())
 }
 
 #[command]
@@ -231,14 +256,16 @@ pub async fn check_model_platform(platform: ModelPlatform) -> Result<String, Str
     let url = format!("{}/models", platform.base_url.trim_end_matches('/'));
     let proxy = PROXY.read().await.clone();
 
+    // Bounded so a blackholed network cannot leave the caller hanging
+    let builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(8));
     let client = if platform.is_proxy_enable && !proxy.host.is_empty() {
         let proxy_url = format!("{}://{}:{}", proxy.protocol, proxy.host, proxy.port);
-        reqwest::Client::builder()
+        builder
             .proxy(reqwest::Proxy::http(&proxy_url).map_err(|e| e.to_string())?)
             .build()
             .map_err(|e| e.to_string())?
     } else {
-        reqwest::Client::new()
+        builder.build().map_err(|e| e.to_string())?
     };
 
     let resp = client
@@ -384,6 +411,17 @@ pub async fn embedding_rebuild_pending() -> bool {
 #[command]
 pub async fn embedding_service_unreachable() -> bool {
     crate::repositories::embedding_collection_repo::service_unreachable()
+}
+
+/// Clear the unreachable marker once an API key is added for the platform the
+/// active collection runs on — the marker was set under missing credentials
+/// and that diagnosis no longer holds.
+#[command]
+pub async fn clear_embedding_service_unreachable() {
+    if let Err(e) = crate::repositories::embedding_collection_repo::set_service_unreachable(false)
+    {
+        log::warn!("Failed to clear service_unreachable: {e}");
+    }
 }
 
 /// All registered vector collections with live stats + active flag, for the
