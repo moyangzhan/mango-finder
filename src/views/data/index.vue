@@ -2,6 +2,7 @@
 import type { DataTableColumns, PaginationInfo } from 'naive-ui'
 import { NCheckbox, NCheckboxGroup, NIcon, NPopover, NSpace } from 'naive-ui'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { useWindowSize } from '@vueuse/core'
 import { KeyboardArrowDownOutlined, ViewColumnOutlined } from '@vicons/material'
@@ -225,6 +226,29 @@ async function handlePageChange(currentPage: number) {
   loadFiles()
 }
 
+// Full rebuild over the whole workspace
+const showRebuildModal = ref(false)
+const rebuildForce = ref(false)
+const rebuilding = ref(false)
+
+async function handleRebuild() {
+  if (rebuilding.value)
+    return
+  rebuilding.value = true
+  try {
+    const started = await invoke<boolean>('start_full_reindex', { force: rebuildForce.value })
+    showRebuildModal.value = false
+    if (started)
+      window.$message.success(t('indexer.rebuildStarted'))
+    else
+      window.$message.info(t('indexer.rebuildNothingPending'))
+  } catch (e) {
+    window.$message.error(typeof e === 'string' ? e : t('common.operationFailed'))
+  } finally {
+    rebuilding.value = false
+  }
+}
+
 async function clearIndex() {
   try {
     await invoke('clear_index')
@@ -260,9 +284,29 @@ watch(() => indexerStore.watcherProcessing, (newVal) => {
     handlePageChange(1)
 })
 
-onMounted(() => {
+// The store flags are flipped by Indexer-page components, which stay alive
+// only after that page was visited once; listen directly so a rebuild that
+// finishes elsewhere still refreshes the statuses
+let unlistenIndexing: (() => void) | null = null
+let unlistenWatcherIndexing: (() => void) | null = null
+
+onMounted(async () => {
   page.value = 1
   loadFiles()
+  const onIndexingEvent = (event: { payload: string }) => {
+    try {
+      const parsed = JSON.parse(event.payload)
+      if (parsed && parsed.Finish !== undefined)
+        handlePageChange(1)
+    } catch { /* ignore malformed events */ }
+  }
+  unlistenIndexing = await listen<string>('selector-indexing', onIndexingEvent)
+  unlistenWatcherIndexing = await listen<string>('watcher-indexing', onIndexingEvent)
+})
+
+onUnmounted(() => {
+  unlistenIndexing?.()
+  unlistenWatcherIndexing?.()
 })
 </script>
 
@@ -294,6 +338,9 @@ onMounted(() => {
           </NTooltip>
           <NButton ghost size="small" @click="handlePageChange(1)">
             {{ t('common.refresh') }}
+          </NButton>
+          <NButton ghost size="small" @click="showRebuildModal = true">
+            {{ t('indexer.rebuildAll') }}
           </NButton>
           <NButtonGroup v-if="selectedFileIds.length > 0">
             <NButton ghost type="error" size="small" @click="clearConfirmType = 'selected'; showClearConfirm = true">
@@ -358,6 +405,29 @@ onMounted(() => {
           @update:sorter="handleSortChange"
         />
       </div>
+
+      <!-- Full rebuild: whole workspace, force option -->
+      <NModal v-model:show="showRebuildModal" preset="dialog" :title="t('indexer.rebuildAll')" :auto-focus="false">
+        <template #default>
+          <p class="mb-3">
+            {{ t('indexer.rebuildAllDesc') }}
+          </p>
+          <NCheckbox v-model:checked="rebuildForce">
+            {{ t('indexer.rebuildForce') }}
+          </NCheckbox>
+          <p class="mt-1 text-xs text-gray-400">
+            {{ rebuildForce ? t('indexer.rebuildForceOnHint') : t('indexer.rebuildForceOffHint') }}
+          </p>
+        </template>
+        <template #action>
+          <NButton @click="showRebuildModal = false">
+            {{ t('common.cancel') }}
+          </NButton>
+          <NButton type="primary" :loading="rebuilding" @click="handleRebuild">
+            {{ t('common.confirm') }}
+          </NButton>
+        </template>
+      </NModal>
 
       <!-- Delete Confirmation Modal -->
       <NModal v-model:show="showClearConfirm" preset="dialog" :title="t('common.warning')" :auto-focus="false">

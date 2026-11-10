@@ -309,6 +309,30 @@ pub fn reset_category_status_waiting(category: i64) -> Result<usize, RepositoryE
     Ok(affected)
 }
 
+/// Reset every not-yet-indexed file back to Waiting, leaving fully indexed
+/// rows untouched; a finished content index with a stuck/failed metadata
+/// embedding only resets the metadata side (the background catch-up job
+/// retries it). Feeds the non-forced full rebuild: failed or interrupted
+/// files are retried, already indexed ones are skipped.
+///
+/// 未索引(含失败)的文件置 Waiting,已索引的保持不动;内容索引已完成但
+/// 元数据卡住/失败的仅重置元数据(由后台补嵌重试)。非强制全量重建使用。
+pub fn reset_not_indexed_status_waiting() -> Result<usize, RepositoryError> {
+    let conn = crate::db_init_manager::open_db()?;
+    let mut affected = conn.execute(
+        "update file_info set content_index_status = 1, content_index_status_msg = '',
+            meta_index_status = 1, meta_index_status_msg = ''
+         where content_index_status != 3",
+        [],
+    )?;
+    affected += conn.execute(
+        "update file_info set meta_index_status = 1, meta_index_status_msg = ''
+         where content_index_status = 3 and meta_index_status in (2, 4)",
+        [],
+    )?;
+    Ok(affected)
+}
+
 /// Files whose content index is done but the metadata embedding is still
 /// pending (upgrade leftovers, switch-back restores, earlier failures).
 /// Picked up by the background metadata catch-up job.

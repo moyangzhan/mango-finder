@@ -291,3 +291,13 @@ pub async fn indexing_watch_paths() -> Result<(), String> {
     start_indexing(paths, INDEXING_FROM_WATCHER).await?;
     Ok(())
 }
+
+/// Rebuild the whole workspace with the active backend. `force` = true
+/// re-processes every file; false only picks up the Waiting ones.
+#[command]
+pub async fn start_full_reindex(force: bool) -> Result<bool, String> {
+    if CONTENT_STORAGE_CHANGING.load(Ordering::SeqCst) {
+        return Err(t!("message.migration-processing").to_string());
+    }
+    crate::indexer_service::start_full_reindex(force).await
+}

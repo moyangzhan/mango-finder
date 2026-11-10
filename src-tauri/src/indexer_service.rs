@@ -4,8 +4,8 @@ use crate::enums::{ContentStorageChangeEvent, FileCategory, IndexingEvent};
 use crate::errors::AppError;
 use crate::global::{
     CONFIG_NAME_INDEXER_SETTING, CONTENT_STORAGE_CHANGING, FS_WATCHER_SETTING, IGNORE_HIDDEN_DIRS,
-    INDEXER_SETTING, INDEXING, INDEXING_FROM_SELECTOR, SCANNING, SCANNING_TOTAL,
-    STOP_INDEX_SIGNAL, STORAGE_PATH,
+    INDEXER_SETTING, INDEXING, INDEXING_FROM_SELECTOR, INDEXING_FROM_WATCHER, SCANNING,
+    SCANNING_TOTAL, STOP_INDEX_SIGNAL, STORAGE_PATH,
 };
 use crate::indexers;
 use crate::initializer;
@@ -554,29 +554,190 @@ pub async fn start_indexing(paths: Vec<String>, from: &str) -> Result<bool, Stri
 
     let result = run_indexing_pipeline(&paths, &task, from).await;
 
-    match &result {
+    finish_indexing_outcome(&result, task.id, from).await;
+
+    result.map(|_| true)
+}
+
+/// Full rebuild over the whole workspace: every `file_info` row is processed
+/// with the active backend, with no watch-path limit, so files that left the
+/// watched set are covered too.
+///
+/// `force` = true additionally rescans the watched paths, so files that were
+/// never scanned in are picked up as well.
+///
+/// `force` = false keeps already-indexed files as they are and only picks up
+/// the Waiting ones; `force` = true sends the entire workspace back to Waiting
+/// first. Either way each file drops its old rows before re-embedding, so a
+/// rerun never duplicates chunks.
+pub async fn start_full_reindex(force: bool) -> Result<bool, String> {
+    // Ok(false) is reserved for "nothing pending", so a busy workspace is an
+    // error the caller can tell apart and show
+    if SCANNING.load(Ordering::SeqCst) || INDEXING.load(Ordering::SeqCst) {
+        return Err(t!("message.indexing-processing").to_string());
+    }
+    // A forced run rescans the watched paths, so files never seen before are
+    // indexed too; nothing to scan and nothing recorded = empty workspace
+    let scan_paths = if force { all_watch_paths().await } else { Vec::new() };
+
+    task_util::lock_storage_task(&task_util::ActiveTask::new("indexing"))
+        .map_err(|e| e.to_string())?;
+
+    // Reset under the lock: a failure here must not leave the workspace
+    // Waiting with no job scheduled. Non-forced runs retry whatever is not
+    // fully indexed (failed / interrupted) and skip the indexed rows.
+    let reset = if force {
+        embedding_collection_repo::reset_all_status_waiting()
+    } else {
+        file_info_repo::reset_not_indexed_status_waiting().map(|_| ())
+    };
+    if let Err(e) = reset {
+        let _ = task_util::unlock_storage_task();
+        return Err(e.to_string());
+    }
+    // Nothing Waiting and no rescan to run = the workspace is fully indexed
+    let pending = pending_content_files();
+    if pending == 0 && scan_paths.is_empty() {
+        let _ = task_util::unlock_storage_task();
+        return Ok(false);
+    }
+
+    STOP_INDEX_SIGNAL.store(false, Ordering::SeqCst);
+    INDEXING.store(true, Ordering::SeqCst);
+    let label = format!(
+        "rebuild · {} · {}",
+        if force { "full" } else { "pending" },
+        embedding_identity_label()
+    );
+    let task = match indexing_task_util::task_new(&Vec::new(), &label).await {
+        Ok(t) => t,
+        Err(e) => {
+            INDEXING.store(false, Ordering::SeqCst);
+            let _ = task_util::unlock_storage_task();
+            return Err(e.to_string());
+        }
+    };
+    let task = Arc::new(task);
+    let from = INDEXING_FROM_WATCHER;
+    frontend_util::send_event(
+        get_event_from(from),
+        &IndexingEvent::Start {
+            task_id: task.id,
+            msg: "Start".to_string(),
+        },
+    );
+
+    // Background job: the command returns as soon as the run is scheduled, so
+    // the caller can report "started" instead of blocking until the end. The
+    // storage lock stays with the job and is released in its indexing_finish.
+    let categories = [FileCategory::Document, FileCategory::Image, FileCategory::Audio];
+    tokio::spawn(async move {
+        // Scan first: newly discovered files land as Waiting and the category
+        // pass below picks them up in the same run
+        if !scan_paths.is_empty() {
+            scanner::start(&scan_paths, task.clone(), from).await;
+            indexing_task_util::set_total(SCANNING_TOTAL.load(Ordering::SeqCst) as i64).await;
+            indexing_task_util::summary_to_db().await;
+        }
+        if STOP_INDEX_SIGNAL.load(Ordering::SeqCst) {
+            finish_indexing_outcome(&Ok(()), task.id, from).await;
+            return;
+        }
+        let result = run_category_pipeline(&task, from, &categories).await;
+        finish_indexing_outcome(&result, task.id, from).await;
+    });
+
+    Ok(true)
+}
+
+/// Files still waiting for content indexing across every category
+fn pending_content_files() -> i64 {
+    [FileCategory::Document, FileCategory::Image, FileCategory::Audio]
+        .iter()
+        .filter_map(|c| file_info_repo::count_unindexed_files(c.value()).ok())
+        .sum()
+}
+
+/// Run the given category indexers back to back over whatever is Waiting.
+/// Documents always run; image/audio run only when something is pending, so
+/// their parser models are not loaded for nothing.
+async fn run_category_pipeline(
+    task: &Arc<IndexingTask>,
+    from: &str,
+    categories: &[FileCategory],
+) -> Result<(), String> {
+    indexing_task_util::summary_to_db().await;
+
+    for category in categories {
+        if STOP_INDEX_SIGNAL.load(Ordering::SeqCst) {
+            break;
+        }
+        match category {
+            FileCategory::Document => {
+                let mut indexer = indexers::document_indexer::DocumentIndexer::new();
+                if let Err(e) = indexer.process(task.clone(), from).await {
+                    log::error!("Document indexing error: {}", e);
+                }
+            }
+            FileCategory::Image => {
+                let pending = file_info_repo::count_unindexed_files(category.value())
+                    .map_err(|e| e.to_string())?;
+                if pending == 0 {
+                    continue;
+                }
+                match indexers::image_indexer::ImageIndexer::new().await {
+                    Ok(mut indexer) => {
+                        if let Err(e) = indexer.process(task.clone(), from).await {
+                            log::error!("Image indexing error: {}", e);
+                        }
+                    }
+                    Err(e) => log::warn!("Image indexer unavailable: {}", e),
+                }
+            }
+            FileCategory::Audio => {
+                let pending = file_info_repo::count_unindexed_files(category.value())
+                    .map_err(|e| e.to_string())?;
+                if pending == 0 {
+                    continue;
+                }
+                match indexers::audio_indexer::AudioIndexer::new().await {
+                    Ok(mut indexer) => {
+                        if let Err(e) = indexer.process(task.clone(), from).await {
+                            log::error!("Audio indexing error: {}", e);
+                        }
+                    }
+                    Err(e) => log::warn!("Audio indexer unavailable: {}", e),
+                }
+            }
+            _ => {}
+        }
+        indexing_task_util::summary_to_db().await;
+    }
+    Ok(())
+}
+
+/// Shared tail: a clean run makes the active collection searchable again;
+/// every path unlocks the storage task and emits Finish
+async fn finish_indexing_outcome(result: &Result<(), String>, task_id: i64, from: &str) {
+    match result {
         Ok(()) => {
-            // A clean (not stopped) pipeline completion makes the active
-            // collection the searchable index again (covers rebuild="none"
-            // switches followed by a manual full index, and normal runs);
-            // a user stop leaves the collection incomplete
+            // A clean (not stopped) completion makes the active collection the
+            // searchable index again; a user stop leaves it incomplete
             if !STOP_INDEX_SIGNAL.load(Ordering::SeqCst) {
                 let active = embedding_collection_repo::active_identity();
                 let _ = embedding_collection_repo::set_indexed_identity(active.as_ref());
             }
-            if let Err(e) = indexing_finish(task.id, "done", from).await {
+            if let Err(e) = indexing_finish(task_id, "done", from).await {
                 log::error!("Failed to finish indexing task: {}", e);
             }
         }
         Err(e) => {
             log::error!("Indexing pipeline failed: {}", e);
-            if let Err(e2) = indexing_finish(task.id, &format!("error: {}", e), from).await {
+            if let Err(e2) = indexing_finish(task_id, &format!("error: {}", e), from).await {
                 log::error!("Failed to finish indexing task after error: {}", e2);
             }
         }
     }
-
-    result.map(|_| true)
 }
 
 async fn run_indexing_pipeline(
@@ -594,47 +755,16 @@ async fn run_indexing_pipeline(
     // Embedding processing
     INDEXING.store(true, Ordering::SeqCst);
 
-    log::info!("Starting document indexing...");
-    let mut document_indexer = indexers::document_indexer::DocumentIndexer::new();
-    let _ = document_indexer
-        .process(task.clone(), from)
-        .await
-        .unwrap_or_else(|e| log::error!("start_indexing => Document indexing error,{}", e));
-    log::info!(
-        "Document indexing done, status: {}",
-        serde_json::json!(document_indexer.status)
-    );
-    indexing_task_util::summary_to_db().await;
-
-    let unindex_images_cnt = file_info_repo::count_unindexed_files(FileCategory::Image.value())
-        .map_err(|e| e.to_string())?;
-    log::info!("Total images to index: {}", unindex_images_cnt);
-    if unindex_images_cnt > 0 {
-        if let Ok(mut image_indexer) = indexers::image_indexer::ImageIndexer::new().await {
-            log::info!("Starting image indexing...");
-            let _ = image_indexer
-                .process(task.clone(), from)
-                .await
-                .unwrap_or_else(|e| log::error!("Image indexing error: {}", e));
-            indexing_task_util::summary_to_db().await;
-        }
-    }
-
-    let unindex_audio_cnt = file_info_repo::count_unindexed_files(FileCategory::Audio.value())
-        .map_err(|e| e.to_string())?;
-    log::info!("Total audio files to index: {}", unindex_audio_cnt);
-    if unindex_audio_cnt > 0 {
-        if let Ok(mut audio_indexer) = indexers::audio_indexer::AudioIndexer::new().await {
-            log::info!("Starting audio indexing...");
-            let _ = audio_indexer
-                .process(task.clone(), from)
-                .await
-                .unwrap_or_else(|e| log::error!("Audio indexing error: {}", e));
-            indexing_task_util::summary_to_db().await;
-        }
-    }
-
-    Ok(())
+    run_category_pipeline(
+        task,
+        from,
+        &[
+            FileCategory::Document,
+            FileCategory::Image,
+            FileCategory::Audio,
+        ],
+    )
+    .await
 }
 
 /// Sync offline changes in watched directories.
