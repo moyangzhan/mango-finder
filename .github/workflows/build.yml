@@ -139,10 +139,37 @@ jobs:
           "
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
+      # The runner image points apt at azure.archive.ubuntu.com, which
+      # occasionally stops resolving on hosted runners; apt then retries for
+      # hours and finally fails. Retry quickly, cap the step, and fall back to
+      # the upstream archive when the mirror itself is unreachable.
       - name: Install Linux Dependencies
+        shell: bash
+        timeout-minutes: 20
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+          set -uo pipefail
+
+          apt_retry() {
+            local attempt
+            for attempt in 1 2 3 4; do
+              if "$@"; then return 0; fi
+              echo "::warning::apt attempt $attempt failed: $*"
+              sleep 15
+            done
+            return 1
+          }
+
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+
+          if ! apt_retry sudo apt-get "${apt_opts[@]}" update; then
+            echo "::warning::apt update failed, switching the mirror to archive.ubuntu.com"
+            sudo sed -i -E 's#https?://azure\.archive\.ubuntu\.com#http://archive.ubuntu.com#g' \
+              /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
+            apt_retry sudo apt-get "${apt_opts[@]}" update
+          fi
+
+          apt_retry sudo apt-get "${apt_opts[@]}" install -y \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Build Linux (Full)
         run: pnpm tauri build --config src-tauri/tauri.full.conf.json
       - name: Collect Full artifact
