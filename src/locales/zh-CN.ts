@@ -393,7 +393,7 @@ export default {
     changeComplete: '切换完成',
     changeCancelled: '切换已取消',
     contentStorageDesc:
-      '选择解析后内容的存储位置，主要用于内容预览和 AI Agent 读取。\n选择"不保存"可节省磁盘空间，但不影响搜索功能。',
+      '选择解析后内容的存储位置，主要用于内容预览和 AI Agent 读取。\n选择"不保存"可节省磁盘空间，也不影响搜索功能。',
     storageDatabaseDesc:
       '将解析内容存入数据库，方便快速预览和访问',
     storageFileDesc:
