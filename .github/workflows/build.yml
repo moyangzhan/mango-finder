@@ -167,7 +167,9 @@ jobs:
           path: dist/*
 
   build-macos:
-    runs-on: macos-14
+    # macos-14 image was retired on 2026-11-02; the label now fails with
+    # "The configuration 'macos-14-arm64-us-default' is not supported".
+    runs-on: macos-15
     env:
       CFLAGS: -U__ARM_FEATURE_MATMUL_INT8
       MACOSX_DEPLOYMENT_TARGET: "10.15"
@@ -230,7 +232,8 @@ jobs:
             cp "$f" "dist/$(basename "$f" .dmg)_Lite.dmg"
           done
       # Intel Mac build disabled - uncomment if needed for Intel Mac users
-      # (re-enabling needs cross-compile care: --target x86_64-apple-darwin, and the mfd pre-build in beforeBuildCommand must match that triple)
+      # (re-enabling needs cross-compile care: --target x86_64-apple-darwin, and the mfd pre-build in beforeBuildCommand must match that triple;
+      #  macos-13 is retired too, run this job on `macos-15-intel` instead of the arm64 labels)
       # - name: Build macOS (Intel)
       #   run: pnpm tauri build --target x86_64-apple-darwin
       - name: Upload Artifact
