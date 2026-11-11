@@ -74,29 +74,40 @@ jobs:
 
       - name: Build Windows (Full)
         run: pnpm tauri build --config src-tauri/tauri.full.conf.json
+      # vite writes its frontend build into dist/, and the Lite build runs
+      # beforeBuildCommand again, so installers collected there are wiped.
+      # Keep them in their own directory and never let the Lite bundling see
+      # the Full package (its glob would label the Full one as Lite).
       - name: Collect Full artifact
         shell: bash
         run: |
-          mkdir -p dist
+          mkdir -p release-artifacts
           for f in src-tauri/target/release/bundle/msi/*.msi; do
-            cp "$f" "dist/$(basename "$f" .msi)_Full.msi"
+            [ -f "$f" ] || continue
+            case "$f" in *Lite*) continue;; esac
+            cp "$f" "release-artifacts/$(basename "$f" .msi)_Full.msi"
           done
       # Lite = coinstallable, fully isolated product: the lite cargo feature
       # (own data dir, port 15679, db seed) + the lite config overlay
       # (own productName/identifier/window title)
+      - name: Clear Full bundles
+        shell: bash
+        run: rm -rf src-tauri/target/release/bundle
       - name: Build Windows (Lite)
         run: pnpm tauri build --features lite --config src-tauri/tauri.lite.conf.json
       - name: Collect Lite artifact
         shell: bash
         run: |
-          for f in src-tauri/target/release/bundle/msi/*.msi; do
-            cp "$f" "dist/$(basename "$f" .msi)_Lite.msi"
+          mkdir -p release-artifacts
+          for f in src-tauri/target/release/bundle/msi/*Lite*.msi; do
+            [ -f "$f" ] || continue
+            cp "$f" "release-artifacts/$(basename "$f" .msi)_Lite.msi"
           done
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: dist/*
+          path: release-artifacts/*
 
   build-linux:
     runs-on: ubuntu-24.04
@@ -201,23 +212,30 @@ jobs:
       - name: Collect Full artifact
         shell: bash
         run: |
-          mkdir -p dist
+          mkdir -p release-artifacts
           for f in src-tauri/target/release/bundle/deb/*.deb; do
-            cp "$f" "dist/$(basename "$f" .deb)_Full.deb"
+            [ -f "$f" ] || continue
+            case "$f" in *Lite*) continue;; esac
+            cp "$f" "release-artifacts/$(basename "$f" .deb)_Full.deb"
           done
+      - name: Clear Full bundles
+        shell: bash
+        run: rm -rf src-tauri/target/release/bundle
       - name: Build Linux (Lite)
         run: pnpm tauri build --features lite --config src-tauri/tauri.lite.conf.json
       - name: Collect Lite artifact
         shell: bash
         run: |
-          for f in src-tauri/target/release/bundle/deb/*.deb; do
-            cp "$f" "dist/$(basename "$f" .deb)_Lite.deb"
+          mkdir -p release-artifacts
+          for f in src-tauri/target/release/bundle/deb/*Lite*.deb; do
+            [ -f "$f" ] || continue
+            cp "$f" "release-artifacts/$(basename "$f" .deb)_Lite.deb"
           done
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
-          path: dist/*
+          path: release-artifacts/*
 
   build-macos:
     # macos-14 image was retired on 2026-11-02; the label now fails with
@@ -291,10 +309,15 @@ jobs:
       - name: Collect Full artifact
         shell: bash
         run: |
-          mkdir -p dist
+          mkdir -p release-artifacts
           for f in src-tauri/target/release/bundle/dmg/*.dmg; do
-            cp "$f" "dist/$(basename "$f" .dmg)_Full.dmg"
+            [ -f "$f" ] || continue
+            case "$f" in *Lite*) continue;; esac
+            cp "$f" "release-artifacts/$(basename "$f" .dmg)_Full.dmg"
           done
+      - name: Clear Full bundles
+        shell: bash
+        run: rm -rf src-tauri/target/release/bundle
       - name: Build macOS (Apple Silicon, Lite)
         shell: bash
         run: |
@@ -314,8 +337,10 @@ jobs:
       - name: Collect Lite artifact
         shell: bash
         run: |
-          for f in src-tauri/target/release/bundle/dmg/*.dmg; do
-            cp "$f" "dist/$(basename "$f" .dmg)_Lite.dmg"
+          mkdir -p release-artifacts
+          for f in src-tauri/target/release/bundle/dmg/*Lite*.dmg; do
+            [ -f "$f" ] || continue
+            cp "$f" "release-artifacts/$(basename "$f" .dmg)_Lite.dmg"
           done
       # Intel Mac build disabled - uncomment if needed for Intel Mac users
       # (re-enabling needs cross-compile care: --target x86_64-apple-darwin, and the mfd pre-build in beforeBuildCommand must match that triple;
@@ -326,7 +351,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-build
-          path: dist/*
+          path: release-artifacts/*
 
   release:
     needs: [build-windows, build-linux, build-macos]
@@ -391,8 +416,10 @@ jobs:
           EXISTING_BODY: ${{ steps.existing_release.outputs.found_body }}
           CHANGELOG: ${{ steps.changelog.outputs.CHANGELOG }}
         run: |
+          # re-tagging the same version must not stack a second changelog
+          printf '%s\n' "$EXISTING_BODY" | sed '/^#### Changelog$/,$d' > existing.md
           {
-            echo "$EXISTING_BODY"
+            cat existing.md
             echo ""
             echo "---"
             echo ""
