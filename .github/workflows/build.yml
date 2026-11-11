@@ -214,8 +214,27 @@ jobs:
           "
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
+      # DMG bundling is the only flaky part of this job: bundle_dmg.sh gives up
+      # with EBUSY when Spotlight still holds the freshly mounted image, and
+      # tauri 2.9.x drops the script output from the error, so the failure is
+      # invisible. Retry with verbose logging (cargo/vite are incremental) and
+      # detach any volume a previous attempt left behind.
       - name: Build macOS (Apple Silicon, Full)
-        run: pnpm tauri build --config src-tauri/tauri.full.conf.json
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm tauri build --verbose --config src-tauri/tauri.full.conf.json; then
+              exit 0
+            fi
+            echo "::warning::macOS Full build attempt $attempt failed, cleaning up"
+            for vol in /Volumes/dmg.*; do
+              if [ -d "$vol" ]; then hdiutil detach "$vol" -force || true; fi
+            done
+            rm -f src-tauri/target/release/bundle/macos/rw.*.dmg
+            sleep 20
+          done
+          echo "::error::macOS Full build failed after 3 attempts"
+          exit 1
       - name: Collect Full artifact
         shell: bash
         run: |
@@ -224,7 +243,21 @@ jobs:
             cp "$f" "dist/$(basename "$f" .dmg)_Full.dmg"
           done
       - name: Build macOS (Apple Silicon, Lite)
-        run: pnpm tauri build --features lite --config src-tauri/tauri.lite.conf.json
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm tauri build --verbose --features lite --config src-tauri/tauri.lite.conf.json; then
+              exit 0
+            fi
+            echo "::warning::macOS Lite build attempt $attempt failed, cleaning up"
+            for vol in /Volumes/dmg.*; do
+              if [ -d "$vol" ]; then hdiutil detach "$vol" -force || true; fi
+            done
+            rm -f src-tauri/target/release/bundle/macos/rw.*.dmg
+            sleep 20
+          done
+          echo "::error::macOS Lite build failed after 3 attempts"
+          exit 1
       - name: Collect Lite artifact
         shell: bash
         run: |
