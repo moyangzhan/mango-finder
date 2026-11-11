@@ -139,37 +139,52 @@ jobs:
           "
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
-      # The runner image points apt at azure.archive.ubuntu.com, which
-      # occasionally stops resolving on hosted runners; apt then retries for
-      # hours and finally fails. Retry quickly, cap the step, and fall back to
-      # the upstream archive when the mirror itself is unreachable.
+      # The runner image points apt at azure.archive.ubuntu.com, which keeps
+      # failing to resolve for some hosted runners; a single `apt-get update`
+      # then spends 20+ minutes on "Ign:" lines and the job dies. Probe the
+      # known mirrors first, point apt at the one that answers, and only then
+      # update/install.
       - name: Install Linux Dependencies
         shell: bash
-        timeout-minutes: 20
+        timeout-minutes: 25
         run: |
           set -uo pipefail
 
-          apt_retry() {
-            local attempt
-            for attempt in 1 2 3 4; do
-              if "$@"; then return 0; fi
-              echo "::warning::apt attempt $attempt failed: $*"
-              sleep 15
-            done
-            return 1
+          probe() { curl -fsSI --max-time 8 "$1/dists/noble/InRelease" >/dev/null 2>&1; }
+
+          mirror=""
+          for candidate in \
+            http://azure.archive.ubuntu.com/ubuntu \
+            http://archive.ubuntu.com/ubuntu \
+            http://security.ubuntu.com/ubuntu
+          do
+            if probe "$candidate"; then mirror="$candidate"; break; fi
+            echo "::warning::apt mirror unreachable: $candidate"
+          done
+          if [ -z "$mirror" ]; then
+            echo "::error::no reachable Ubuntu mirror from this runner"
+            exit 1
+          fi
+          echo "using apt mirror: $mirror"
+          sudo sed -i -E "s#https?://[a-z0-9.-]+\.ubuntu\.com/ubuntu#${mirror}#g" \
+            /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
+
+          apt_get() {
+            sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+              -o Acquire::ForceIPv4=true -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 "$@"
           }
 
-          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-
-          if ! apt_retry sudo apt-get "${apt_opts[@]}" update; then
-            echo "::warning::apt update failed, switching the mirror to archive.ubuntu.com"
-            sudo sed -i -E 's#https?://azure\.archive\.ubuntu\.com#http://archive.ubuntu.com#g' \
-              /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
-            apt_retry sudo apt-get "${apt_opts[@]}" update
-          fi
-
-          apt_retry sudo apt-get "${apt_opts[@]}" install -y \
-            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+          for attempt in 1 2 3; do
+            if apt_get update && apt_get install -y --fix-missing \
+                libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $attempt failed"
+            sleep 15
+          done
+          echo "::error::could not install the Linux dependencies"
+          exit 1
       - name: Build Linux (Full)
         run: pnpm tauri build --config src-tauri/tauri.full.conf.json
       - name: Collect Full artifact
