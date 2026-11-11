@@ -87,7 +87,7 @@ export default {
     language: 'Language',
     display: 'Display',
     setting: 'Setting',
-    commonSetting: 'Common Setting',
+    commonSetting: 'General',
     displaySetting: 'Display Setting',
     theme: 'Theme',
     themeSetting: 'Theme Setting',
@@ -103,7 +103,6 @@ export default {
     nothing: 'Nothing',
     none: 'None',
     privacy: 'Privacy',
-    storage: 'Storage',
     light: 'Light',
     dark: 'Dark',
     overview: 'Overview',
@@ -230,6 +229,7 @@ export default {
   },
   cli: {
     setting: 'Command Line Tool',
+    doc: 'CLI Documentation',
     pathDesc: 'The installer ships the CLI (mfd) with the GUI; adding it to PATH makes mfd available in any terminal',
     install: 'Add to PATH',
     uninstall: 'Remove from PATH',
@@ -280,7 +280,7 @@ export default {
     reindexCategory: 'Re-index this category',
     reindexStarted: 'Category re-index started',
     reindexNothing: 'No files need re-indexing in this category',
-    setting: 'Indexer Setting',
+    setting: 'Indexing',
     indexer: 'Indexer',
     privateMode: 'Private Mode',
     privateModeDesc:
@@ -412,6 +412,9 @@ export default {
     offlineSyncCompleted: 'Offline sync completed',
     offlineSyncFailed: 'Offline sync failed, you can try manual indexing',
   },
+  storage: {
+    title: 'Storage',
+  },
   vectorLibrary: {
     title: 'Index Libraries',
     desc: 'Each index library corresponds to one \'service => model\' pair and they never mix; switching back to a retained library takes effect instantly. All data is stored locally - \'local/remote\' tells whether the embedding model runs on your machine or in the cloud.',
@@ -466,7 +469,6 @@ export default {
     currentVersion: 'Current Version',
     appClientId: 'App Client ID',
     appInfo: 'App Info',
-    cliDoc: 'CLI Documentation',
   },
   cluster: {
     title: 'Multi-Device',

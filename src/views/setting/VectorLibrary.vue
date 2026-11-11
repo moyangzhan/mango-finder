@@ -96,6 +96,10 @@ const columns = computed<DataTableColumns<EmbeddingCollectionRow>>(() => [
   {
     title: t('vectorLibrary.modelBackend'),
     key: 'model',
+    // minWidth instead of unbounded flex: without it this column hoards all
+    // leftover width and squeezes the actions column /
+    // 用 minWidth 而非不限宽：否则本列吃掉全部剩余宽度，挤压操作列
+    minWidth: 200,
     render(row) {
       return `${backendTitle(row.platform)} => ${row.model}`
     },
@@ -135,7 +139,7 @@ const columns = computed<DataTableColumns<EmbeddingCollectionRow>>(() => [
   {
     title: t('common.operation'),
     key: 'actions',
-    width: 100,
+    width: 150,
     render(row) {
       if (row.is_active)
         return h('span', { class: 'text-xs text-gray-300' }, t('vectorLibrary.switchAwayFirst'))
@@ -171,10 +175,10 @@ onMounted(async () => {
 
 <template>
   <div>
-    <NCard :title="t('vectorLibrary.title')" size="small" :bordered="true" hoverable>
-      <NAlert :show-icon="false" class="text-xs mb-2">
-        {{ t('vectorLibrary.desc') }}
-      </NAlert>
+    <NCard size="small" :bordered="true" hoverable>
+      <template #header>
+        <CardTitleHelp :title="t('vectorLibrary.title')" :help="t('vectorLibrary.desc')" />
+      </template>
       <NDataTable
         size="small"
         :columns="columns"

@@ -91,7 +91,7 @@ export default {
     languageSettingWarning:
       '本设置除了设置软件界面上显示的语言，同时也设置了模型提示词所使用的语言',
     tagline: '唤醒你的数据',
-    commonSetting: '通用设置',
+    commonSetting: '通用',
     displaySetting: '显示设置',
     theme: '主题',
     themeSetting: '主题设置',
@@ -103,7 +103,6 @@ export default {
     nothing: '无',
     none: '无',
     privacy: '隐私',
-    storage: '存储',
     light: '浅色',
     dark: '深色',
     overview: '概览',
@@ -230,6 +229,7 @@ export default {
   },
   cli: {
     setting: '命令行工具',
+    doc: 'CLI 文档',
     pathDesc: '安装包已随 GUI 附带 CLI（mfd），加入 PATH 后可在任意终端直接使用',
     install: '加入 PATH',
     uninstall: '移出 PATH',
@@ -280,7 +280,7 @@ export default {
     reindexCategory: '重新索引该类目',
     reindexStarted: '已开始按类目重建索引',
     reindexNothing: '该类目没有需要重建的文件',
-    setting: '索引设置',
+    setting: '索引',
     indexer: '索引器',
     privateMode: '隐私模式',
     privateModeDesc: '所有数据处理均在本地进行，不会上传到任何外部服务器。',
@@ -406,6 +406,9 @@ export default {
     offlineSyncCompleted: '离线同步完成',
     offlineSyncFailed: '离线同步失败，可尝试手动索引',
   },
+  storage: {
+    title: '存储',
+  },
   vectorLibrary: {
     title: '索引库',
     desc: '每个索引库对应一个「服务 => 模型」组合，互不混用；切换时可切回已保留的库即时生效。所有数据均存储在本地，「本地/远程」指的是索引由本地还是远程模型生成。',
@@ -459,7 +462,6 @@ export default {
     currentVersion: '当前版本',
     appClientId: '客户端ID',
     appInfo: '应用信息',
-    cliDoc: 'CLI 文档',
   },
   cluster: {
     title: '多设备互联',

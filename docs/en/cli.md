@@ -4,7 +4,7 @@ Mango Finder Command Line Interface for searching and managing documents.
 
 ## Installation
 
-The Mango Finder installer ships the CLI: after installing, add `mfd` to `PATH` from the "Command Line Tool" card in the GUI settings page, then use it in any terminal. Building the installer is covered in [build.md](./build.md).
+The Mango Finder installer ships the CLI: after installing, add `mfd` to `PATH` from the "Command Line Tool" card in the GUI settings page, then use it in any terminal. Building the installer is covered in [build.md](https://github.com/moyangzhan/mango-finder/blob/main/docs/en/build.md).
 
 To build the CLI alone from source (same crate as the GUI, no extra prerequisites):
 

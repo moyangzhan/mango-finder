@@ -2,8 +2,8 @@
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { NBadge, NButton, NConfigProvider, NIcon, NModal, darkTheme, dateEnUS, dateZhCN, enUS, zhCN } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
-import { FileTrayStackedOutline, GitNetworkOutline, HomeOutline, SettingsOutline } from '@vicons/ionicons5'
-import { DeviceHubOutlined } from '@vicons/material'
+// Sidebar icons all come from ionicons5 Outline so stroke weight stays uniform / 侧边栏图标统一用 ionicons5 Outline，保持描边粗细一致
+import { FileTrayStackedOutline, HomeOutline, ScanOutline, SettingsOutline, ShareSocialOutline } from '@vicons/ionicons5'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import NaiveProvider from '@/components/NaiveProvider.vue'
@@ -59,7 +59,7 @@ const menuOptions = computed<MenuOption[]>(() => [
   },
   {
     key: 'menu-index',
-    icon: renderIcon(GitNetworkOutline),
+    icon: renderIcon(ScanOutline),
     label: () =>
       h(
         RouterLink,
@@ -90,10 +90,10 @@ const menuOptions = computed<MenuOption[]>(() => [
     icon: () => (clusterEnabled.value && pendingPairingCount.value > 0)
       ? (
           h(NBadge, { value: pendingPairingCount.value, max: 99, type: 'info' }, {
-            default: () => h(NIcon, null, { default: () => h(DeviceHubOutlined) }),
+            default: () => h(NIcon, null, { default: () => h(ShareSocialOutline) }),
           })
         )
-      : h(NIcon, null, { default: () => h(DeviceHubOutlined) }),
+      : h(NIcon, null, { default: () => h(ShareSocialOutline) }),
     label: () =>
       h(
         RouterLink,

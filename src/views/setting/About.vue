@@ -1,29 +1,18 @@
 <script setup lang="ts">
 import { openPath } from '@tauri-apps/plugin-opener'
-import { LogoGithub, DocumentTextOutline } from '@vicons/ionicons5'
+import { LogoGithub } from '@vicons/ionicons5'
 import { invoke } from '@tauri-apps/api/core'
 import { getVersion } from '@tauri-apps/api/app'
-import cliDocEn from '../../../docs/en/cli.md?raw'
-import cliDocZh from '../../../docs/cn/cli.md?raw'
 import HowToUse from '../HowToUse.vue'
-import MarkdownPreview from '@/components/MarkdownPreview.vue'
-import { getLocale, t } from '@/locales'
+import { t } from '@/locales'
 
 const appVersion = ref('')
 const appClientId = ref('')
-const showCliDoc = ref(false)
-const cliDocContent = ref('')
 
 function openUrl(path = '') {
   openPath(path).then((res) => {
     console.log('openUrl', res)
   })
-}
-
-function openCliDoc() {
-  // 文档在构建期内嵌，跟随界面语言选择中英文版本
-  cliDocContent.value = getLocale() === 'zh-CN' ? cliDocZh : cliDocEn
-  showCliDoc.value = true
 }
 
 onMounted(async () => {
@@ -77,22 +66,7 @@ onMounted(async () => {
           {{ t('about.appClientId') }}: {{ appClientId }}
         </div>
       </div>
-      <div class="mt-4">
-        <NButton text type="primary" class="text-link" @click="openCliDoc">
-          <template #icon>
-            <NIcon>
-              <DocumentTextOutline />
-            </NIcon>
-          </template>
-          <span class="text-xs">{{ t('about.cliDoc') }}</span>
-        </NButton>
-      </div>
     </div>
-    <NModal v-model:show="showCliDoc" preset="card" :title="t('about.cliDoc')" style="width: 80%; max-height: 80vh;" class="select-text">
-      <div class="overflow-y-auto" style="max-height: 65vh">
-        <MarkdownPreview :content="cliDocContent" />
-      </div>
-    </NModal>
   </div>
 </template>
 

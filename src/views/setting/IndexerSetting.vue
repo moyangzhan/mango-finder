@@ -799,77 +799,7 @@ async function loadEmbeddingModel() {
   }
 }
 
-// Storage change state
-const changingType = ref<'document' | 'image' | 'audio' | null>(null)
-const changingProgress = ref({ current: 0, total: 0 })
-
-async function onContentStorageChanged(type: 'document' | 'image' | 'audio', value: string) {
-  const oldValue = indexerStore.indexerSetting.content_storage[type] || 'database'
-  if (oldValue === value)
-    return
-
-  // Block if another storage change is already running
-  if (changingType.value) {
-    window.$message.warning(t('indexer.changing'))
-    return
-  }
-
-  // Count affected files
-  let affectedCount = 0
-  try {
-    affectedCount = await invoke<number>('count_indexed_files', { category: type })
-  } catch (e) {
-    console.error('Failed to count indexed files:', e)
-    // On error, show dialog anyway so user can decide
-  }
-
-  if (affectedCount === 0) {
-    // No files to change, just save
-    indexerStore.indexerSetting.content_storage[type] = value
-    updateIndexerSetting()
-    return
-  }
-
-  // Build confirmation message
-  let confirmMsg = ''
-  if (value === 'none')
-    confirmMsg = t('indexer.changeConfirmNone', { count: affectedCount })
-  else if (oldValue === 'none')
-    confirmMsg = t('indexer.changeConfirmReparse', { count: affectedCount })
-  else if (value === 'file')
-    confirmMsg = t('indexer.changeConfirmFile', { count: affectedCount })
-  else
-    confirmMsg = t('indexer.changeConfirmDatabase', { count: affectedCount })
-
-  // Show confirmation dialog
-  window.$dialog.warning({
-    title: t('common.tip'),
-    content: confirmMsg,
-    positiveText: t('common.confirm'),
-    negativeText: t('common.cancel'),
-    onPositiveClick: async () => {
-      try {
-        changingType.value = type
-        changingProgress.value = { current: 0, total: affectedCount }
-        await invoke('change_content_storage', { category: type, newMode: value })
-        // Update local state (backend has spawned the task)
-        indexerStore.indexerSetting.content_storage[type] = value
-      } catch (e) {
-        console.error('Storage change failed:', e)
-        window.$message.error(t('common.operationFailed'))
-        // Revert UI on failure
-        changingType.value = null
-        indexerStore.indexerSetting.content_storage[type] = oldValue
-      }
-    },
-    onNegativeClick: () => {
-      // Value was never changed, no revert needed (controlled component)
-    },
-  })
-}
-
-// Listen for storage change events
-let unlistenStorageChange: (() => void) | null = null
+// Listen for indexing events (the storage tab owns the content-storage listener)
 let unlistenIndexing: (() => void) | null = null
 let unlistenWatcherIndexing: (() => void) | null = null
 
@@ -1358,35 +1288,6 @@ onMounted(async () => {
     // Background (re)builds flip the semantic-pending state on Finish
     unlistenIndexing = await listen<string>('selector-indexing', onIndexingEvent)
     unlistenWatcherIndexing = await listen<string>('watcher-indexing', onIndexingEvent)
-
-    // Listen for storage change events
-    unlistenStorageChange = await listen<string>('content-storage-change-event', async (event) => {
-      let parsed: any
-      try {
-        parsed = JSON.parse(event.payload)
-      } catch {
-        console.error('Failed to parse storage change event:', event.payload)
-        return
-      }
-      const { event: eventType, data } = parsed
-      if (eventType === 'progress' && data.current !== undefined && data.total !== undefined) {
-        changingProgress.value = { current: data.current, total: data.total }
-      } else if (eventType === 'complete' || eventType === 'error' || eventType === 'cancelled') {
-        changingType.value = null
-        if (eventType === 'complete')
-          window.$message.success(t('indexer.changeComplete'))
-        else if (eventType === 'error')
-          window.$message.error(t('common.operationFailed'))
-        else if (eventType === 'cancelled')
-          window.$message.info(t('indexer.changeCancelled'))
-
-        // Reload setting from backend to sync any revert on failure/cancel
-        try {
-          const setting = await invoke<IndexerSetting>('load_indexer_setting')
-          indexerStore.setIndexerSetting(setting)
-        } catch { /* ignore */ }
-      }
-    })
   } catch (e) {
     console.error('IndexerSetting onMounted error', e)
   }
@@ -1417,7 +1318,6 @@ async function onIndexingEvent(event: { payload: string }) {
 }
 
 onUnmounted(() => {
-  unlistenStorageChange?.()
   unlistenIndexing?.()
   unlistenWatcherIndexing?.()
 })
@@ -1819,86 +1719,6 @@ onUnmounted(() => {
         </NModal>
       </div>
     </NCard>
-    <NCard :title="t('common.storage')" class="mb-4 px-0" size="small" :bordered="true" hoverable>
-      <div class="flex flex-col">
-        <NAlert :show-icon="false">
-          <div class="whitespace-pre-line">
-            {{ t('indexer.contentStorageDesc') }}
-          </div>
-        </NAlert>
-        <div class="flex flex-col space-y-3 my-4">
-          <div>
-            <div>{{ t('indexer.documentStorage') }}</div>
-            <NRadioGroup
-              size="small"
-              :value="indexerStore.indexerSetting.content_storage.document || 'database'"
-              @update:value="(v: string) => onContentStorageChanged('document', v)"
-            >
-              <NSpace>
-                <NRadio value="database">
-                  {{ t('indexer.storageDatabase') }}
-                </NRadio>
-                <NRadio value="file">
-                  {{ t('indexer.storageFile') }}
-                </NRadio>
-                <NRadio value="none">
-                  {{ t('indexer.storageNone') }}
-                </NRadio>
-              </NSpace>
-            </NRadioGroup>
-            <div class="text-xs text-gray-400 mt-1">
-              {{ indexerStore.indexerSetting.content_storage.document === 'database' ? t('indexer.storageDatabaseDesc') : indexerStore.indexerSetting.content_storage.document === 'file' ? t('indexer.storageFileDesc') : indexerStore.indexerSetting.content_storage.document === 'none' ? t('indexer.storageNoneDesc') : '' }}
-            </div>
-          </div>
-          <div>
-            <div>{{ t('indexer.imageStorage') }}</div>
-            <NRadioGroup
-              size="small"
-              :value="indexerStore.indexerSetting.content_storage.image || 'database'"
-              @update:value="(v: string) => onContentStorageChanged('image', v)"
-            >
-              <NSpace>
-                <NRadio value="database">
-                  {{ t('indexer.storageDatabase') }}
-                </NRadio>
-                <NRadio value="file">
-                  {{ t('indexer.storageFile') }}
-                </NRadio>
-              </NSpace>
-            </NRadioGroup>
-            <div class="text-xs text-gray-400 mt-1">
-              {{ indexerStore.indexerSetting.content_storage.image === 'database' ? t('indexer.storageDatabaseDesc') : t('indexer.storageFileDesc') }}
-            </div>
-          </div>
-          <div>
-            <div>{{ t('indexer.audioStorage') }}</div>
-            <NRadioGroup
-              size="small"
-              :value="indexerStore.indexerSetting.content_storage.audio || 'database'"
-              @update:value="(v: string) => onContentStorageChanged('audio', v)"
-            >
-              <NSpace>
-                <NRadio value="database">
-                  {{ t('indexer.storageDatabase') }}
-                </NRadio>
-                <NRadio value="file">
-                  {{ t('indexer.storageFile') }}
-                </NRadio>
-              </NSpace>
-            </NRadioGroup>
-            <div class="text-xs text-gray-400 mt-1">
-              {{ indexerStore.indexerSetting.content_storage.audio === 'database' ? t('indexer.storageDatabaseDesc') : t('indexer.storageFileDesc') }}
-            </div>
-          </div>
-        </div>
-        <!-- Storage change progress -->
-        <div v-if="changingType" class="flex items-center gap-2 text-xs text-gray-500">
-          <NSpin size="small" />
-          <span>{{ t('indexer.changing') }} ({{ changingProgress.current }}/{{ changingProgress.total }}<template v-if="changingProgress.total > 0">, {{ Math.round(changingProgress.current / changingProgress.total * 100) }}%</template>)</span>
-        </div>
-      </div>
-    </NCard>
-
     <!-- Model Edit Modal -->
     <NModal v-model:show="showModelEditModal" preset="card" :title="t('indexer.editModel')" style="width: 500px">
       <NForm v-if="editingModel" ref="modelEditFormRef" label-placement="left" label-width="80">

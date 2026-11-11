@@ -9,6 +9,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AppTag: typeof import('./src/components/AppTag.vue')['default']
+    CardTitleHelp: typeof import('./src/components/CardTitleHelp.vue')['default']
     MarkdownPreview: typeof import('./src/components/MarkdownPreview.vue')['default']
     NaiveProvider: typeof import('./src/components/NaiveProvider.vue')['default']
     NAlert: typeof import('naive-ui')['NAlert']

@@ -4,7 +4,7 @@ Mango Finder 命令行工具，方便开发者和 AI Agent 使用。
 
 ## 安装
 
-Mango Finder 安装包自带 CLI：安装后在 GUI 设置页「命令行工具」中将 `mfd` 加入 `PATH`，即可在任意终端使用。安装包构建见 [build.md](./build.md)。
+Mango Finder 安装包自带 CLI：安装后在 GUI 设置页「命令行工具」中将 `mfd` 加入 `PATH`，即可在任意终端使用。安装包构建见 [build.md](https://github.com/moyangzhan/mango-finder/blob/main/docs/cn/build.md)。
 
 从源码单独构建（与 GUI 同 crate，无需额外依赖）：
 

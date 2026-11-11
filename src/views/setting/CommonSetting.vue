@@ -1,27 +1,58 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
-import { relaunch } from '@tauri-apps/plugin-process'
+import { DocumentTextOutline } from '@vicons/ionicons5'
+import cliDocEn from '../../../docs/en/cli.md?raw'
+import cliDocZh from '../../../docs/cn/cli.md?raw'
 import ProxyEdit from './ProxyEdit.vue'
+import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import { useAppStore } from '@/stores/app'
-import { setLocale, t } from '@/locales'
+import { getLocale, setLocale, t } from '@/locales'
 
-const dataPath = ref('')
 const appStore = useAppStore()
 const activePlatform = ref('openai')
 const activeTheme = ref(appStore.getTheme)
 const activeLanguage = ref('en-US')
 const activeTab = ref('openai')
-const needRestart = ref(false)
-const dataCopying = ref(false)
-const cliStatus = ref<{ mfd_path: string, exists: boolean, installed: boolean }>({ mfd_path: '', exists: false, installed: false })
+const cliStatus = ref<{ mfd_path: string; exists: boolean; installed: boolean }>({ mfd_path: '', exists: false, installed: false })
 const cliBusy = ref(false)
+const showCliDoc = ref(false)
+const cliDocContent = ref('')
+
+// GUI users already have the app installed; the modal swaps the source-install section for a quick availability check /
+// 弹窗面向已装好 GUI 的用户：不显示源码安装章节，换成 CLI 可用性自检
+const quickCheckZh = `## 快速自检
+
+新开一个终端（PATH 变更对已打开的终端不生效）并运行：
+
+\`\`\`bash
+mfd version
+\`\`\`
+
+输出版本号即表示 \`mfd\` 已可用；若提示找不到命令，请重新加入 \`PATH\` 并新开终端重试。`
+
+const quickCheckEn = `## Quick Check
+
+Open a new terminal (PATH changes do not affect terminals that are already open) and run:
+
+\`\`\`bash
+mfd version
+\`\`\`
+
+A version line means \`mfd\` is ready. If the command is not found, re-add it to \`PATH\` above and reopen the terminal.`
+
+function openCliDoc() {
+  // Doc is embedded at build time and follows the UI locale; the install section spans its heading up to the next "## " heading /
+  // 文档在构建期内嵌，跟随界面语言；安装章节为其标题行到下一个 "## " 标题之间的内容
+  const raw = getLocale() === 'zh-CN' ? cliDocZh : cliDocEn
+  const quickCheck = getLocale() === 'zh-CN' ? quickCheckZh : quickCheckEn
+  cliDocContent.value = raw.replace(/^## (安装|Installation)[\s\S]*?(?=^## )/m, `${quickCheck}\n\n`)
+  showCliDoc.value = true
+}
 
 async function loadCliStatus() {
   try {
     cliStatus.value = await invoke('cli_path_status')
-  }
-  catch (err) {
+  } catch (err) {
     console.error('cli_path_status error', err)
   }
 }
@@ -33,11 +64,9 @@ async function toggleCliPath() {
     await invoke(wasInstalled ? 'cli_path_uninstall' : 'cli_path_install')
     window.$message.success(wasInstalled ? t('cli.uninstallSuccess') : t('cli.installSuccess'))
     await loadCliStatus()
-  }
-  catch (err: any) {
+  } catch (err: any) {
     window.$message.error(typeof err === 'string' ? err : t('common.operationFailed'))
-  }
-  finally {
+  } finally {
     cliBusy.value = false
   }
 }
@@ -56,128 +85,6 @@ function handleThemeChanged(selectedTheme: string) {
   appStore.changeTheme()
 }
 
-async function openDirDialog() {
-  const paths = await open({ directory: true, multiple: false })
-  if (!paths || Array.isArray(paths))
-    return
-
-  let res: string
-  try {
-    res = await invoke<string>('set_data_path', { path: paths, force: false })
-  } catch (err: any) {
-    window.$message.error(typeof err === 'string' ? err : t('common.operationFailed'))
-    return
-  }
-  if (res.indexOf('exist') === 0) {
-    const existPath = res.split(':')[1]
-    window.$dialog.warning({
-      title: t('common.warning'),
-      content: `${t('common.existFile')}: ${existPath}${t('common.forceChange')}`,
-      positiveText: t('common.confirm'),
-      onPositiveClick: async () => {
-        dataCopying.value = true
-        try {
-          res = await invoke<string>('set_data_path', { path: paths, force: true })
-          if (res.indexOf('success') === 0) {
-            const userDataPath = await invoke<string>('get_data_path')
-            dataPath.value = userDataPath
-            window.$message.success(t('common.restartAppForChange'))
-            needRestart.value = true
-          } else {
-            window.$message.error(res)
-          }
-        } catch (err) {
-          console.error('set_data_path error', err)
-        } finally {
-          dataCopying.value = false
-        }
-      },
-    })
-    return
-  } else if (res.indexOf('same') === 0) {
-    window.$message.error(t('common.changeSamePathError'))
-    return
-  }
-
-  const userDataPath = await invoke<string>('get_data_path')
-  dataPath.value = userDataPath
-  window.$message.success(t('common.restartAppForChange'))
-  needRestart.value = true
-}
-
-async function resetDataPath() {
-  window.$dialog.warning({
-    title: t('common.warning'),
-    content: t('common.resetDataPathConfirm'),
-    positiveText: t('common.confirm'),
-    negativeText: t('common.cancel'),
-    onPositiveClick: async () => {
-      await doResetDataPath()
-    },
-  })
-}
-
-async function doResetDataPath() {
-  try {
-    let res = await invoke<string>('reset_data_path', { force: false })
-    if (res.indexOf('exist') === 0) {
-      const existPath = res.split(':')[1]
-      window.$dialog.warning({
-        title: t('common.warning'),
-        content: `${t('common.existFile')}: ${existPath}${t('common.forceChange')}`,
-        positiveText: t('common.confirm'),
-        onPositiveClick: async () => {
-          dataCopying.value = true
-          try {
-            res = await invoke<string>('reset_data_path', { force: true })
-            if (res.indexOf('success') === 0) {
-              const userDataPath = await invoke<string>('get_data_path')
-              dataPath.value = userDataPath
-              window.$message.success(t('common.restartAppForChange'))
-              needRestart.value = true
-            } else {
-              window.$message.error(res)
-            }
-          } catch (err) {
-            console.log(err)
-          } finally {
-            dataCopying.value = false
-          }
-        },
-      })
-      return
-    } else if (res.indexOf('same') === 0) {
-      window.$message.error(t('common.changeSamePathError'))
-      return
-    }
-    const userDataPath = await invoke<string>('get_data_path')
-    dataPath.value = userDataPath
-    window.$message.success(t('common.restartAppForChange'))
-    needRestart.value = true
-  } catch (err) {
-    console.error('reset_data_path error', err)
-    window.$message.error(t('common.operationFailed'))
-  }
-}
-
-async function openDataPath() {
-  try {
-    await invoke('open_directory', { path: dataPath.value })
-  } catch (e) {
-    console.error('open_directory failed', e)
-    window.$message.error(t('common.operationFailed'))
-  }
-}
-
-async function restart() {
-  try {
-    await relaunch()
-  } catch (e) {
-    console.error('relaunch failed', e)
-    window.$message.error(t('common.operationFailed'))
-  }
-}
-
 onMounted(async () => {
   console.log('common setting onMounted')
   const activePlatformName = await invoke('load_active_platform')
@@ -187,8 +94,6 @@ onMounted(async () => {
   console.log('active_locale', activeLocale)
   setLocale(activeLocale as 'en-US' | 'zh-CN')
   activeLanguage.value = activeLocale as string
-  const userDataPath = await invoke<string>('get_data_path')
-  dataPath.value = userDataPath
   await loadCliStatus()
 })
 </script>
@@ -217,36 +122,6 @@ onMounted(async () => {
         </NFormItem>
       </div>
     </NCard>
-    <NCard :title="t('indexer.dataPath')" class="mb-4" size="small" :bordered="true">
-      <div class="flex flex-col space-y-2">
-        <div>{{ dataPath }}</div>
-        <div class="text-xs text-gray-400">
-          {{ t('indexer.dataPathDesc') }}
-        </div>
-        <NAlert v-if="needRestart" type="warning">
-          {{ t('common.restartAppForChange') }}
-          <NButton text type="primary" class="text-link" @click="restart">
-            {{
-              t('common.clickToRestart') }}
-          </NButton>
-        </NAlert>
-        <div class="flex space-x-2">
-          <div class="mr-2">
-            <NButton ghost :disabled="dataCopying" :loading="dataCopying" @click="openDirDialog">
-              <span>{{ t('common.change') }}</span>
-            </NButton>
-          </div>
-          <div class="mr-2">
-            <NButton ghost :disabled="dataCopying" :loading="dataCopying" @click="resetDataPath">
-              {{ t('common.reset') }}
-            </NButton>
-          </div>
-          <NButton ghost :disabled="dataCopying" :loading="dataCopying" @click="openDataPath">
-            {{ t('common.open') }}
-          </NButton>
-        </div>
-      </div>
-    </NCard>
     <NCard :title="t('cli.setting')" class="mb-4" size="small" :bordered="true">
       <div class="flex flex-col space-y-2">
         <template v-if="cliStatus.exists">
@@ -265,10 +140,25 @@ onMounted(async () => {
             {{ t('cli.notFound') }}
           </div>
         </template>
+        <div>
+          <NButton text type="primary" class="text-link" @click="openCliDoc">
+            <template #icon>
+              <NIcon>
+                <DocumentTextOutline />
+              </NIcon>
+            </template>
+            <span class="text-xs">{{ t('cli.doc') }}</span>
+          </NButton>
+        </div>
       </div>
     </NCard>
     <NCard :title="t('proxy.setting')" class="mb-4" size="small" :bordered="true">
       <ProxyEdit />
     </NCard>
+    <NModal v-model:show="showCliDoc" preset="card" :title="t('cli.doc')" style="width: 80%; max-height: 80vh;" class="select-text">
+      <div class="overflow-y-auto" style="max-height: 65vh">
+        <MarkdownPreview :content="cliDocContent" />
+      </div>
+    </NModal>
   </div>
 </template>
