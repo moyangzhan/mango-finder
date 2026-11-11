@@ -139,14 +139,14 @@ jobs:
           "
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
-      # The runner image points apt at azure.archive.ubuntu.com, which keeps
-      # failing to resolve for some hosted runners; a single `apt-get update`
-      # then spends 20+ minutes on "Ign:" lines and the job dies. Probe the
-      # known mirrors first, point apt at the one that answers, and only then
-      # update/install.
+      # *.ubuntu.com DNS is broken on some hosted runners: azure.archive,
+      # archive and security all fail to resolve, which makes apt sit on "Ign:"
+      # lines until the job dies, while the same archive is served fine by its
+      # other mirrors. Probe them, point apt at the first one that answers, and
+      # only then update/install.
       - name: Install Linux Dependencies
         shell: bash
-        timeout-minutes: 25
+        timeout-minutes: 20
         run: |
           set -uo pipefail
 
@@ -154,9 +154,11 @@ jobs:
 
           mirror=""
           for candidate in \
-            http://azure.archive.ubuntu.com/ubuntu \
-            http://archive.ubuntu.com/ubuntu \
-            http://security.ubuntu.com/ubuntu
+            https://ftp.osuosl.org/pub/ubuntu \
+            https://mirror.math.princeton.edu/pub/ubuntu \
+            https://mirrors.edge.kernel.org/ubuntu \
+            https://mirrors.aliyun.com/ubuntu \
+            http://azure.archive.ubuntu.com/ubuntu
           do
             if probe "$candidate"; then mirror="$candidate"; break; fi
             echo "::warning::apt mirror unreachable: $candidate"
@@ -166,8 +168,15 @@ jobs:
             exit 1
           fi
           echo "using apt mirror: $mirror"
-          sudo sed -i -E "s#https?://[a-z0-9.-]+\.ubuntu\.com/ubuntu#${mirror}#g" \
-            /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
+
+          # the mirrors above use different paths than the image's default
+          # source, so replace it instead of rewriting it
+          sudo rm -f /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources
+          {
+            echo "deb $mirror noble main restricted universe multiverse"
+            echo "deb $mirror noble-updates main restricted universe multiverse"
+            echo "deb $mirror noble-security main restricted universe multiverse"
+          } | sudo tee /etc/apt/sources.list >/dev/null
 
           apt_get() {
             sudo env DEBIAN_FRONTEND=noninteractive apt-get \
@@ -175,13 +184,15 @@ jobs:
               -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 "$@"
           }
 
+          apt_get update || echo "::warning::apt update reported errors, continuing anyway"
           for attempt in 1 2 3; do
-            if apt_get update && apt_get install -y --fix-missing \
+            if apt_get install -y --fix-missing \
                 libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev; then
               exit 0
             fi
-            echo "::warning::apt attempt $attempt failed"
-            sleep 15
+            echo "::warning::apt install attempt $attempt failed"
+            apt_get update || true
+            sleep 20
           done
           echo "::error::could not install the Linux dependencies"
           exit 1
