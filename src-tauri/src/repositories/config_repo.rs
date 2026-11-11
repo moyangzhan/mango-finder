@@ -13,8 +13,10 @@ pub fn get_one(config_name: &str) -> Result<Option<Config>, RepositoryError> {
         })
     }) {
         Ok(c) => c,
+        // Absent key = None, not an error
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
         Err(e) => {
-            log::debug!("get one error, config_name: {}, error: {}", config_name, e);
+            log::error!("Failed to query config {}: {}", config_name, e);
             return Ok(None);
         }
     };
@@ -38,8 +40,14 @@ pub fn get_val(config_name: &str) -> String {
     };
     let config = match stmt.query_row([config_name], |row| Ok(row.get(0)?)) {
         Ok(c) => c,
+        // Absent key is an empty value, not a failure (e.g. paths_cache_version before its first increment)
+        // key 不存在即为空值而非失败(如首次 increment 前的 paths_cache_version)
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            log::debug!("Config not set: {}", config_name);
+            return "".to_string();
+        }
         Err(e) => {
-            log::debug!("Failed to query map: {}", e);
+            log::error!("Failed to query config {}: {}", config_name, e);
             return "".to_string();
         }
     };

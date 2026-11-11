@@ -123,6 +123,15 @@ pub async fn search(query: &str) -> Vec<SearchResult> {
 /// 首次调用构建路径缓存并启动刷新计时器;并发调用共享同一次构建,后续为空操作
 pub async fn init() {
     INIT.get_or_init(|| async {
+        // Seed the version row so the timer always reads a value; an absent row
+        // would hit "config not set" every 10s tick until the first deletion.
+        // Idempotent (OR IGNORE keeps an existing counter); must run before
+        // build_index snapshots the version.
+        // 预写版本号行,避免计时器在首次删除前每 10s 都读到"不存在";
+        // 幂等(已存在则保留),须在 build_index 快照版本之前执行。
+        if let Err(e) = config_repo::insert_or_ignore(CONFIG_NAME_PATHS_CACHE_VERSION, "1") {
+            log::warn!("Failed to seed paths cache version: {}", e);
+        }
         build_index().await;
         tokio::spawn(paths_index_timer());
     })
